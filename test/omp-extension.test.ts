@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import specwrightOmpExtension from "../src/runtime/omp/extension";
 import { installOmpAdapter } from "../src/runtime/omp/install";
+import { refreshStatus } from "../src/runtime/omp/status";
 import type { ExtensionApiLike, OmpCommandContextLike } from "../src/runtime/omp/types";
 
 test("OMP extension registers and handles specwright command", async () => {
@@ -97,6 +98,58 @@ test("OMP status refresh syncs tasks.md before rendering status", async () => {
     },
   });
 
+  expect(statuses.at(-1)).toContain("Specwright · 0001 · executing · tasks=1/1");
+});
+test("concurrent refreshStatus calls do not throw ENOENT on temp file rename", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-concurrent-"));
+  const changeDir = join(cwd, ".specwright/changes/0001-drift");
+  await mkdir(changeDir, { recursive: true });
+  await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Concurrent refresh\n", "utf8");
+  await writeFile(join(cwd, ".specwright/state.json"), `${JSON.stringify({
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "drift",
+        title: "Drift",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "executing",
+        step: "execute",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: {
+            id: "T001",
+            title: "Concurrent refresh",
+            status: "pending",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }, null, 2)}\n`, "utf8");
+
+  const statuses: Array<string | undefined> = [];
+  const ctx: OmpCommandContextLike = {
+    cwd,
+    ui: {
+      setStatus(_key, text) { statuses.push(text); },
+    },
+  };
+
+  const results = await Promise.allSettled([
+    refreshStatus({}, ctx),
+    refreshStatus({}, ctx),
+    refreshStatus({}, ctx),
+  ]);
+
+  for (const result of results) {
+    expect(result.status).toBe("fulfilled");
+  }
   expect(statuses.at(-1)).toContain("Specwright · 0001 · executing · tasks=1/1");
 });
 
