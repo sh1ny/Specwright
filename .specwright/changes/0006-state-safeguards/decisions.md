@@ -8,6 +8,7 @@
 - OMP session status refresh uses a shared core sync/status path and may update derived state so the badge matches slash-command status.
 - Sync preserves cached `in-progress` and `blocked` for unchecked tasks when ID/title still match; checked tasks become `done`.
 - Change 0006 scope is the minimum state-safeguards slice: parser/sync helper, non-current-mutating state update path, command wiring, validator issue, OMP status refresh, and tests.
+- Checkpoint handling is in scope: commands that mutate derived `.specwright/state.json` during checkpoint must either avoid that mutation or stage it automatically.
 
 ## Deferred
 

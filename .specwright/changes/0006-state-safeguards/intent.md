@@ -14,6 +14,6 @@
 ## Approval notes
 
 - Change 0006 should make `state.json` a CLI-owned derived cache for task metadata, with `tasks.md` as the model-editable source for task IDs, titles, and checkbox completion.
-- Users are OMP and CLI Specwright operators who need `/specwright status`, `execute`, `verify`, `handoff`, and OMP badge refresh to reflect artifact truth without asking agents to hand-edit `state.json`.
+- Users are OMP and CLI Specwright operators who need `/specwright status`, `execute`, `verify`, `handoff`, `checkpoint`, and OMP badge refresh to reflect artifact truth without asking agents or users to hand-edit/stage `state.json`.
 - Non-goal for this change: adding new task creation/sync CLI UX such as `specwright task add` or `specwright task sync`.
 

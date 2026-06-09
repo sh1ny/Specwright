@@ -55,6 +55,29 @@ export interface TaskState {
   updatedAt: string;
 }
 
+export interface ParsedTaskArtifact {
+  id: string;
+  title: string;
+  checked: boolean;
+  line: number;
+}
+
+export type TaskSyncIssueKind = "malformed-task-line" | "duplicate-task-id" | "title-drift" | "cached-task-without-artifact";
+export interface TaskSyncIssue {
+  kind: TaskSyncIssueKind;
+  line?: number;
+  taskId?: string;
+  message: string;
+  previousTitle?: string;
+  nextTitle?: string;
+}
+
+export interface TaskSyncResult {
+  change: ChangeState;
+  issues: TaskSyncIssue[];
+  changed: boolean;
+}
+
 export interface ChangeState {
   id: string;
   slug: string;

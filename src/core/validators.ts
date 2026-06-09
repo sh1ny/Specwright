@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { changeDir } from "./paths";
-import { loadConfig } from "./state";
+import { loadConfig, unreconciledTaskDriftIssues } from "./state";
 import type { ChangeState, LifecycleStep, OnlineResearchMode, SpecwrightConfig, SpecwrightMode, WorkflowPublishMode } from "./types";
 
 export interface ValidationIssue {
@@ -183,6 +183,15 @@ export async function validateChange(cwd: string, change: ChangeState): Promise<
         issues.push({ level: "error", code: "SW006", message: `${block.id} lacks an acceptance or verification block.`, file: "tasks.md" });
       }
     }
+  }
+
+  for (const issue of unreconciledTaskDriftIssues(change, tasks, stepIndex >= STEP_INDEX.execute)) {
+    issues.push({
+      level: "error",
+      code: "SW009",
+      message: `Unreconciled task drift: ${issue.message}`,
+      file: "tasks.md",
+    });
   }
 
   if (plan && !/evidence\.md/i.test(plan)) {

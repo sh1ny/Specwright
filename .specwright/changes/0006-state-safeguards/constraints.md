@@ -17,6 +17,8 @@
 - OMP status refresh must use shared core sync/status behavior rather than displaying raw stale cache.
 - Passive sync of a non-active change must not mutate `currentChange`; existing `upsertChange()` behavior is unsafe for that path because it makes the updated change current.
 - Validators should report unreconciled drift with a specific issue code when sync cannot safely reconcile malformed or ambiguous task state.
+- Checkpoint must not require users to list `.specwright/state.json` manually when checkpoint itself mutates derived state during sync.
+- Phase checkpoints should avoid task parsing/state writes unless task metadata is required; task checkpoints may sync but must include any resulting derived state mutation in the commit.
 
 ## Open constraints
 

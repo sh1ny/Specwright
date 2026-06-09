@@ -23,6 +23,9 @@ import {
   loadState,
   saveConfig,
   saveState,
+  syncChangeTasksFromFileIfPresent,
+  syncChangeTasksFromMarkdown,
+  updateCachedChange,
   upsertChange,
 } from "./state";
 import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, writePullRequestBodyFile } from "./git";
@@ -405,12 +408,24 @@ async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<Com
   const config = await loadConfig(ctx.cwd);
   const state = await loadState(ctx.cwd);
   const currentChange = state.currentChange ?? null;
-  const currentStatus = currentChange ? state.changes[currentChange]?.status ?? null : null;
-  if (args.json) {
-    return ok(JSON.stringify({ project: config.project.name, currentChange, changeCount: Object.keys(state.changes).length, currentStatus }, null, 2));
+  let current = currentChange ? state.changes[currentChange] : undefined;
+  if (current) {
+    current = await syncChangeTasksForCommand(ctx, current);
   }
-  return ok(`Specwright · ${config.project.name} · current=${currentChange ?? "none"} · changes=${Object.keys(state.changes).length}`, {
-    statusText: `Specwright · ${currentChange ?? "none"} · ${currentStatus ?? "idle"}`,
+  const currentStatus = current?.status ?? null;
+  const progress = taskProgress(current);
+  if (args.json) {
+    return ok(JSON.stringify({
+      project: config.project.name,
+      currentChange,
+      changeCount: Object.keys(state.changes).length,
+      currentStatus,
+      tasks: progress,
+    }, null, 2));
+  }
+  const taskSuffix = progress.total > 0 ? ` · tasks=${progress.done}/${progress.total}` : "";
+  return ok(`Specwright · ${config.project.name} · current=${currentChange ?? "none"} · changes=${Object.keys(state.changes).length}${taskSuffix}`, {
+    statusText: `Specwright · ${currentChange ?? "none"} · ${currentStatus ?? "idle"}${taskSuffix}`,
   });
 }
 
@@ -536,12 +551,33 @@ async function ensureChangeArtifacts(cwd: string, change: ChangeState, files: st
 
 async function updateChangeStep(cwd: string, change: ChangeState, status: ChangeState["status"], step: ChangeState["step"], now: Date): Promise<ChangeState> {
   const updated: ChangeState = { ...change, status, step, updatedAt: now.toISOString() };
-  await upsertChange(cwd, updated);
+  await updateCachedChange(cwd, updated);
   return updated;
 }
 
+async function syncChangeTasksForCommand(ctx: CommandContext, change: ChangeState): Promise<ChangeState> {
+  return (await syncChangeTasksFromFileIfPresent(ctx.cwd, change, ctx.now())).change;
+}
+
+function taskProgress(change: ChangeState | undefined): { total: number; done: number } {
+  if (!change) {
+    return { total: 0, done: 0 };
+  }
+  let done = 0;
+  let total = 0;
+  for (const task of Object.values(change.tasks)) {
+    total += 1;
+    if (task.status === "done") {
+      done += 1;
+    }
+  }
+  return { total, done };
+}
+
 async function commandDiscuss(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
-  const change = await updateChangeStep(ctx.cwd, await findCurrentChange(ctx.cwd, args.positionals[0]), "discussing", "discuss", ctx.now());
+  let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  change = await syncChangeTasksForCommand(ctx, change);
+  change = await updateChangeStep(ctx.cwd, change, "discussing", "discuss", ctx.now());
   const created = await ensureChangeArtifacts(ctx.cwd, change, ["discussion.md", "intent.md", "constraints.md", "decisions.md"]);
   const config = await loadConfig(ctx.cwd);
   const prompt = `${renderDiscussPrompt({ step: "discuss", change, config, cwd: ctx.cwd })}
@@ -549,11 +585,12 @@ async function commandDiscuss(ctx: CommandContext, args: ParsedArgs): Promise<Co
 ${renderCheckpointClause({ change, unit: { kind: "phase", id: "discuss" }, files: artifactPaths(change, ["discussion.md", "intent.md", "constraints.md", "decisions.md"]) })}`;
   return ok("Prepared discuss prompt.", { filesCreated: created, prompt });
 }
-
 async function commandResearch(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   const config = await loadConfig(ctx.cwd);
   const online = args.online ?? config.defaults.onlineResearch;
-  const change = await updateChangeStep(ctx.cwd, await findCurrentChange(ctx.cwd, args.positionals[0]), "researching", "research", ctx.now());
+  let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  change = await syncChangeTasksForCommand(ctx, change);
+  change = await updateChangeStep(ctx.cwd, change, "researching", "research", ctx.now());
   const created = await ensureChangeArtifacts(ctx.cwd, change, ["research.md", "sources.md", "evidence.md", "options.md"]);
   const prompt = `# Specwright Research: ${change.id}-${change.slug}
 
@@ -587,7 +624,8 @@ ${renderCheckpointClause({ change, unit: { kind: "phase", id: "research" }, file
 }
 
 async function commandPlan(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
-  const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  change = await syncChangeTasksForCommand(ctx, change);
   for (const file of ["intent.md", "research.md", "evidence.md"]) {
     if (!await exists(join(changeDir(ctx.cwd, change.id, change.slug), file))) {
       return fail(`Required artifact missing: ${file}`);
@@ -626,27 +664,6 @@ ${renderCheckpointClause({ change: updated, unit: { kind: "phase", id: "plan" },
   return ok("Prepared plan prompt.", { prompt });
 }
 
-function parseTasks(markdown: string, previous: Record<string, TaskState>, now: Date): Record<string, TaskState> {
-  const tasks: Record<string, TaskState> = {};
-  for (const line of markdown.split(/\r?\n/)) {
-    const match = /^\s*- \[([ xX])] (T\d{3}):\s*(.+?)\s*$/.exec(line);
-    if (!match) continue;
-    const id = match[2] ?? "";
-    const checked = (match[1] ?? "") !== " ";
-    const prior = previous[id];
-    const status = checked ? "done" : prior?.status === "in-progress" || prior?.status === "blocked" ? prior.status : "pending";
-    tasks[id] = { id, title: match[3] ?? "", status, updatedAt: now.toISOString() };
-  }
-  return tasks;
-}
-
-async function parseTasksFromFile(cwd: string, change: ChangeState, now: Date): Promise<ChangeState> {
-  const tasksPath = join(changeDir(cwd, change.id, change.slug), "tasks.md");
-  const markdown = await readFile(tasksPath, "utf8");
-  const updated: ChangeState = { ...change, tasks: parseTasks(markdown, change.tasks, now), updatedAt: now.toISOString() };
-  await upsertChange(cwd, updated);
-  return updated;
-}
 
 function artifactPaths(change: ChangeState, files: readonly string[]): string[] {
   const dir = `.specwright/changes/${change.id}-${change.slug}`;
@@ -676,9 +693,6 @@ function taskFilesFromMarkdown(markdown: string, taskId: string): string[] {
 
 async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
-  if (Object.keys(change.tasks).length === 0) {
-    change = await parseTasksFromFile(ctx.cwd, change, ctx.now());
-  }
   if (args.phase && args.task) {
     return fail("Specify exactly one of --phase or --task.");
   }
@@ -687,9 +701,6 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
   }
   if (args.phase && !CHECKPOINT_PHASES.has(args.phase)) {
     return fail(`Invalid checkpoint phase: ${args.phase}`);
-  }
-  if (args.task && !change.tasks[args.task]) {
-    return fail(`Task not found: ${args.task}`);
   }
   if (!args.files || args.files.length === 0) {
     return fail("At least one file must be supplied with --files.");
@@ -704,9 +715,30 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
     }
   }
 
+  const filesToStage = [...args.files];
+  const stateFile = ".specwright/state.json";
+  const hasTasksMd = filesToStage.some(f => f === "tasks.md" || f.endsWith("/tasks.md"));
+  if (hasTasksMd && !filesToStage.includes(stateFile)) {
+    filesToStage.push(stateFile);
+  }
+  if (args.task) {
+    const tasksMarkdown = await readFile(join(changeDir(ctx.cwd, change.id, change.slug), "tasks.md"), "utf8");
+    const syncResult = syncChangeTasksFromMarkdown(change, tasksMarkdown, ctx.now());
+    change = syncResult.change;
+    if (!change.tasks[args.task]) {
+      return fail(`Task not found: ${args.task}`);
+    }
+    if (syncResult.issues.length > 0) {
+      return fail(`Task sync issues: ${syncResult.issues.map(i => i.message).join("; ")}`);
+    }
+    if (syncResult.changed) {
+      await updateCachedChange(ctx.cwd, change);
+    }
+  }
+
   const unit = args.task ?? args.phase ?? "";
   const message = `specwright: checkpoint ${change.id}-${change.slug} ${unit}`;
-  await stageFiles(ctx.cwd, args.files);
+  await stageFiles(ctx.cwd, filesToStage);
   await commitStaged(ctx.cwd, message);
   return ok(`Created checkpoint commit for ${unit}.`);
 }
@@ -716,7 +748,7 @@ async function commandTasks(ctx: CommandContext, args: ParsedArgs): Promise<Comm
   if (!await exists(join(changeDir(ctx.cwd, change.id, change.slug), "plan.md"))) {
     return fail("Required artifact missing: plan.md");
   }
-  const updated = await parseTasksFromFile(ctx.cwd, change, ctx.now());
+  const updated = await syncChangeTasksForCommand(ctx, change);
   const config = await loadConfig(ctx.cwd);
   const prompt = `# Specwright Tasks: ${updated.id}-${updated.slug}
 
@@ -746,9 +778,7 @@ async function selectedTask(change: ChangeState, taskId: string | undefined): Pr
 
 async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
-  if (Object.keys(change.tasks).length === 0) {
-    change = await parseTasksFromFile(ctx.cwd, change, ctx.now());
-  }
+  change = await syncChangeTasksForCommand(ctx, change);
   const task = await selectedTask(change, args.task);
   if (!task) {
     return fail(args.task ? `Task not found: ${args.task}` : "No pending Specwright task.");
@@ -756,7 +786,7 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const now = ctx.now().toISOString();
   const tasks = { ...change.tasks, [task.id]: { ...task, status: "in-progress" as const, updatedAt: now } };
   const updated: ChangeState = { ...change, tasks, status: "executing", step: "execute", updatedAt: now };
-  await upsertChange(ctx.cwd, updated);
+  await updateCachedChange(ctx.cwd, updated);
   const tasksMarkdown = await readFile(join(changeDir(ctx.cwd, updated.id, updated.slug), "tasks.md"), "utf8");
   const taskFiles = taskFilesFromMarkdown(tasksMarkdown, task.id);
   const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
@@ -765,21 +795,51 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
 
 async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  // Compute sync result without persisting, so validation can detect drift
+  const tasksPath = join(changeDir(ctx.cwd, change.id, change.slug), "tasks.md");
+  let syncResult: ReturnType<typeof syncChangeTasksFromMarkdown> | undefined;
+  try {
+    const markdown = await readFile(tasksPath, "utf8");
+    syncResult = syncChangeTasksFromMarkdown(change, markdown, ctx.now());
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      // no-op when tasks.md is missing
+    } else {
+      throw error;
+    }
+  }
+  // Validate against ORIGINAL cached state (before sync)
   const report = await validateChange(ctx.cwd, change);
+  // Surface sync issues as SW009 errors in the validation report
+  if (syncResult && syncResult.issues.length > 0) {
+    for (const issue of syncResult.issues) {
+      report.issues.push({
+        level: "error",
+        code: "SW009",
+        message: `Unreconciled task drift: ${issue.kind}: ${issue.message}`,
+        file: "tasks.md",
+      });
+    }
+    report.ok = false;
+  }
   const verifyPath = join(changeDir(ctx.cwd, change.id, change.slug), "verify.md");
   await writeFile(verifyPath, renderValidationReport(report), "utf8");
   if (!report.ok) {
     const summary = args.json ? JSON.stringify(report, null, 2) : "Specwright validation failed.";
     return fail(summary, { filesUpdated: [verifyPath] });
   }
-  const updated = await updateChangeStep(ctx.cwd, change, "verifying", "verify", ctx.now());
+  // Only persist sync after validation passes
+  if (syncResult && syncResult.changed && syncResult.issues.length === 0) {
+    await updateCachedChange(ctx.cwd, syncResult.change);
+  }
+  const updated = await updateChangeStep(ctx.cwd, syncResult ? syncResult.change : change, "verifying", "verify", ctx.now());
   const config = await loadConfig(ctx.cwd);
   const prompt = `# Specwright Verify: ${updated.id}-${updated.slug}\n\n${renderContextBudget(config)}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n- .specwright/changes/${updated.id}-${updated.slug}/verify.md\n\nRun the task-specific checks listed in tasks.md and update verify.md with observed command output.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "phase", id: "verify" }, files: artifactPaths(updated, ["verify.md", "tasks.md"]) })}`;
   return ok(args.json ? JSON.stringify(report, null, 2) : "Specwright validators passed.", { filesUpdated: [verifyPath], prompt });
 }
 
 async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
-  const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  const change = await syncChangeTasksForCommand(ctx, await findCurrentChange(ctx.cwd, args.positionals[0]));
   const dir = changeDir(ctx.cwd, change.id, change.slug);
   const artifacts = await Promise.all(["intent.md", "evidence.md", "tasks.md", "verify.md"].map(async (file) => {
     try { return await readFile(join(dir, file), "utf8"); } catch { return ""; }
@@ -795,7 +855,7 @@ async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const report = await validateChange(ctx.cwd, change);
   const allDone = Object.values(change.tasks).length > 0 && Object.values(change.tasks).every((task) => task.status === "done");
   const status = allDone && report.ok ? "done" : change.status;
-  await upsertChange(ctx.cwd, { ...change, status, step: "handoff", updatedAt: ctx.now().toISOString() });
+  await updateCachedChange(ctx.cwd, { ...change, status, step: "handoff", updatedAt: ctx.now().toISOString() });
   return ok(`Generated handoff for ${change.id}.`, { filesUpdated: [handoffPath], prompt: handoff });
 }
 
