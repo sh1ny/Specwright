@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import specwrightOmpExtension from "../src/runtime/omp/extension";
+import { defaultConfig } from "../src/core/state";
 import { installOmpAdapter } from "../src/runtime/omp/install";
 import { refreshStatus } from "../src/runtime/omp/status";
 import type { ExtensionApiLike, OmpCommandContextLike } from "../src/runtime/omp/types";
@@ -214,7 +215,12 @@ test("OMP extension preserves quoted JSON config values", async () => {
 
 test("OMP adapter installs project-local extension files", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-install-"));
-  const changed = await installOmpAdapter({ cwd, force: false });
+  const config = defaultConfig("specwright-omp-install");
+  config.agents.researcher.model = "custom/research";
+  config.agents.planner.model = "custom/plan";
+  config.agents.executor.model = "custom/execute";
+  config.agents.verifier.model = "custom/verify";
+  const changed = await installOmpAdapter({ cwd, force: false, config });
 
   expect(changed).toContain(".omp/extensions/specwright/package.json");
   expect(changed).toContain(".omp/extensions/specwright/index.ts");
@@ -238,9 +244,28 @@ test("OMP adapter installs project-local extension files", async () => {
 
   const researcher = await readFile(join(cwd, ".omp/agents/specwright-researcher.md"), "utf8");
   expect(researcher).toContain("name: specwright-researcher");
+  expect(researcher).toContain("description: Researches local repo evidence and online sources for one Specwright change.");
+  expect(researcher).toContain("model: custom/research");
   expect(researcher).toContain("tools: read,grep,find,lsp,web_search");
+  expect(researcher).toContain("spawns: []");
+
+  const planner = await readFile(join(cwd, ".omp/agents/specwright-planner.md"), "utf8");
+  expect(planner).toContain("name: specwright-planner");
+  expect(planner).toContain("description: Converts Specwright intent and research evidence into a decision-complete plan and tasks.");
+  expect(planner).toContain("model: custom/plan");
+  expect(planner).toContain("tools: read,grep,find,lsp");
+  expect(planner).toContain("spawns: []");
 
   const executor = await readFile(join(cwd, ".omp/agents/specwright-executor.md"), "utf8");
   expect(executor).toContain("name: specwright-executor");
+  expect(executor).toContain("model: custom/execute");
+  expect(executor).toContain("tools: read,grep,find,lsp,edit,write,bash,todo");
+  expect(executor).toContain("spawns: []");
   expect(executor).toContain("Implement the assigned task only.");
+
+  const verifier = await readFile(join(cwd, ".omp/agents/specwright-verifier.md"), "utf8");
+  expect(verifier).toContain("name: specwright-verifier");
+  expect(verifier).toContain("model: custom/verify");
+  expect(verifier).toContain("tools: read,grep,find,lsp,bash,browser");
+  expect(verifier).toContain("spawns: []");
 });
