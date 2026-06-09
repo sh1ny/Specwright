@@ -173,7 +173,7 @@ test("OMP extension sends generated prompts as immediate user messages when idle
   const ctx: OmpCommandContextLike = { cwd, waitForIdle: async () => {} };
 
   await command!.handler("init", ctx);
-  await command!.handler('new research "Config commands"', ctx);
+  await command!.handler("new research Add configuration commands for system management", ctx);
   await command!.handler("research --online auto", ctx);
 
   expect(sentMessages).toHaveLength(1);

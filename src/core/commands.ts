@@ -1,4 +1,4 @@
-import { access, cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,6 +64,8 @@ const MODES = new Set<SpecwrightMode>(["lite", "full"]);
 const ONLINE_MODES = new Set<OnlineResearchMode>(["never", "ask", "auto", "require"]);
 const PUBLISH_MODES = new Set<WorkflowPublishMode>(["none", "push", "pr"]);
 const CHECKPOINT_PHASES = new Set(["discuss", "research", "plan", "tasks", "verify", "handoff"]);
+const MAX_REQUEST_FILE_BYTES = 64 * 1024;
+const REQUEST_FILE_GLOB_PATTERN = /[*?\[\]{}]/;
 const TEMPLATE_FILES = [
   "change.md",
   "discussion.md",
@@ -473,6 +475,77 @@ async function commandScan(ctx: CommandContext): Promise<CommandResult> {
   return ok("Prepared project scan prompt.", { prompt, filesCreated: [scanPath] });
 }
 
+async function expandRequestFileReference(cwd: string, token: string): Promise<string> {
+  const fileReference = token.slice(1);
+  if (!fileReference) {
+    throw new Error("Invalid @file reference: include a local file path after @.");
+  }
+  if (fileReference === "-") {
+    throw new Error("stdin @file references are not supported; pass a local file path.");
+  }
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(fileReference)) {
+    throw new Error(`URL @file references are not supported: ${token}. Pass a local file path.`);
+  }
+  if (REQUEST_FILE_GLOB_PATTERN.test(fileReference)) {
+    throw new Error(`Glob patterns are not supported in @file references: ${token}. Pass one explicit file path.`);
+  }
+
+  const filePath = resolve(cwd, fileReference);
+  let fileStat;
+  try {
+    fileStat = await stat(filePath);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      throw new Error(`File reference not found: ${token} (${filePath}).`);
+    }
+    throw new Error(`Cannot inspect file reference: ${token} (${filePath}).`);
+  }
+
+  if (fileStat.isDirectory()) {
+    throw new Error(`File reference is a directory: ${token} (${filePath}); pass a file path.`);
+  }
+  if (!fileStat.isFile()) {
+    throw new Error(`File reference is not a regular file: ${token} (${filePath}).`);
+  }
+  if (fileStat.size > MAX_REQUEST_FILE_BYTES) {
+    throw new Error(`File reference is too large: ${token} is ${fileStat.size} bytes; maximum is ${MAX_REQUEST_FILE_BYTES} bytes.`);
+  }
+
+  try {
+    await access(filePath, constants.R_OK);
+  } catch {
+    throw new Error(`File reference is not readable: ${token} (${filePath}).`);
+  }
+
+  try {
+    return await readFile(filePath, "utf8");
+  } catch {
+    throw new Error(`Cannot read file reference: ${token} (${filePath}).`);
+  }
+}
+
+async function expandRequestTokens(cwd: string, tokens: string[]): Promise<string> {
+  const expanded: string[] = [];
+  for (const token of tokens) {
+    expanded.push(token.startsWith("@") ? await expandRequestFileReference(cwd, token) : token);
+  }
+  return expanded.join(" ").trim();
+}
+function deriveTitle(request: string): string {
+  let title = request.replace(/\s+/g, " ").trim();
+
+  const sentenceEnd = title.search(/[.!?](\s|$)/);
+  if (sentenceEnd > 0 && sentenceEnd < 80) {
+    title = title.slice(0, sentenceEnd + 1).trim();
+  } else if (title.length > 80) {
+    const truncated = title.slice(0, 80);
+    const lastSpace = truncated.lastIndexOf(" ");
+    title = (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated).trim();
+  }
+
+  return title || "change";
+}
+
 function templateValues(change: ChangeState): Record<string, string> {
   return {
     id: change.id,
@@ -500,22 +573,22 @@ async function existingChangeIds(cwd: string, stateIds: string[]): Promise<strin
   }
   return ids;
 }
-
 async function commandNew(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
-  const [kindArg, title] = args.positionals;
+  const [kindArg, ...requestTokens] = args.positionals;
   if (!CHANGE_KINDS.has(kindArg as ChangeKind)) {
     return fail("Change kind must be one of feature, bugfix, refactor, research.");
   }
-  if (!title) {
-    return fail("Usage: specwright new <kind> \"<title>\"");
+  const request = await expandRequestTokens(ctx.cwd, requestTokens);
+  if (!request) {
+    return fail("Usage: specwright new <kind> <request...>");
   }
   if (args.mode && !MODES.has(args.mode)) {
     return fail(`Invalid mode: ${args.mode}`);
   }
-
   const config = await loadConfig(ctx.cwd);
   const state = await loadState(ctx.cwd);
   const id = nextChangeId(await existingChangeIds(ctx.cwd, Object.keys(state.changes)));
+  const title = deriveTitle(request);
   const slug = slugify(title);
   const now = ctx.now().toISOString();
   const change: ChangeState = {
@@ -541,7 +614,8 @@ async function commandNew(ctx: CommandContext, args: ParsedArgs): Promise<Comman
   const dir = changeDir(ctx.cwd, id, slug);
   await ensureDir(dir);
 
-  const replacements = templateValues(change);
+  const sourceRequest = requestTokens.join(" ");
+  const replacements = { ...templateValues(change), sourceRequest, expandedRequest: request };
   const created: string[] = [];
   for (const file of TEMPLATE_FILES) {
     let content = await readFile(join(packageRoot(), "packs", "core", "templates", file), "utf8");
@@ -1062,5 +1136,5 @@ export async function runSpecwrightCommand(ctx: CommandContext, argv: string[]):
 }
 
 export function renderHelp(): string {
-  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--print-prompt]\n  specwright new <kind> "<title>" [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
+  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
 }

@@ -363,8 +363,64 @@
           "updatedAt": "2026-06-09T17:06:16.110Z"
         }
       }
+    },
+    "0009": {
+      "id": "0009",
+      "slug": "improve-specwright-new-intent-input",
+      "title": "Improve Specwright New Intent Input",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "verifying",
+      "step": "verify",
+      "createdAt": "2026-06-09T18:06:35.344Z",
+      "updatedAt": "2026-06-09T19:44:56.233Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Rework new command intent input",
+          "status": "done",
+          "updatedAt": "2026-06-09T19:42:44.057Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Replace new-command help text",
+          "status": "done",
+          "updatedAt": "2026-06-09T19:42:44.057Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Expand local file references",
+          "status": "done",
+          "updatedAt": "2026-06-09T19:42:44.057Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Derive change title from request",
+          "status": "done",
+          "updatedAt": "2026-06-09T19:42:44.057Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Render source request in intent artifact",
+          "status": "done",
+          "updatedAt": "2026-06-09T19:42:44.057Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Preserve OMP argument behavior",
+          "status": "done",
+          "updatedAt": "2026-06-09T19:42:44.057Z"
+        },
+        "T007": {
+          "id": "T007",
+          "title": "Preserve git and scoped commit behavior",
+          "status": "done",
+          "updatedAt": "2026-06-09T19:42:44.057Z"
+        }
+      }
     }
   },
-  "updatedAt": "2026-06-09T17:20:06.392Z",
-  "currentChange": "0008"
+  "updatedAt": "2026-06-09T19:44:56.233Z",
+  "currentChange": "0009"
 }

@@ -83,6 +83,140 @@ test("invalid enum option values fail and valid values still work", async () => 
   const validOnline = await runSpecwrightCommand(ctx, ["research", "--online", "never"]);
   expect(validOnline.ok).toBe(true);
 });
+test("new rejects missing request with updated usage message", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-missing-request-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const missing = await runSpecwrightCommand(ctx, ["new", "feature"]);
+  expect(missing.ok).toBe(false);
+  expect(missing.exitCode).toBe(1);
+  expect(missing.summary).toBe("Usage: specwright new <kind> <request...>");
+  expect(missing.summary).not.toContain('"<title>"');
+});
+test("new accepts multi-word unquoted request and uses all tokens", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-multiword-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Inventory", "Crafting", "System"]);
+  expect(result.ok).toBe(true);
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].title).toBe("Inventory Crafting System");
+  expect(state.changes["0001"].slug).toBe("inventory-crafting-system");
+});
+test("new accepts quoted request as single request", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-quoted-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["new", "bugfix", "Fix login redirect after session expiry"]);
+  expect(result.ok).toBe(true);
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].title).toBe("Fix login redirect after session expiry");
+  expect(state.changes["0001"].slug).toBe("fix-login-redirect-after-session-expiry");
+});
+test("new expands standalone local file references in request", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-file-reference-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "docs"));
+  await writeFile(join(cwd, "docs/request.md"), "Build inventory\nwith recipes", "utf8");
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Implement", "@docs/request.md", "now"]);
+
+  expect(result.ok).toBe(true);
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].title).toBe("Implement Build inventory with recipes now");
+});
+test("new derives a readable title and slug from a long request", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-long-request-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const longRequest = "This is a very long implementation request that goes well beyond what would be reasonable for a change title and should be truncated to a readable length";
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", longRequest]);
+  expect(result.ok).toBe(true);
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].title.length).toBeLessThanOrEqual(80);
+  expect(state.changes["0001"].title).not.toContain("\n");
+  expect(state.changes["0001"].title).toMatch(/^This is a very long implementation request/);
+  expect(state.changes["0001"].slug).toBe("this-is-a-very-long-implementation-request-that-goes-well-beyond-what-would-be");
+});
+test("new uses first sentence as title when request contains multiple sentences", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-sentence-boundary-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const multiSentence = "Add user authentication. Then implement authorization checks and session management.";
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", multiSentence]);
+  expect(result.ok).toBe(true);
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].title).toBe("Add user authentication.");
+  expect(state.changes["0001"].slug).toBe("add-user-authentication");
+});
+test("new renders exact source request and expanded request in intent artifact", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-intent-request-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const inlineRequest = "Add user authentication with OAuth2 support";
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", inlineRequest]);
+  expect(result.ok).toBe(true);
+  const intent = await readFile(join(cwd, ".specwright", "changes", "0001-add-user-authentication-with-oauth2-support", "intent.md"), "utf8");
+  expect(intent).toContain("### Source request");
+  expect(intent).toContain(inlineRequest);
+  expect(intent).toContain("### Expanded request");
+  expect(intent).toContain(inlineRequest);
+});
+test("new renders expanded request in intent artifact when file references are used", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-intent-expanded-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "docs"));
+  await writeFile(join(cwd, "docs/request.md"), "Build inventory\nwith recipes", "utf8");
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Implement", "@docs/request.md", "now"]);
+  expect(result.ok).toBe(true);
+  const intent = await readFile(join(cwd, ".specwright", "changes", "0001-implement-build-inventory-with-recipes-now", "intent.md"), "utf8");
+  expect(intent).toContain("### Source request");
+  expect(intent).toContain("Implement @docs/request.md now");
+  expect(intent).toContain("### Expanded request");
+  expect(intent).toContain("Implement Build inventory\nwith recipes now");
+});
+
+test("new rejects unsupported or invalid local file references", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-invalid-file-reference-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "docs"));
+  await writeFile(join(cwd, "large.md"), "x".repeat(64 * 1024 + 1), "utf8");
+  const unreadablePath = join(cwd, "secret.md");
+  await writeFile(unreadablePath, "secret", "utf8");
+  await chmod(unreadablePath, 0o000);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  try {
+    for (const [token, expected] of [
+      ["@missing.md", "File reference not found: @missing.md"],
+      ["@docs", "File reference is a directory: @docs"],
+      ["@*.md", "Glob patterns are not supported in @file references: @*.md"],
+      ["@https://example.invalid/request.md", "URL @file references are not supported: @https://example.invalid/request.md"],
+      ["@-", "stdin @file references are not supported"],
+      ["@secret.md", "File reference is not readable: @secret.md"],
+      ["@large.md", "File reference is too large: @large.md is 65537 bytes; maximum is 65536 bytes."],
+    ] as const) {
+      const result = await runSpecwrightCommand(ctx, ["new", "feature", token]);
+      expect(result.ok, token).toBe(false);
+      expect(result.exitCode, token).toBe(1);
+      expect(result.summary, token).toContain(expected);
+    }
+  } finally {
+    await chmod(unreadablePath, 0o600);
+  }
+});
+
+test("help text advertises request-based new contract", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-help-new-request-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const help = await runSpecwrightCommand(ctx, ["help"]);
+  expect(help.ok).toBe(true);
+  expect(help.summary).toContain("specwright new <kind> <request...>");
+  expect(help.summary).not.toContain('"<title>"');
+});
 
 test("init writes default lifecycle agent model config", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-agent-config-defaults-"));
