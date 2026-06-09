@@ -64,7 +64,7 @@
   - Acceptance: `state.json` reflects T006 status as `done` and change status as `verifying` or later.
   - Verification: Inspect `.specwright/state.json` to confirm T006 status is `done` and change 0006 status is `verifying` or later.
 
-- [ ] T007: Correct verify.md test count and refresh evidence.md
+- [x] T007: Correct verify.md test count and refresh evidence.md
   - Files: `.specwright/changes/0006-state-safeguards/verify.md`, `.specwright/changes/0006-state-safeguards/evidence.md`
   - Action: Recorded test count claims 36 but the three referenced files contain 38 test cases. `evidence.md` references pre-implementation code paths as current. Update both to match the actual branch state.
   - Acceptance: `verify.md` has correct test count; `evidence.md` references post-implementation source paths.
