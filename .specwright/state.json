@@ -371,13 +371,56 @@
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "discussing",
-      "step": "discuss",
+      "status": "verifying",
+      "step": "verify",
       "createdAt": "2026-06-09T18:06:35.344Z",
-      "updatedAt": "2026-06-09T18:06:35.344Z",
-      "tasks": {}
+      "updatedAt": "2026-06-09T18:46:22.880Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Rework new command intent input",
+          "status": "pending",
+          "updatedAt": "2026-06-09T18:46:13.339Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Replace new-command help text",
+          "status": "pending",
+          "updatedAt": "2026-06-09T18:46:13.339Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Expand local file references",
+          "status": "pending",
+          "updatedAt": "2026-06-09T18:46:13.339Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Derive change title from request",
+          "status": "pending",
+          "updatedAt": "2026-06-09T18:46:13.339Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Render source request in intent artifact",
+          "status": "pending",
+          "updatedAt": "2026-06-09T18:46:13.339Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Preserve OMP argument behavior",
+          "status": "pending",
+          "updatedAt": "2026-06-09T18:46:13.339Z"
+        },
+        "T007": {
+          "id": "T007",
+          "title": "Preserve git and scoped commit behavior",
+          "status": "pending",
+          "updatedAt": "2026-06-09T18:46:13.339Z"
+        }
+      }
     }
   },
-  "updatedAt": "2026-06-09T18:06:35.344Z",
+  "updatedAt": "2026-06-09T18:46:22.880Z",
   "currentChange": "0009"
 }
