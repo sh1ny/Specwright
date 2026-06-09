@@ -41,6 +41,8 @@ test("research prompt includes online research and fallback", async () => {
   expect(result.prompt).toContain("web_search");
   expect(result.prompt).toContain("sources.md");
   expect(result.prompt).toContain("retry the same assignment once with OMP's bundled `task` agent");
+  expect(result.prompt).toContain("spawn `specwright-researcher`");
+  expect(result.prompt).toContain("configured model `pi/task`");
   expect(result.prompt).toContain("specwright checkpoint 0001-inventory-crafting --phase research --files .specwright/changes/0001-inventory-crafting/research.md,.specwright/changes/0001-inventory-crafting/sources.md,.specwright/changes/0001-inventory-crafting/evidence.md,.specwright/changes/0001-inventory-crafting/options.md");
 });
 
@@ -68,6 +70,8 @@ test("discuss prompt requires OMP-led clarification before artifact writes", asy
   expect(prompt).toContain("`Ready for research`");
   expect(prompt).toContain("deterministic Specwright CLI has already prepared the discussion artifacts");
   expect(prompt).toContain("specwright checkpoint 0001-inventory-crafting --phase discuss --files .specwright/changes/0001-inventory-crafting/discussion.md,.specwright/changes/0001-inventory-crafting/intent.md,.specwright/changes/0001-inventory-crafting/constraints.md,.specwright/changes/0001-inventory-crafting/decisions.md");
+  expect(prompt).not.toContain("Lifecycle spawn strategy");
+  expect(prompt).not.toContain("spawn `specwright-");
   expect(prompt).not.toContain("CLI can call `ask`");
 });
 
@@ -84,6 +88,9 @@ test("plan and tasks prompts require CLI-parseable checklist tasks", async () =>
   expect(planResult.prompt).toContain("Do NOT use task headings such as ### T001");
   expect(planResult.prompt).toContain("only checklist lines define executable tasks");
   expect(planResult.prompt).toContain("specwright checkpoint 0001-inventory-crafting --phase plan --files .specwright/changes/0001-inventory-crafting/plan.md,.specwright/changes/0001-inventory-crafting/tasks.md");
+  expect(planResult.prompt).toContain("spawn `specwright-planner`");
+  expect(planResult.prompt).toContain("configured model `pi/plan`");
+  expect(planResult.prompt).not.toContain("\n  - [ ]");
 
   const tasksResult = await runSpecwrightCommand(ctx, ["tasks", "--print-prompt"]);
   expect(tasksResult.ok).toBe(true);
@@ -91,6 +98,8 @@ test("plan and tasks prompts require CLI-parseable checklist tasks", async () =>
   expect(tasksResult.prompt).toContain("exactly one unchecked checklist line: - [ ] T001: Short imperative title");
   expect(tasksResult.prompt).toContain("Do NOT write task IDs as headings such as ### T001");
   expect(tasksResult.prompt).toContain("specwright checkpoint 0001-inventory-crafting --phase tasks --files .specwright/changes/0001-inventory-crafting/tasks.md");
+  expect(tasksResult.prompt).not.toContain("Lifecycle spawn strategy");
+  expect(tasksResult.prompt).not.toContain("spawn `specwright-");
 });
 
 test("execute prompt includes scoped checkpoint command from task files", async () => {
@@ -99,12 +108,29 @@ test("execute prompt includes scoped checkpoint command from task files", async 
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
   expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
   await writeFile(
+    join(cwd, ".specwright/changes/0001-inventory-crafting/intent.md"),
+    "# Intent\n\n## Goal\n\nBuild inventory.\n",
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-inventory-crafting/evidence.md"),
+    "# Evidence\n\n## Local evidence\n\n- Existing inventory command evidence.\n",
+    "utf8",
+  );
+  await writeFile(
     join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"),
-    "- [ ] T001: Build inventory\n  - Files: `src/core/commands.ts`, `test/core-commands.test.ts`\n",
+    "- [ ] T001: Build inventory\n  - Files: `src/core/commands.ts`, `test/core-commands.test.ts`\n  - Action: Wire inventory.\n  - Acceptance: Inventory works.\n  - Verification: Run focused prompt tests.\n",
     "utf8",
   );
 
   const result = await runSpecwrightCommand(ctx, ["execute", "--task", "T001", "--print-prompt"]);
   expect(result.ok).toBe(true);
   expect(result.prompt).toContain("specwright checkpoint 0001-inventory-crafting --task T001 --files src/core/commands.ts,test/core-commands.test.ts");
+  expect(result.prompt).toContain("spawn `specwright-executor`");
+  expect(result.prompt).toContain("configured model `pi/task`");
+
+  const verifyResult = await runSpecwrightCommand(ctx, ["verify", "--print-prompt"]);
+  expect(verifyResult.ok).toBe(true);
+  expect(verifyResult.prompt).toContain("spawn `specwright-verifier`");
+  expect(verifyResult.prompt).toContain("configured model `pi/task`");
 });

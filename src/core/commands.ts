@@ -13,7 +13,7 @@ import {
   specwrightDir,
   statePath,
 } from "./paths";
-import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderSubagentRetryClause } from "./prompts";
+import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderLifecycleSpawnStrategy, renderSubagentRetryClause } from "./prompts";
 import { slugify, nextChangeId } from "./slug";
 import {
   defaultConfig,
@@ -633,6 +633,8 @@ online=${online}
 
 ${renderContextBudget(config)}
 
+${renderLifecycleSpawnStrategy({ step: "research", config })}
+
 Read first:
 - .specwright/changes/${change.id}-${change.slug}/intent.md
 - .specwright/changes/${change.id}-${change.slug}/constraints.md
@@ -671,6 +673,8 @@ async function commandPlan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   const prompt = `# Specwright Plan: ${updated.id}-${updated.slug}
 
 ${renderContextBudget(config)}
+
+${renderLifecycleSpawnStrategy({ step: "plan", config })}
 
 Read first:
 - .specwright/changes/${updated.id}-${updated.slug}/intent.md
@@ -824,7 +828,8 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
   await updateCachedChange(ctx.cwd, updated);
   const tasksMarkdown = await readFile(join(changeDir(ctx.cwd, updated.id, updated.slug), "tasks.md"), "utf8");
   const taskFiles = taskFilesFromMarkdown(tasksMarkdown, task.id);
-  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
+  const config = await loadConfig(ctx.cwd);
+  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\n${renderLifecycleSpawnStrategy({ step: "execute", config })}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
   return ok(`Prepared execute prompt for ${task.id}.`, { prompt });
 }
 
@@ -869,7 +874,7 @@ async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<Com
   }
   const updated = await updateChangeStep(ctx.cwd, syncResult ? syncResult.change : change, "verifying", "verify", ctx.now());
   const config = await loadConfig(ctx.cwd);
-  const prompt = `# Specwright Verify: ${updated.id}-${updated.slug}\n\n${renderContextBudget(config)}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n- .specwright/changes/${updated.id}-${updated.slug}/verify.md\n\nRun the task-specific checks listed in tasks.md and update verify.md with observed command output.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "phase", id: "verify" }, files: artifactPaths(updated, ["verify.md", "tasks.md"]) })}`;
+  const prompt = `# Specwright Verify: ${updated.id}-${updated.slug}\n\n${renderContextBudget(config)}\n\n${renderLifecycleSpawnStrategy({ step: "verify", config })}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n- .specwright/changes/${updated.id}-${updated.slug}/verify.md\n\nRun the task-specific checks listed in tasks.md and update verify.md with observed command output.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "phase", id: "verify" }, files: artifactPaths(updated, ["verify.md", "tasks.md"]) })}`;
   return ok(args.json ? JSON.stringify(report, null, 2) : "Specwright validators passed.", { filesUpdated: [verifyPath], prompt });
 }
 
