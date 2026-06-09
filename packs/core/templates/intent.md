@@ -12,4 +12,7 @@
 </frozen-after-approval>
 
 ## Approval notes
-
+### Source request
+{{sourceRequest}}
+### Expanded request
+{{expandedRequest}}

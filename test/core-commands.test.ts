@@ -150,6 +150,33 @@ test("new uses first sentence as title when request contains multiple sentences"
   expect(state.changes["0001"].title).toBe("Add user authentication.");
   expect(state.changes["0001"].slug).toBe("add-user-authentication");
 });
+test("new renders exact source request and expanded request in intent artifact", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-intent-request-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const inlineRequest = "Add user authentication with OAuth2 support";
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", inlineRequest]);
+  expect(result.ok).toBe(true);
+  const intent = await readFile(join(cwd, ".specwright", "changes", "0001-add-user-authentication-with-oauth2-support", "intent.md"), "utf8");
+  expect(intent).toContain("### Source request");
+  expect(intent).toContain(inlineRequest);
+  expect(intent).toContain("### Expanded request");
+  expect(intent).toContain(inlineRequest);
+});
+test("new renders expanded request in intent artifact when file references are used", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-intent-expanded-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "docs"));
+  await writeFile(join(cwd, "docs/request.md"), "Build inventory\nwith recipes", "utf8");
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Implement", "@docs/request.md", "now"]);
+  expect(result.ok).toBe(true);
+  const intent = await readFile(join(cwd, ".specwright", "changes", "0001-implement-build-inventory-with-recipes-now", "intent.md"), "utf8");
+  expect(intent).toContain("### Source request");
+  expect(intent).toContain("Implement @docs/request.md now");
+  expect(intent).toContain("### Expanded request");
+  expect(intent).toContain("Implement Build inventory\nwith recipes now");
+});
 
 test("new rejects unsupported or invalid local file references", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-new-invalid-file-reference-"));

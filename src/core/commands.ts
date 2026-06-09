@@ -614,7 +614,8 @@ async function commandNew(ctx: CommandContext, args: ParsedArgs): Promise<Comman
   const dir = changeDir(ctx.cwd, id, slug);
   await ensureDir(dir);
 
-  const replacements = templateValues(change);
+  const sourceRequest = requestTokens.join(" ");
+  const replacements = { ...templateValues(change), sourceRequest, expandedRequest: request };
   const created: string[] = [];
   for (const file of TEMPLATE_FILES) {
     let content = await readFile(join(packageRoot(), "packs", "core", "templates", file), "utf8");
