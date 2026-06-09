@@ -113,6 +113,15 @@ test("new accepts quoted request as single request", async () => {
   expect(state.changes["0001"].title).toBe("Fix login redirect after session expiry");
   expect(state.changes["0001"].slug).toBe("fix-login-redirect-after-session-expiry");
 });
+test("help text advertises request-based new contract", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-help-new-request-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const help = await runSpecwrightCommand(ctx, ["help"]);
+  expect(help.ok).toBe(true);
+  expect(help.summary).toContain("specwright new <kind> <request...>");
+  expect(help.summary).not.toContain('"<title>"');
+});
 
 test("init writes default lifecycle agent model config", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-agent-config-defaults-"));
