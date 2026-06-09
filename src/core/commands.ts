@@ -1,4 +1,4 @@
-import { access, cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,6 +64,8 @@ const MODES = new Set<SpecwrightMode>(["lite", "full"]);
 const ONLINE_MODES = new Set<OnlineResearchMode>(["never", "ask", "auto", "require"]);
 const PUBLISH_MODES = new Set<WorkflowPublishMode>(["none", "push", "pr"]);
 const CHECKPOINT_PHASES = new Set(["discuss", "research", "plan", "tasks", "verify", "handoff"]);
+const MAX_REQUEST_FILE_BYTES = 64 * 1024;
+const REQUEST_FILE_GLOB_PATTERN = /[*?\[\]{}]/;
 const TEMPLATE_FILES = [
   "change.md",
   "discussion.md",
@@ -473,6 +475,63 @@ async function commandScan(ctx: CommandContext): Promise<CommandResult> {
   return ok("Prepared project scan prompt.", { prompt, filesCreated: [scanPath] });
 }
 
+async function expandRequestFileReference(cwd: string, token: string): Promise<string> {
+  const fileReference = token.slice(1);
+  if (!fileReference) {
+    throw new Error("Invalid @file reference: include a local file path after @.");
+  }
+  if (fileReference === "-") {
+    throw new Error("stdin @file references are not supported; pass a local file path.");
+  }
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(fileReference)) {
+    throw new Error(`URL @file references are not supported: ${token}. Pass a local file path.`);
+  }
+  if (REQUEST_FILE_GLOB_PATTERN.test(fileReference)) {
+    throw new Error(`Glob patterns are not supported in @file references: ${token}. Pass one explicit file path.`);
+  }
+
+  const filePath = resolve(cwd, fileReference);
+  let fileStat;
+  try {
+    fileStat = await stat(filePath);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      throw new Error(`File reference not found: ${token} (${filePath}).`);
+    }
+    throw new Error(`Cannot inspect file reference: ${token} (${filePath}).`);
+  }
+
+  if (fileStat.isDirectory()) {
+    throw new Error(`File reference is a directory: ${token} (${filePath}); pass a file path.`);
+  }
+  if (!fileStat.isFile()) {
+    throw new Error(`File reference is not a regular file: ${token} (${filePath}).`);
+  }
+  if (fileStat.size > MAX_REQUEST_FILE_BYTES) {
+    throw new Error(`File reference is too large: ${token} is ${fileStat.size} bytes; maximum is ${MAX_REQUEST_FILE_BYTES} bytes.`);
+  }
+
+  try {
+    await access(filePath, constants.R_OK);
+  } catch {
+    throw new Error(`File reference is not readable: ${token} (${filePath}).`);
+  }
+
+  try {
+    return await readFile(filePath, "utf8");
+  } catch {
+    throw new Error(`Cannot read file reference: ${token} (${filePath}).`);
+  }
+}
+
+async function expandRequestTokens(cwd: string, tokens: string[]): Promise<string> {
+  const expanded: string[] = [];
+  for (const token of tokens) {
+    expanded.push(token.startsWith("@") ? await expandRequestFileReference(cwd, token) : token);
+  }
+  return expanded.join(" ").trim();
+}
+
 function templateValues(change: ChangeState): Record<string, string> {
   return {
     id: change.id,
@@ -506,7 +565,7 @@ async function commandNew(ctx: CommandContext, args: ParsedArgs): Promise<Comman
   if (!CHANGE_KINDS.has(kindArg as ChangeKind)) {
     return fail("Change kind must be one of feature, bugfix, refactor, research.");
   }
-  const request = requestTokens.join(" ").trim();
+  const request = await expandRequestTokens(ctx.cwd, requestTokens);
   if (!request) {
     return fail("Usage: specwright new <kind> <request...>");
   }

@@ -113,6 +113,50 @@ test("new accepts quoted request as single request", async () => {
   expect(state.changes["0001"].title).toBe("Fix login redirect after session expiry");
   expect(state.changes["0001"].slug).toBe("fix-login-redirect-after-session-expiry");
 });
+test("new expands standalone local file references in request", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-file-reference-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "docs"));
+  await writeFile(join(cwd, "docs/request.md"), "Build inventory\nwith recipes", "utf8");
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Implement", "@docs/request.md", "now"]);
+
+  expect(result.ok).toBe(true);
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].title).toBe("Implement Build inventory\nwith recipes now");
+});
+
+test("new rejects unsupported or invalid local file references", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-invalid-file-reference-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "docs"));
+  await writeFile(join(cwd, "large.md"), "x".repeat(64 * 1024 + 1), "utf8");
+  const unreadablePath = join(cwd, "secret.md");
+  await writeFile(unreadablePath, "secret", "utf8");
+  await chmod(unreadablePath, 0o000);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  try {
+    for (const [token, expected] of [
+      ["@missing.md", "File reference not found: @missing.md"],
+      ["@docs", "File reference is a directory: @docs"],
+      ["@*.md", "Glob patterns are not supported in @file references: @*.md"],
+      ["@https://example.invalid/request.md", "URL @file references are not supported: @https://example.invalid/request.md"],
+      ["@-", "stdin @file references are not supported"],
+      ["@secret.md", "File reference is not readable: @secret.md"],
+      ["@large.md", "File reference is too large: @large.md is 65537 bytes; maximum is 65536 bytes."],
+    ] as const) {
+      const result = await runSpecwrightCommand(ctx, ["new", "feature", token]);
+      expect(result.ok, token).toBe(false);
+      expect(result.exitCode, token).toBe(1);
+      expect(result.summary, token).toContain(expected);
+    }
+  } finally {
+    await chmod(unreadablePath, 0o600);
+  }
+});
+
 test("help text advertises request-based new contract", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-help-new-request-"));
   const ctx = testContext(cwd);
