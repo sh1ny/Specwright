@@ -427,10 +427,10 @@
       "kind": "bugfix",
       "pack": "core",
       "mode": "lite",
-      "status": "verifying",
-      "step": "verify",
+      "status": "done",
+      "step": "handoff",
       "createdAt": "2026-06-09T20:06:58.070Z",
-      "updatedAt": "2026-06-09T21:25:54.855Z",
+      "updatedAt": "2026-06-09T21:28:30.826Z",
       "tasks": {
         "T001": {
           "id": "T001",
@@ -447,6 +447,6 @@
       }
     }
   },
-  "updatedAt": "2026-06-09T21:25:54.855Z",
+  "updatedAt": "2026-06-09T21:28:30.826Z",
   "currentChange": "0010"
 }
