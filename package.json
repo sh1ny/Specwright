@@ -1,0 +1,21 @@
+{
+  "name": "specwright",
+  "version": "0.1.0",
+  "type": "module",
+  "private": false,
+  "bin": {
+    "specwright": "./bin/specwright.mjs"
+  },
+  "scripts": {
+    "specwright": "bun src/cli.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "check": "bun test && tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "latest",
+    "typescript-language-server": "^5.3.0",
+    "vscode-langservers-extracted": "^4.10.0"
+  }
+}

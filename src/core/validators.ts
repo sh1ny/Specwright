@@ -1,0 +1,212 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { changeDir } from "./paths";
+import { loadConfig } from "./state";
+import type { ChangeState, LifecycleStep, OnlineResearchMode, SpecwrightConfig, SpecwrightMode, WorkflowPublishMode } from "./types";
+
+export interface ValidationIssue {
+  level: "error" | "warning";
+  code: string;
+  message: string;
+  file?: string;
+}
+
+export interface ValidationReport {
+  ok: boolean;
+  issues: ValidationIssue[];
+}
+
+const STEP_INDEX: Record<LifecycleStep, number> = {
+  discuss: 0,
+  research: 1,
+  plan: 2,
+  execute: 3,
+  verify: 4,
+  handoff: 5,
+};
+
+const MODES = new Set<SpecwrightMode>(["lite", "full"]);
+const ONLINE_MODES = new Set<OnlineResearchMode>(["never", "ask", "auto", "require"]);
+const PUBLISH_MODES = new Set<WorkflowPublishMode>(["none", "push", "pr"]);
+const GIT_REMOTE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const GIT_BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
+function validateGitName(value: string, label: string, pattern: RegExp): void {
+  if (
+    value.length === 0 ||
+    value.startsWith("-") ||
+    value.includes("..") ||
+    value.includes("@{") ||
+    value.includes("\\") ||
+    value.includes("//") ||
+    value.endsWith("/") ||
+    value.endsWith(".") ||
+    /\s|[\x00-\x1f\x7f]/.test(value) ||
+    !pattern.test(value)
+  ) {
+    throw new Error(`Invalid ${label}`);
+  }
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+export function validateSpecwrightConfig(config: SpecwrightConfig): void {
+  if (config.version !== 1) throw new Error("Invalid config version");
+  if (typeof config.project.name !== "string") throw new Error("Invalid project.name");
+  if (!MODES.has(config.defaults.mode)) throw new Error("Invalid defaults.mode");
+  if (typeof config.defaults.pack !== "string") throw new Error("Invalid defaults.pack");
+  if (!ONLINE_MODES.has(config.defaults.onlineResearch)) throw new Error("Invalid defaults.onlineResearch");
+  if (!Number.isInteger(config.defaults.maxContextFiles) || config.defaults.maxContextFiles <= 0) {
+    throw new Error("Invalid defaults.maxContextFiles");
+  }
+  if (!Number.isInteger(config.defaults.maxOutputWords) || config.defaults.maxOutputWords <= 0) {
+    throw new Error("Invalid defaults.maxOutputWords");
+  }
+  if (!isStringArray(config.packs.roots)) throw new Error("Invalid packs.roots");
+  if (!isStringArray(config.packs.enabled)) throw new Error("Invalid packs.enabled");
+  if (typeof config.runtimes.omp.enabled !== "boolean") throw new Error("Invalid runtimes.omp.enabled");
+  if (typeof config.workflow.autoCommit !== "boolean") throw new Error("Invalid workflow.autoCommit");
+  if (!PUBLISH_MODES.has(config.workflow.publishMode)) throw new Error("Invalid workflow.publishMode");
+  if (config.workflow.baseBranch !== undefined) {
+    validateGitName(config.workflow.baseBranch, "workflow.baseBranch", GIT_BRANCH_PATTERN);
+  }
+  validateGitName(config.workflow.remote, "workflow.remote", GIT_REMOTE_PATTERN);
+}
+
+async function readArtifact(cwd: string, change: ChangeState, file: string): Promise<string | undefined> {
+  try {
+    return await readFile(join(changeDir(cwd, change.id, change.slug), file), "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function hasNonHeadingContent(markdown: string): boolean {
+  return markdown.split(/\r?\n/).some((line) => {
+    const trimmed = line.trim();
+    return trimmed.length > 0
+      && !trimmed.startsWith("#")
+      && !trimmed.startsWith("<!--")
+      && !trimmed.startsWith("-->")
+      && !trimmed.startsWith("<frozen-after-approval")
+      && trimmed !== "</frozen-after-approval>";
+  });
+}
+
+function taskBlocks(tasksMarkdown: string): Array<{ id: string; title: string; block: string; checked: boolean }> {
+  const lines = tasksMarkdown.split(/\r?\n/);
+  const blocks: Array<{ id: string; title: string; block: string; checked: boolean }> = [];
+  let current: { id: string; title: string; start: number; checked: boolean } | undefined;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^\s*- \[([ xX])] (T\d{3}):\s*(.+?)\s*$/.exec(lines[index] ?? "");
+    if (!match) {
+      continue;
+    }
+    if (current) {
+      blocks.push({
+        id: current.id,
+        title: current.title,
+        checked: current.checked,
+        block: lines.slice(current.start, index).join("\n"),
+      });
+    }
+    current = {
+      id: match[2] ?? "",
+      title: match[3] ?? "",
+      start: index,
+      checked: (match[1] ?? "") !== " ",
+    };
+  }
+
+  if (current) {
+    blocks.push({
+      id: current.id,
+      title: current.title,
+      checked: current.checked,
+      block: lines.slice(current.start).join("\n"),
+    });
+  }
+
+  return blocks;
+}
+
+export async function validateChange(cwd: string, change: ChangeState): Promise<ValidationReport> {
+  const config = await loadConfig(cwd);
+  const issues: ValidationIssue[] = [];
+  const stepIndex = STEP_INDEX[change.step];
+  const intent = await readArtifact(cwd, change, "intent.md");
+  const evidence = await readArtifact(cwd, change, "evidence.md");
+  const sources = await readArtifact(cwd, change, "sources.md");
+  const tasks = await readArtifact(cwd, change, "tasks.md");
+  const plan = await readArtifact(cwd, change, "plan.md");
+  const verify = await readArtifact(cwd, change, "verify.md");
+
+  if (!intent || !hasNonHeadingContent(intent)) {
+    issues.push({ level: "error", code: "SW001", message: "intent.md is missing or has no non-heading content.", file: "intent.md" });
+  }
+
+  if (stepIndex >= STEP_INDEX.plan && !evidence) {
+    issues.push({ level: "error", code: "SW002", message: "evidence.md is required before plan or later steps.", file: "evidence.md" });
+  }
+
+  if (config.defaults.onlineResearch === "require" && (!sources || !hasNonHeadingContent(sources))) {
+    issues.push({
+      level: stepIndex >= STEP_INDEX.plan ? "error" : "warning",
+      code: "SW003",
+      message: "sources.md is empty while onlineResearch is require.",
+      file: "sources.md",
+    });
+  }
+
+  const blocks = taskBlocks(tasks ?? "");
+  const seen = new Set<string>();
+  for (const block of blocks) {
+    if (seen.has(block.id)) {
+      issues.push({ level: "error", code: "SW004", message: `tasks.md contains duplicate task ID ${block.id}.`, file: "tasks.md" });
+    }
+    seen.add(block.id);
+  }
+
+  if (stepIndex >= STEP_INDEX.execute && blocks.length === 0) {
+    issues.push({ level: "error", code: "SW005", message: "tasks.md has no T### tasks before execute.", file: "tasks.md" });
+  }
+
+  if (stepIndex >= STEP_INDEX.execute) {
+    for (const block of blocks) {
+      if (!/acceptance/i.test(block.block) || !/verification/i.test(block.block)) {
+        issues.push({ level: "error", code: "SW006", message: `${block.id} lacks an acceptance or verification block.`, file: "tasks.md" });
+      }
+    }
+  }
+
+  if (plan && !/evidence\.md/i.test(plan)) {
+    issues.push({ level: "warning", code: "SW007", message: "plan.md does not mention evidence.md.", file: "plan.md" });
+  }
+
+  if (blocks.length > 0 && blocks.every((block) => block.checked) && !/observed (command|output)|command output|observed output/i.test(verify ?? "")) {
+    issues.push({ level: "error", code: "SW008", message: "All tasks are done but verify.md has no observed command/output section.", file: "verify.md" });
+  }
+
+  return {
+    ok: issues.every((issue) => issue.level !== "error"),
+    issues,
+  };
+}
+
+export function renderValidationReport(report: ValidationReport): string {
+  const result = report.ok ? "PASS" : "FAIL";
+  const issues = report.issues.length === 0
+    ? "No issues."
+    : report.issues.map((issue) => {
+      const file = issue.file ? ` (${issue.file})` : "";
+      return `- ${issue.level.toUpperCase()} ${issue.code}${file}: ${issue.message}`;
+    }).join("\n");
+
+  return `# Verification\n\n## Result\n\n${result}\n\n## Issues\n\n${issues}\n\n## Observed output\n\n`;
+}

@@ -1,0 +1,32 @@
+{
+  "id": "core",
+  "name": "Core Software Pack",
+  "version": "0.1.0",
+  "description": "Lightweight discuss/research/plan/execute/verify/handoff workflow for software changes.",
+  "artifacts": [
+    "change.md",
+    "discussion.md",
+    "intent.md",
+    "constraints.md",
+    "research.md",
+    "sources.md",
+    "evidence.md",
+    "options.md",
+    "plan.md",
+    "tasks.md",
+    "verify.md",
+    "handoff.md"
+  ],
+  "workflows": [
+    "feature"
+  ],
+  "agents": [
+    "researcher",
+    "planner",
+    "executor",
+    "verifier"
+  ],
+  "validators": [
+    "core"
+  ]
+}

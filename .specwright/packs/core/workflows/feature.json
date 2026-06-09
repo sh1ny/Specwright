@@ -1,0 +1,48 @@
+{
+  "id": "feature",
+  "name": "Feature Change",
+  "pack": "core",
+  "steps": [
+    "discuss",
+    "research",
+    "plan",
+    "execute",
+    "verify",
+    "handoff"
+  ],
+  "modes": {
+    "lite": {
+      "artifacts": [
+        "change.md",
+        "intent.md",
+        "constraints.md",
+        "evidence.md",
+        "research.md",
+        "plan.md",
+        "tasks.md",
+        "verify.md",
+        "handoff.md"
+      ],
+      "maxContextFiles": 6,
+      "maxOutputWords": 1200
+    },
+    "full": {
+      "artifacts": [
+        "change.md",
+        "discussion.md",
+        "intent.md",
+        "constraints.md",
+        "research.md",
+        "sources.md",
+        "evidence.md",
+        "options.md",
+        "plan.md",
+        "tasks.md",
+        "verify.md",
+        "handoff.md"
+      ],
+      "maxContextFiles": 12,
+      "maxOutputWords": 3000
+    }
+  }
+}

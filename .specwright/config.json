@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "project": {
+    "name": "Specwright"
+  },
+  "defaults": {
+    "mode": "lite",
+    "pack": "core",
+    "onlineResearch": "auto",
+    "maxContextFiles": 6,
+    "maxOutputWords": 1200
+  },
+  "packs": {
+    "roots": [
+      ".specwright/packs",
+      "packs"
+    ],
+    "enabled": [
+      "core"
+    ]
+  },
+  "runtimes": {
+    "omp": {
+      "enabled": true
+    }
+  }
+}
