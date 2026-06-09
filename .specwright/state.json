@@ -309,13 +309,62 @@
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "discussing",
-      "step": "discuss",
+      "status": "planning",
+      "step": "plan",
       "createdAt": "2026-06-09T15:17:04.618Z",
-      "updatedAt": "2026-06-09T15:17:04.618Z",
-      "tasks": {}
+      "updatedAt": "2026-06-09T16:40:25.313Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Add model role config shape",
+          "status": "pending",
+          "updatedAt": "2026-06-09T15:20:49.223Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Expose model roles through config commands",
+          "status": "pending",
+          "updatedAt": "2026-06-09T15:20:49.223Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Render OMP agents from config",
+          "status": "pending",
+          "updatedAt": "2026-06-09T15:20:49.223Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Regenerate agents on model role changes",
+          "status": "pending",
+          "updatedAt": "2026-06-09T15:20:49.223Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Add lifecycle spawn strategy helper",
+          "status": "pending",
+          "updatedAt": "2026-06-09T15:20:49.223Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Wire spawn strategy into lifecycle prompts",
+          "status": "pending",
+          "updatedAt": "2026-06-09T15:20:49.223Z"
+        },
+        "T007": {
+          "id": "T007",
+          "title": "Verify default routing behavior",
+          "status": "pending",
+          "updatedAt": "2026-06-09T15:20:49.223Z"
+        },
+        "T008": {
+          "id": "T008",
+          "title": "Run focused quality gates",
+          "status": "pending",
+          "updatedAt": "2026-06-09T15:20:49.223Z"
+        }
+      }
     }
   },
-  "updatedAt": "2026-06-09T15:17:04.618Z",
+  "updatedAt": "2026-06-09T16:40:25.313Z",
   "currentChange": "0008"
 }
