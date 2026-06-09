@@ -37,6 +37,7 @@ import type {
   CommandResult,
   OnlineResearchMode,
   SpecwrightConfig,
+  SpecwrightAgentName,
   SpecwrightMode,
   WorkflowPublishMode,
   TaskState,
@@ -346,6 +347,16 @@ function getConfigKeyDescriptor(key: string): ConfigKeyDescriptor | undefined {
   return CONFIG_KEY_DESCRIPTORS[key as keyof typeof CONFIG_KEY_DESCRIPTORS];
 }
 
+function agentNameForModelConfigKey(key: string): SpecwrightAgentName | undefined {
+  switch (key) {
+    case "agents.researcher.model": return "researcher";
+    case "agents.planner.model": return "planner";
+    case "agents.executor.model": return "executor";
+    case "agents.verifier.model": return "verifier";
+    default: return undefined;
+  }
+}
+
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -424,7 +435,7 @@ async function commandInit(ctx: CommandContext, args: ParsedArgs): Promise<Comma
 
   updated.push(...await copyBuiltInCorePack(ctx.cwd, args.force));
   created.push(...await ensureProjectFiles(ctx.cwd));
-  updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force }));
+  updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force, config: await loadConfig(ctx.cwd) }));
   return ok("Initialized Specwright in .specwright and installed OMP adapter in .omp.", { filesCreated: created, filesUpdated: updated });
 }
 
@@ -939,7 +950,12 @@ async function commandConfig(ctx: CommandContext, args: ParsedArgs): Promise<Com
       return fail(error instanceof Error ? error.message : String(error));
     }
     await saveConfig(ctx.cwd, updated);
-    return ok(`Set ${key}.`, { filesUpdated: [configPath(ctx.cwd)] });
+    const filesUpdated = [configPath(ctx.cwd)];
+    const updatedAgent = agentNameForModelConfigKey(key);
+    if (updatedAgent && updated.runtimes.omp.enabled) {
+      filesUpdated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: false, config: updated, regenerateAgents: [updatedAgent] }));
+    }
+    return ok(`Set ${key}.`, { filesUpdated });
   }
 
   return fail("Usage: specwright config get <key> | specwright config set <key> <value>");

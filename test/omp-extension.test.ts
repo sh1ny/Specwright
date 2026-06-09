@@ -269,3 +269,24 @@ test("OMP adapter installs project-local extension files", async () => {
   expect(verifier).toContain("tools: read,grep,find,lsp,bash,browser");
   expect(verifier).toContain("spawns: []");
 });
+
+test("OMP adapter can regenerate one agent without rewriting other artifacts", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-agent-regenerate-"));
+  const config = defaultConfig("specwright-omp-agent-regenerate");
+  expect(await installOmpAdapter({ cwd, force: false, config })).toContain(".omp/agents/specwright-planner.md");
+
+  const indexPath = join(cwd, ".omp/extensions/specwright/index.ts");
+  const researcherPath = join(cwd, ".omp/agents/specwright-researcher.md");
+  const plannerPath = join(cwd, ".omp/agents/specwright-planner.md");
+  const indexBefore = await readFile(indexPath, "utf8");
+  const researcherBefore = await readFile(researcherPath, "utf8");
+
+  config.agents.planner.model = "custom/plan-model";
+  const changed = await installOmpAdapter({ cwd, force: false, config, regenerateAgents: ["planner"] });
+  expect(changed).toEqual([".omp/agents/specwright-planner.md"]);
+
+  const planner = await readFile(plannerPath, "utf8");
+  expect(planner).toContain("model: custom/plan-model");
+  expect(await readFile(indexPath, "utf8")).toBe(indexBefore);
+  expect(await readFile(researcherPath, "utf8")).toBe(researcherBefore);
+});

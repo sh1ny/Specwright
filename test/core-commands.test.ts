@@ -181,6 +181,34 @@ test("config set persists agent model values without touching unrelated config",
   expect(after.workflow).toEqual(before.workflow);
 });
 
+test("config set regenerates changed OMP agent models when OMP is enabled", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-agent-regenerate-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const packagePath = join(cwd, ".omp/extensions/specwright/package.json");
+  const rulePath = join(cwd, ".omp/rules/specwright-workflow.md");
+  const researcherPath = join(cwd, ".omp/agents/specwright-researcher.md");
+  const plannerPath = join(cwd, ".omp/agents/specwright-planner.md");
+  const packageBefore = await readFile(packagePath, "utf8");
+  const ruleBefore = await readFile(rulePath, "utf8");
+  const researcherBefore = await readFile(researcherPath, "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["config", "set", "agents.planner.model", "custom/plan-model"]);
+  expect(result.ok).toBe(true);
+  expect(result.filesUpdated).toContain(".specwright/config.json");
+  expect(result.filesUpdated).toContain(".omp/agents/specwright-planner.md");
+  expect(result.filesUpdated).not.toContain(".omp/extensions/specwright/package.json");
+  expect(result.filesUpdated).not.toContain(".omp/rules/specwright-workflow.md");
+  expect(result.filesUpdated).not.toContain(".omp/agents/specwright-researcher.md");
+
+  const plannerAfter = await readFile(plannerPath, "utf8");
+  expect(plannerAfter).toContain("model: custom/plan-model");
+  expect(await readFile(packagePath, "utf8")).toBe(packageBefore);
+  expect(await readFile(rulePath, "utf8")).toBe(ruleBefore);
+  expect(await readFile(researcherPath, "utf8")).toBe(researcherBefore);
+});
+
 test("config set rejects invalid input without changing existing config", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-config-invalid-"));
   const ctx = testContext(cwd);

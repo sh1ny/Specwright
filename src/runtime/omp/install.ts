@@ -136,23 +136,29 @@ spawns: []
 ${definition.body}`;
 }
 
-export async function installOmpAdapter(input: { cwd: string; force: boolean; config?: Pick<SpecwrightConfig, "agents"> }): Promise<string[]> {
+export async function installOmpAdapter(input: { cwd: string; force: boolean; config?: Pick<SpecwrightConfig, "agents">; regenerateAgents?: readonly SpecwrightAgentName[] }): Promise<string[]> {
   const changed: string[] = [];
   const extensionDir = ompExtensionDir(input.cwd);
   const config = input.config ?? defaultConfig(basename(input.cwd));
-  const writes: Array<[string, string]> = [
+  const staticWrites: Array<[string, string]> = [
     [join(extensionDir, "package.json"), PACKAGE_JSON],
     [join(extensionDir, "index.ts"), await extensionIndexContent(input.cwd)],
     [join(ompRulesDir(input.cwd), "specwright-workflow.md"), WORKFLOW_RULE],
   ];
 
-  for (const agentName of Object.keys(AGENT_DEFINITIONS) as SpecwrightAgentName[]) {
-    const definition = AGENT_DEFINITIONS[agentName];
-    writes.push([join(ompAgentsDir(input.cwd), definition.fileName), renderAgent(definition, config.agents[agentName].model)]);
+  for (const [path, content] of staticWrites) {
+    const written = await writeOwned(path, content, input.force);
+    if (written) {
+      changed.push(relative(input.cwd, written));
+    }
   }
 
-  for (const [path, content] of writes) {
-    const written = await writeOwned(path, content, input.force);
+  for (const agentName of Object.keys(AGENT_DEFINITIONS) as SpecwrightAgentName[]) {
+    const definition = AGENT_DEFINITIONS[agentName];
+    const path = join(ompAgentsDir(input.cwd), definition.fileName);
+    const content = renderAgent(definition, config.agents[agentName].model);
+    const shouldRegenerate = input.regenerateAgents?.includes(agentName) === true;
+    const written = await writeOwned(path, content, input.force || shouldRegenerate);
     if (written) {
       changed.push(relative(input.cwd, written));
     }
