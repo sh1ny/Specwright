@@ -4,13 +4,13 @@
 
 ## Wave 1: Shared state foundation
 
-- [ ] T001: Extract task parsing and safe sync
+- [x] T001: Extract task parsing and safe sync
   - Files: `src/core/commands.ts`, `src/core/state.ts`, `src/core/types.ts`, `test/core-commands.test.ts`
   - Action: Move checklist parsing out of command-local code into shared core helpers that reconcile `tasks.md` against cached task state. Preserve `in-progress` and `blocked` for unchecked tasks when ID and title still match; mark checked tasks as `done`; expose unsafe drift diagnostics instead of silently overwriting ambiguous state.
   - Acceptance: CLI code has one shared task artifact parser/sync path; title drift, checkbox drift, preserved runtime statuses, malformed task lines, and duplicate IDs have deterministic outcomes.
   - Verification: Run the focused Bun tests that cover task parsing/sync behavior and confirm they fail before the helper behavior exists and pass after implementation.
 
-- [ ] T002: Add passive change state updates
+- [x] T002: Add passive change state updates
   - Files: `src/core/state.ts`, `src/core/commands.ts`, `test/core-commands.test.ts`
   - Action: Add a state write helper that updates one cached change without changing `currentChange`. Keep `upsertChange()` for flows that intentionally make a change current, and migrate passive sync call sites to the new helper.
   - Acceptance: Syncing a non-active change updates that change's cached task metadata without changing `.specwright/state.json.currentChange`.
@@ -18,13 +18,13 @@
 
 ## Wave 2: CLI behavior and checkpoint safety
 
-- [ ] T003: Auto-sync state-dependent CLI commands
+- [x] T003: Auto-sync state-dependent CLI commands
   - Files: `src/core/commands.ts`, `src/core/state.ts`, `test/core-commands.test.ts`
   - Action: Run safe sync before `status`, `tasks`, `execute`, `verify`, and `handoff` read task state. Ensure checked boxes in `tasks.md` become cached `done` state and safe unchecked tasks remain pending or preserve runtime-only status.
   - Acceptance: User-facing command output reflects artifact truth after `tasks.md` changes, without requiring agents or users to edit `.specwright/state.json` manually.
   - Verification: Run focused CLI tests for `status`, `execute`, `verify`, and `handoff` after changing `tasks.md` directly; assert observed output/state uses synced task metadata.
 
-- [ ] T004: Fix checkpoint derived-state side effects
+- [x] T004: Fix checkpoint derived-state side effects
   - Files: `src/core/commands.ts`, `src/core/git.ts`, `test/core-commands.test.ts`
   - Action: Reorder checkpoint logic so `--phase` checkpoints do not parse tasks or write `.specwright/state.json`. For `--task`, sync only as needed to validate the task and automatically stage `.specwright/state.json` when that sync mutates derived state.
   - Acceptance: `checkpoint --phase plan --files plan.md,tasks.md` commits only listed phase files when task metadata is not needed; `checkpoint --task T###` includes derived state in the same commit when sync changes it.
@@ -32,7 +32,7 @@
 
 ## Wave 3: OMP and validation surfaces
 
-- [ ] T005: Refresh OMP status through shared sync
+- [x] T005: Refresh OMP status through shared sync
   - Files: `src/runtime/omp/status.ts`, `src/runtime/omp/extension.ts`, `test/omp-extension.test.ts`
   - Action: Update OMP badge/status refresh to use the shared core sync/status path instead of reading raw cached state directly.
   - Acceptance: OMP-visible status reflects `tasks.md` changes after session refresh and does not display stale cached task state.

@@ -1,21 +1,18 @@
-import { readJsonFile } from "../../core/json";
-import { statePath } from "../../core/paths";
-import type { SpecwrightState } from "../../core/types";
+import { runSpecwrightCommand } from "../../core/commands";
 import type { OmpContextLike } from "./types";
 
 export async function refreshStatus(_event: unknown, ctx: OmpContextLike): Promise<void> {
   const cwd = ctx.cwd ?? process.cwd();
-  const state = await readJsonFile<SpecwrightState>(statePath(cwd));
-  if (!state) {
+  const result = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["status"]);
+  const statusText = result.statusText;
+  if (!result.ok || !statusText) {
     ctx.ui?.setStatus?.("specwright", undefined);
     return;
   }
 
-  const current = state.currentChange ?? "none";
-  const status = state.currentChange ? state.changes[state.currentChange]?.status ?? "idle" : "idle";
   const usage = ctx.getContextUsage?.();
   const contextText = typeof usage?.percent === "number" ? ` · ctx ${Math.round(usage.percent)}%` : "";
-  ctx.ui?.setStatus?.("specwright", `Specwright · ${current} · ${status}${contextText}`);
+  ctx.ui?.setStatus?.("specwright", `${statusText}${contextText}`);
 }
 
 export function clearStatus(_event: unknown, ctx: OmpContextLike): void {

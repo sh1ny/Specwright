@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import specwrightOmpExtension from "../src/runtime/omp/extension";
@@ -39,6 +39,65 @@ test("OMP extension registers and handles specwright command", async () => {
   expect(notifications.at(-1)).toContain("Specwright ·");
   expect(statuses.at(-1)).toContain("Specwright · none · idle");
   expect(sentMessages).toHaveLength(0);
+});
+
+test("OMP status refresh syncs tasks.md before rendering status", async () => {
+  const handlers = new Map<string, (event: unknown, ctx: OmpCommandContextLike) => void | Promise<unknown>>();
+  const statuses: Array<string | undefined> = [];
+  let label = "";
+
+  const pi: ExtensionApiLike = {
+    setLabel(value) { label = value; },
+    on(event, handler) { handlers.set(event, handler); },
+    registerCommand() {},
+    sendUserMessage() {},
+  };
+
+  specwrightOmpExtension(pi);
+  expect(label).toBe("Specwright");
+
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-refresh-"));
+  const changeDir = join(cwd, ".specwright/changes/0001-drift");
+  await mkdir(changeDir, { recursive: true });
+  await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Refresh status\n", "utf8");
+  await writeFile(join(cwd, ".specwright/state.json"), `${JSON.stringify({
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "drift",
+        title: "Drift",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "executing",
+        step: "execute",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: {
+            id: "T001",
+            title: "Refresh status",
+            status: "pending",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }, null, 2)}\n`, "utf8");
+
+  const refresh = handlers.get("session_start");
+  expect(refresh).toBeDefined();
+  await refresh?.({}, {
+    cwd,
+    ui: {
+      setStatus(_key, text) { statuses.push(text); },
+    },
+  });
+
+  expect(statuses.at(-1)).toContain("Specwright · 0001 · executing · tasks=1/1");
 });
 
 test("OMP extension sends generated prompts as immediate user messages when idle", async () => {
