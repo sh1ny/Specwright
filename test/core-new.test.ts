@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { runSpecwrightCommand } from "../src/core/commands";
 import { runGit } from "../src/core/git";
 import { slugify } from "../src/core/slug";
-import type { SpecwrightState } from "../src/core/types";
+import type { ChangeState, SpecwrightState } from "../src/core/types";
 
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -18,6 +18,12 @@ async function pathExists(path: string): Promise<boolean> {
 
 function testContext(cwd: string) {
   return { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+}
+
+function requireChange(state: SpecwrightState, id: string): ChangeState {
+  const change = state.changes[id];
+  expect(change).toBeDefined();
+  return change!;
 }
 
 async function expectGit(cwd: string, args: readonly string[]) {
@@ -45,7 +51,7 @@ test("new creates a current change directory", async () => {
 
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
   expect(state.currentChange).toBe("0001");
-  const slug = state.changes["0001"].slug;
+  const slug = requireChange(state, "0001").slug;
   await expect(pathExists(join(cwd, `.specwright/changes/0001-${slug}`))).resolves.toBe(true);
 });
 test("new and discuss create a first-class decisions artifact", async () => {
@@ -56,7 +62,7 @@ test("new and discuss create a first-class decisions artifact", async () => {
   expect((await runSpecwrightCommand(ctx, ["discuss"])).ok).toBe(true);
 
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
-  const slug = state.changes["0001"].slug;
+  const slug = requireChange(state, "0001").slug;
 
   const decisions = await readFile(join(cwd, `.specwright/changes/0001-${slug}/decisions.md`), "utf8");
   expect(decisions).toContain("# Decisions");
@@ -77,7 +83,7 @@ test("new in a git worktree creates a change branch and commits only scaffold fi
   expect(result.ok).toBe(true);
 
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
-  const slug = state.changes["0001"].slug;
+  const slug = requireChange(state, "0001").slug;
 
   const branch = await expectGit(cwd, ["branch", "--show-current"]);
   expect(branch.stdout.trim()).toBe(`feature/0001-${slug}`);
@@ -108,7 +114,7 @@ test("new in a git worktree creates a branch without committing when auto-commit
   expect(result.ok).toBe(true);
 
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
-  const slug = state.changes["0001"].slug;
+  const slug = requireChange(state, "0001").slug;
 
   const branch = await expectGit(cwd, ["branch", "--show-current"]);
   expect(branch.stdout.trim()).toBe(`feature/0001-${slug}`);
@@ -130,12 +136,13 @@ test("new derives title and slug from a long request and uses them for branch an
 
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
   expect(state.currentChange).toBe("0001");
-  expect(state.changes["0001"].title.length).toBeLessThanOrEqual(80);
-  expect(state.changes["0001"].slug).toBe(slugify(state.changes["0001"].title));
+  const change = requireChange(state, "0001");
+  expect(change.title.length).toBeLessThanOrEqual(80);
+  expect(change.slug).toBe(slugify(change.title));
 
   const branch = await expectGit(cwd, ["branch", "--show-current"]);
-  expect(branch.stdout.trim()).toBe(`feature/0001-${state.changes["0001"].slug}`);
+  expect(branch.stdout.trim()).toBe(`feature/0001-${change.slug}`);
 
   const subject = await expectGit(cwd, ["log", "-1", "--pretty=%s"]);
-  expect(subject.stdout.trim()).toBe(`specwright: start 0001-${state.changes["0001"].slug}`);
+  expect(subject.stdout.trim()).toBe(`specwright: start 0001-${change.slug}`);
 });
