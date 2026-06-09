@@ -363,8 +363,21 @@
           "updatedAt": "2026-06-09T17:06:16.110Z"
         }
       }
+    },
+    "0009": {
+      "id": "0009",
+      "slug": "improve-specwright-new-intent-input",
+      "title": "Improve Specwright New Intent Input",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-09T18:06:35.344Z",
+      "updatedAt": "2026-06-09T18:06:35.344Z",
+      "tasks": {}
     }
   },
-  "updatedAt": "2026-06-09T17:20:06.392Z",
-  "currentChange": "0008"
+  "updatedAt": "2026-06-09T18:06:35.344Z",
+  "currentChange": "0009"
 }
