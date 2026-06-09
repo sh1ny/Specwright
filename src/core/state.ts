@@ -143,7 +143,7 @@ export async function syncChangeTasksFromFile(cwd: string, change: ChangeState, 
   const markdown = await readFile(tasksPath, "utf8");
   const result = syncChangeTasksFromMarkdown(change, markdown, now);
   if (result.changed) {
-    await upsertChange(cwd, result.change);
+    await updateCachedChange(cwd, result.change);
   }
   return result;
 }
@@ -223,6 +223,13 @@ export async function findCurrentChange(cwd: string, explicit?: string): Promise
   }
 
   throw new Error(`Specwright change not found: ${target}`);
+}
+
+export async function updateCachedChange(cwd: string, change: ChangeState): Promise<void> {
+  const state = await loadState(cwd);
+  state.changes[change.id] = change;
+  state.updatedAt = change.updatedAt;
+  await saveState(cwd, state);
 }
 
 export async function upsertChange(cwd: string, change: ChangeState): Promise<void> {

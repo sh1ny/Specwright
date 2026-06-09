@@ -403,6 +403,30 @@ test("task artifact sync reports malformed and duplicate task lines deterministi
   expect(issueKinds).toEqual(["duplicate-task-id", "malformed-task-line", "malformed-task-line"]);
 });
 
+test("task file sync updates a non-current change without changing currentChange", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-passive-task-sync-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Quest Board"])).ok).toBe(true);
+
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"),
+    "- [x] T001: Build inventory\n- [ ] T002: Review recipes\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["tasks", "0001-inventory-crafting"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.currentChange).toBe("0002");
+  expect(state.changes["0001"].tasks.T001.status).toBe("done");
+  expect(state.changes["0001"].tasks.T002.status).toBe("pending");
+  expect(state.changes["0002"].tasks).toEqual({});
+});
+
+
 
 test("pull request body is generated from populated Specwright artifacts", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-pr-body-populated-"));
