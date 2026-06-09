@@ -1,18 +1,28 @@
 import { runSpecwrightCommand } from "../../core/commands";
 import type { OmpContextLike } from "./types";
-
+let refreshInFlight: Promise<void> | undefined;
 export async function refreshStatus(_event: unknown, ctx: OmpContextLike): Promise<void> {
-  const cwd = ctx.cwd ?? process.cwd();
-  const result = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["status"]);
-  const statusText = result.statusText;
-  if (!result.ok || !statusText) {
-    ctx.ui?.setStatus?.("specwright", undefined);
+  if (refreshInFlight) {
+    await refreshInFlight;
     return;
   }
-
-  const usage = ctx.getContextUsage?.();
-  const contextText = typeof usage?.percent === "number" ? ` · ctx ${Math.round(usage.percent)}%` : "";
-  ctx.ui?.setStatus?.("specwright", `${statusText}${contextText}`);
+  refreshInFlight = (async () => {
+    const cwd = ctx.cwd ?? process.cwd();
+    const result = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["status"]);
+    const statusText = result.statusText;
+    if (!result.ok || !statusText) {
+      ctx.ui?.setStatus?.("specwright", undefined);
+      return;
+    }
+    const usage = ctx.getContextUsage?.();
+    const contextText = typeof usage?.percent === "number" ? ` · ctx ${Math.round(usage.percent)}%` : "";
+    ctx.ui?.setStatus?.("specwright", `${statusText}${contextText}`);
+  })();
+  try {
+    await refreshInFlight;
+  } finally {
+    refreshInFlight = undefined;
+  }
 }
 
 export function clearStatus(_event: unknown, ctx: OmpContextLike): void {
