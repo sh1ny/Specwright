@@ -176,13 +176,11 @@ export function unreconciledTaskDriftIssues(
   return issues;
 }
 
-
 export function syncChangeTasksFromMarkdown(change: ChangeState, markdown: string, now: Date): TaskSyncResult {
   const parsed = parseTaskArtifact(markdown);
   const issues = [...parsed.issues];
   const updatedAt = now.toISOString();
   const tasks: Record<string, TaskState> = {};
-
   for (const task of parsed.tasks) {
     const prior = change.tasks[task.id];
     if (prior && prior.title !== task.title) {
@@ -195,7 +193,6 @@ export function syncChangeTasksFromMarkdown(change: ChangeState, markdown: strin
         nextTitle: task.title,
       });
     }
-
     const status = task.checked
       ? "done"
       : prior && prior.title === task.title && (prior.status === "in-progress" || prior.status === "blocked")
@@ -203,7 +200,15 @@ export function syncChangeTasksFromMarkdown(change: ChangeState, markdown: strin
         : "pending";
     tasks[task.id] = { id: task.id, title: task.title, status, updatedAt };
   }
-
+  for (const task of Object.values(change.tasks)) {
+    if (!tasks[task.id]) {
+      issues.push({
+        kind: "cached-task-without-artifact",
+        taskId: task.id,
+        message: `Cached task ${task.id} has no matching tasks.md artifact.`,
+      });
+    }
+  }
   const changed = !taskStatesEqual(change.tasks, tasks);
   return {
     change: changed ? { ...change, tasks, updatedAt } : change,
@@ -234,7 +239,7 @@ export async function syncChangeTasksFromFileIfPresent(cwd: string, change: Chan
     throw error;
   }
   const result = syncChangeTasksFromMarkdown(change, markdown, now);
-  if (result.changed) {
+  if (result.changed && result.issues.length === 0) {
     await updateCachedChange(cwd, result.change);
   }
   return result;
@@ -327,7 +332,6 @@ export async function updateCachedChange(cwd: string, change: ChangeState): Prom
 export async function upsertChange(cwd: string, change: ChangeState): Promise<void> {
   const state = await loadState(cwd);
   state.changes[change.id] = change;
-  state.currentChange = change.id;
   state.updatedAt = change.updatedAt;
   await saveState(cwd, state);
 }
