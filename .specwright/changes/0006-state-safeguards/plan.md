@@ -14,12 +14,13 @@ Checkpoint behavior is part of this change. Phase checkpoints must not parse tas
 
 - Approved intent says `state.json` is derived CLI cache and `tasks.md` is authoritative for task IDs, titles, and checkbox completion: `.specwright/changes/0006-state-safeguards/intent.md:16-18`.
 - Constraints require safe sync before `status`, `tasks`, `execute`, `verify`, and `handoff`; OMP status must use shared sync/status behavior; passive sync must not mutate `currentChange`: `.specwright/changes/0006-state-safeguards/constraints.md:13-21`.
-- `evidence.md` currently contains only empty evidence headings, so this plan cites the artifact gap directly and uses the approved intent/constraints plus observed local source citations as the implementation basis: `.specwright/changes/0006-state-safeguards/evidence.md:5-9`.
+- `evidence.md` records local source evidence for the split cache/source-of-truth problem and the command surfaces that currently read or write stale task state: `.specwright/changes/0006-state-safeguards/evidence.md:7-21`.
+- Research confirmed the only task parser is command-local and persists through `upsertChange()`, so shared core reconciliation is required: `.specwright/changes/0006-state-safeguards/research.md:7-11`.
 - Current task parsing is private to commands and writes through `upsertChange()`: `src/core/commands.ts:629-648`.
-- `upsertChange()` currently assigns `currentChange`, which is unsafe for passive non-active sync: `src/core/state.ts:122-125`.
+- `upsertChange()` currently assigns `currentChange`, which is unsafe for passive non-active sync: `src/core/state.ts:122-127`.
 - Checkpoint currently parses tasks before deciding whether the checkpoint is phase- or task-scoped and stages only explicit files: `src/core/commands.ts:677-711`.
-- OMP status currently displays raw cached state without shared sync: `src/runtime/omp/status.ts:14-18`.
-- Validators already parse task blocks and report duplicate/lacking-task-shape issues, but do not compare task artifacts to cached state: `src/core/validators.ts:101-183`.
+- OMP status currently displays raw cached state without shared sync: `src/runtime/omp/status.ts:1-18`.
+- Validators already parse task blocks and report duplicate/lacking-task-shape issues, but do not compare task artifacts to cached state: `src/core/validators.ts:101-199`.
 
 ## Implementation approach
 
