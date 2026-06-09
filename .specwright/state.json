@@ -185,50 +185,63 @@
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "executing",
-      "step": "execute",
+      "status": "verifying",
+      "step": "verify",
       "createdAt": "2026-06-09T06:22:47.489Z",
-      "updatedAt": "2026-06-09T07:50:54.110Z",
+      "updatedAt": "2026-06-09T08:03:02.823Z",
       "tasks": {
         "T001": {
           "id": "T001",
           "title": "Extract task parsing and safe sync",
           "status": "done",
-          "updatedAt": "2026-06-09T07:50:54.110Z"
+          "updatedAt": "2026-06-09T08:01:33.146Z"
         },
         "T002": {
           "id": "T002",
           "title": "Add passive change state updates",
           "status": "done",
-          "updatedAt": "2026-06-09T07:50:54.110Z"
+          "updatedAt": "2026-06-09T08:01:33.146Z"
         },
         "T003": {
           "id": "T003",
           "title": "Auto-sync state-dependent CLI commands",
           "status": "done",
-          "updatedAt": "2026-06-09T07:50:54.110Z"
+          "updatedAt": "2026-06-09T08:01:33.146Z"
         },
         "T004": {
           "id": "T004",
           "title": "Fix checkpoint derived-state side effects",
           "status": "done",
-          "updatedAt": "2026-06-09T07:50:54.110Z"
+          "updatedAt": "2026-06-09T08:01:33.146Z"
         },
         "T005": {
           "id": "T005",
           "title": "Refresh OMP status through shared sync",
           "status": "done",
-          "updatedAt": "2026-06-09T07:50:54.110Z"
+          "updatedAt": "2026-06-09T08:01:33.146Z"
         },
         "T006": {
           "id": "T006",
           "title": "Report unreconciled task drift",
-          "status": "pending",
-          "updatedAt": "2026-06-09T07:50:54.110Z"
+          "status": "done",
+          "updatedAt": "2026-06-09T08:01:33.146Z"
         }
       }
+    },
+    "0007": {
+      "id": "0007",
+      "slug": "fix-task-sync-drift-persistence-ordering-omp-refresh-races-and-stale-artifact-state",
+      "title": "Fix task sync drift persistence ordering, OMP refresh races, and stale artifact state",
+      "kind": "bugfix",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-09T08:22:37.569Z",
+      "updatedAt": "2026-06-09T08:22:37.569Z",
+      "tasks": {}
     }
   },
-  "updatedAt": "2026-06-09T07:50:54.110Z",
-  "currentChange": "0006"
+  "updatedAt": "2026-06-09T08:22:37.569Z",
+  "currentChange": "0007"
 }
