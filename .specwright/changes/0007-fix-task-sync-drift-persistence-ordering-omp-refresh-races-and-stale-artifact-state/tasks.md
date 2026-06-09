@@ -58,7 +58,7 @@
 
 ## Wave 4 — Artifact cleanup
 
-- [ ] T006: Refresh state.json to match completed T006 artifacts
+- [x] T006: Refresh state.json to match completed T006 artifacts
   - Files: `.specwright/state.json`
   - Action: Change 0006's T006 is marked checked in `tasks.md` and `verify.md` records PASS, but `state.json` still shows T006 as `pending` and the change as `executing`. Run `specwright status 0006` (or `specwright tasks 0006`) to sync derived state to artifact truth.
   - Acceptance: `state.json` reflects T006 status as `done` and change status as `verifying` or later.
