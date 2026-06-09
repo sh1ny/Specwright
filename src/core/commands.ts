@@ -23,8 +23,9 @@ import {
   loadState,
   saveConfig,
   saveState,
-  syncChangeTasksFromFile,
   syncChangeTasksFromFileIfPresent,
+  syncChangeTasksFromMarkdown,
+  updateCachedChange,
   upsertChange,
 } from "./state";
 import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, writePullRequestBodyFile } from "./git";
@@ -712,14 +713,18 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
 
   const filesToStage = [...args.files];
   if (args.task) {
-    const syncResult = await syncChangeTasksFromFile(ctx.cwd, change, ctx.now());
+    const tasksMarkdown = await readFile(join(changeDir(ctx.cwd, change.id, change.slug), "tasks.md"), "utf8");
+    const syncResult = syncChangeTasksFromMarkdown(change, tasksMarkdown, ctx.now());
     change = syncResult.change;
     if (!change.tasks[args.task]) {
       return fail(`Task not found: ${args.task}`);
     }
     const stateFile = ".specwright/state.json";
-    if (syncResult.changed && !filesToStage.includes(stateFile)) {
-      filesToStage.push(stateFile);
+    if (syncResult.changed) {
+      await updateCachedChange(ctx.cwd, change);
+      if (!filesToStage.includes(stateFile)) {
+        filesToStage.push(stateFile);
+      }
     }
   }
 
