@@ -445,8 +445,21 @@
           "updatedAt": "2026-06-09T21:25:20.462Z"
         }
       }
+    },
+    "0011": {
+      "id": "0011",
+      "slug": "specwright-omp-tight-integration-plan-context-specwright-s-omp-integration",
+      "title": "# Specwright OMP Tight-Integration Plan ## Context Specwright’s OMP integration",
+      "kind": "refactor",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-09T23:08:12.458Z",
+      "updatedAt": "2026-06-09T23:08:12.458Z",
+      "tasks": {}
     }
   },
-  "updatedAt": "2026-06-09T21:28:30.826Z",
-  "currentChange": "0010"
+  "updatedAt": "2026-06-09T23:08:12.458Z",
+  "currentChange": "0011"
 }
