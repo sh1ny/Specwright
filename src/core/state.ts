@@ -332,7 +332,6 @@ export async function updateCachedChange(cwd: string, change: ChangeState): Prom
 export async function upsertChange(cwd: string, change: ChangeState): Promise<void> {
   const state = await loadState(cwd);
   state.changes[change.id] = change;
-  state.currentChange = change.id;
   state.updatedAt = change.updatedAt;
   await saveState(cwd, state);
 }

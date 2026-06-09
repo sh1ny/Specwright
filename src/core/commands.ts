@@ -551,7 +551,7 @@ async function ensureChangeArtifacts(cwd: string, change: ChangeState, files: st
 
 async function updateChangeStep(cwd: string, change: ChangeState, status: ChangeState["status"], step: ChangeState["step"], now: Date): Promise<ChangeState> {
   const updated: ChangeState = { ...change, status, step, updatedAt: now.toISOString() };
-  await upsertChange(cwd, updated);
+  await updateCachedChange(cwd, updated);
   return updated;
 }
 
@@ -778,7 +778,7 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const now = ctx.now().toISOString();
   const tasks = { ...change.tasks, [task.id]: { ...task, status: "in-progress" as const, updatedAt: now } };
   const updated: ChangeState = { ...change, tasks, status: "executing", step: "execute", updatedAt: now };
-  await upsertChange(ctx.cwd, updated);
+  await updateCachedChange(ctx.cwd, updated);
   const tasksMarkdown = await readFile(join(changeDir(ctx.cwd, updated.id, updated.slug), "tasks.md"), "utf8");
   const taskFiles = taskFilesFromMarkdown(tasksMarkdown, task.id);
   const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
@@ -818,7 +818,7 @@ async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const report = await validateChange(ctx.cwd, change);
   const allDone = Object.values(change.tasks).length > 0 && Object.values(change.tasks).every((task) => task.status === "done");
   const status = allDone && report.ok ? "done" : change.status;
-  await upsertChange(ctx.cwd, { ...change, status, step: "handoff", updatedAt: ctx.now().toISOString() });
+  await updateCachedChange(ctx.cwd, { ...change, status, step: "handoff", updatedAt: ctx.now().toISOString() });
   return ok(`Generated handoff for ${change.id}.`, { filesUpdated: [handoffPath], prompt: handoff });
 }
 
