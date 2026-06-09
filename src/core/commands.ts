@@ -791,16 +791,45 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
 }
 
 async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
-  let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
-  change = await syncChangeTasksForCommand(ctx, change);
+  const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  // Compute sync result without persisting, so validation can detect drift
+  const tasksPath = join(changeDir(ctx.cwd, change.id, change.slug), "tasks.md");
+  let syncResult: ReturnType<typeof syncChangeTasksFromMarkdown> | undefined;
+  try {
+    const markdown = await readFile(tasksPath, "utf8");
+    syncResult = syncChangeTasksFromMarkdown(change, markdown, ctx.now());
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      // no-op when tasks.md is missing
+    } else {
+      throw error;
+    }
+  }
+  // Validate against ORIGINAL cached state (before sync)
   const report = await validateChange(ctx.cwd, change);
+  // Surface sync issues as SW009 errors in the validation report
+  if (syncResult && syncResult.issues.length > 0) {
+    for (const issue of syncResult.issues) {
+      report.issues.push({
+        level: "error",
+        code: "SW009",
+        message: `Unreconciled task drift: ${issue.kind}: ${issue.message}`,
+        file: "tasks.md",
+      });
+    }
+    report.ok = false;
+  }
   const verifyPath = join(changeDir(ctx.cwd, change.id, change.slug), "verify.md");
   await writeFile(verifyPath, renderValidationReport(report), "utf8");
   if (!report.ok) {
     const summary = args.json ? JSON.stringify(report, null, 2) : "Specwright validation failed.";
     return fail(summary, { filesUpdated: [verifyPath] });
   }
-  const updated = await updateChangeStep(ctx.cwd, change, "verifying", "verify", ctx.now());
+  // Only persist sync after validation passes
+  if (syncResult && syncResult.changed && syncResult.issues.length === 0) {
+    await updateCachedChange(ctx.cwd, syncResult.change);
+  }
+  const updated = await updateChangeStep(ctx.cwd, syncResult ? syncResult.change : change, "verifying", "verify", ctx.now());
   const config = await loadConfig(ctx.cwd);
   const prompt = `# Specwright Verify: ${updated.id}-${updated.slug}\n\n${renderContextBudget(config)}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n- .specwright/changes/${updated.id}-${updated.slug}/verify.md\n\nRun the task-specific checks listed in tasks.md and update verify.md with observed command output.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "phase", id: "verify" }, files: artifactPaths(updated, ["verify.md", "tasks.md"]) })}`;
   return ok(args.json ? JSON.stringify(report, null, 2) : "Specwright validators passed.", { filesUpdated: [verifyPath], prompt });
