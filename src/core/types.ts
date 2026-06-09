@@ -62,11 +62,10 @@ export interface ParsedTaskArtifact {
   line: number;
 }
 
-export type TaskSyncIssueKind = "malformed-task-line" | "duplicate-task-id" | "title-drift";
-
+export type TaskSyncIssueKind = "malformed-task-line" | "duplicate-task-id" | "title-drift" | "cached-task-without-artifact";
 export interface TaskSyncIssue {
   kind: TaskSyncIssueKind;
-  line: number;
+  line?: number;
   taskId?: string;
   message: string;
   previousTitle?: string;

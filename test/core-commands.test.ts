@@ -442,6 +442,20 @@ test("task artifact sync reports malformed and duplicate task lines deterministi
   expect(issueKinds).toEqual(["duplicate-task-id", "malformed-task-line", "malformed-task-line"]);
 });
 
+test("syncChangeTasksFromMarkdown emits cached-task-without-artifact issues", () => {
+  const now = new Date("2026-06-08T01:00:00.000Z");
+  const change: ChangeState = {
+    ...changeFixture("0001", "inventory-crafting", "Inventory Crafting"),
+    tasks: {
+      T001: { id: "T001", title: "Build inventory", status: "in-progress", updatedAt: "old" },
+      T002: { id: "T002", title: "Review recipes", status: "blocked", updatedAt: "old" },
+    },
+  };
+  const result = syncChangeTasksFromMarkdown(change, "- [ ] T001: Build inventory\n", now);
+  expect(result.issues.map((issue) => issue.kind)).toEqual(["cached-task-without-artifact"]);
+  expect(result.issues[0]?.taskId).toBe("T002");
+  expect(result.issues[0]?.message).toContain("T002");
+});
 test("task file sync updates a non-current change without changing currentChange", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-passive-task-sync-"));
   const ctx = testContext(cwd);

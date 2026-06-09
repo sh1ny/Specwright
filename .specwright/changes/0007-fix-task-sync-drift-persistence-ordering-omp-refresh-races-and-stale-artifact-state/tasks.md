@@ -4,7 +4,7 @@
 
 ## Wave 1 — Core sync correctness
 
-- [ ] T001: Report cached tasks missing from artifact as sync issues
+- [x] T001: Report cached tasks missing from artifact as sync issues
   - Files: `src/core/state.ts`
   - Action: When `syncChangeTasksFromMarkdown` builds the new task map, emit a `cached-task-without-artifact` issue for every task ID present in `change.tasks` that is absent from the parsed `tasks.md`. Add these issues to the returned `issues` array before returning the sync result. Currently cached `in-progress` or `blocked` tasks are silently deleted.
   - Acceptance: Sync result contains an issue when a cached task ID is missing from the artifact.
