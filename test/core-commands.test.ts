@@ -124,7 +124,31 @@ test("new expands standalone local file references in request", async () => {
 
   expect(result.ok).toBe(true);
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
-  expect(state.changes["0001"].title).toBe("Implement Build inventory\nwith recipes now");
+  expect(state.changes["0001"].title).toBe("Implement Build inventory with recipes now");
+});
+test("new derives a readable title and slug from a long request", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-long-request-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const longRequest = "This is a very long implementation request that goes well beyond what would be reasonable for a change title and should be truncated to a readable length";
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", longRequest]);
+  expect(result.ok).toBe(true);
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].title.length).toBeLessThanOrEqual(80);
+  expect(state.changes["0001"].title).not.toContain("\n");
+  expect(state.changes["0001"].title).toMatch(/^This is a very long implementation request/);
+  expect(state.changes["0001"].slug).toBe("this-is-a-very-long-implementation-request-that-goes-well-beyond-what-would-be");
+});
+test("new uses first sentence as title when request contains multiple sentences", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-sentence-boundary-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const multiSentence = "Add user authentication. Then implement authorization checks and session management.";
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", multiSentence]);
+  expect(result.ok).toBe(true);
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].title).toBe("Add user authentication.");
+  expect(state.changes["0001"].slug).toBe("add-user-authentication");
 });
 
 test("new rejects unsupported or invalid local file references", async () => {

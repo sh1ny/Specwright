@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSpecwrightCommand } from "../src/core/commands";
 import { runGit } from "../src/core/git";
+import { slugify } from "../src/core/slug";
 import type { SpecwrightState } from "../src/core/types";
 
 async function pathExists(path: string): Promise<boolean> {
@@ -108,4 +109,24 @@ test("new in a git worktree creates a branch without committing when auto-commit
 
   const status = await expectGit(cwd, ["status", "--short"]);
   expect(status.stdout).toContain("?? .specwright/");
+});
+test("new derives title and slug from a long request and uses them for branch and state", async () => {
+  const cwd = await initGitRepo("specwright-new-derived-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const longRequest = "Implement a complete user authentication and authorization system with OAuth2 integration and session management for the web application";
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", longRequest]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
+  expect(state.currentChange).toBe("0001");
+  expect(state.changes["0001"].title.length).toBeLessThanOrEqual(80);
+  expect(state.changes["0001"].slug).toBe(slugify(state.changes["0001"].title));
+
+  const branch = await expectGit(cwd, ["branch", "--show-current"]);
+  expect(branch.stdout.trim()).toBe(`feature/0001-${state.changes["0001"].slug}`);
+
+  const subject = await expectGit(cwd, ["log", "-1", "--pretty=%s"]);
+  expect(subject.stdout.trim()).toBe(`specwright: start 0001-${state.changes["0001"].slug}`);
 });

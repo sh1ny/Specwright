@@ -531,6 +531,20 @@ async function expandRequestTokens(cwd: string, tokens: string[]): Promise<strin
   }
   return expanded.join(" ").trim();
 }
+function deriveTitle(request: string): string {
+  let title = request.replace(/\s+/g, " ").trim();
+
+  const sentenceEnd = title.search(/[.!?](\s|$)/);
+  if (sentenceEnd > 0 && sentenceEnd < 80) {
+    title = title.slice(0, sentenceEnd + 1).trim();
+  } else if (title.length > 80) {
+    const truncated = title.slice(0, 80);
+    const lastSpace = truncated.lastIndexOf(" ");
+    title = (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated).trim();
+  }
+
+  return title || "change";
+}
 
 function templateValues(change: ChangeState): Record<string, string> {
   return {
@@ -559,7 +573,6 @@ async function existingChangeIds(cwd: string, stateIds: string[]): Promise<strin
   }
   return ids;
 }
-
 async function commandNew(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   const [kindArg, ...requestTokens] = args.positionals;
   if (!CHANGE_KINDS.has(kindArg as ChangeKind)) {
@@ -575,7 +588,7 @@ async function commandNew(ctx: CommandContext, args: ParsedArgs): Promise<Comman
   const config = await loadConfig(ctx.cwd);
   const state = await loadState(ctx.cwd);
   const id = nextChangeId(await existingChangeIds(ctx.cwd, Object.keys(state.changes)));
-  const title = request;
+  const title = deriveTitle(request);
   const slug = slugify(title);
   const now = ctx.now().toISOString();
   const change: ChangeState = {
