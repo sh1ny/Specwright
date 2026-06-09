@@ -98,3 +98,10 @@ Specwright’s OMP integration today is a thin adapter: it registers the `/specw
 - OMP exposes blocking `tool_call` interception at the extension layer and `event.input` includes `agent` for `task` calls (observed in `omp://extensions.md` and `omp://tools/task.md`).
 - No direct extension-managed subagent spawn API exists in the current OMP surface, so enforcement remains interception-based.
 - Agent names remain `specwright-researcher`, `specwright-planner`, `specwright-executor`, `specwright-verifier`.
+
+### Discuss refinements
+
+- Include all five integration candidates in change 0011: lifecycle routing enforcement, structured tools, OMP prompt adapter split, richer status/drift UI, and adapter version marker.
+- Treat structured tools as a strong candidate whose exact return schema must be confirmed during research against OMP's tool API.
+- Keep the lifecycle goal strict: lifecycle commands should fail closed when blocking `tool_call` interception is supported, rather than relying only on prompt compliance.
+- Status/drift integration should avoid repeated expensive validation by caching verification work against relevant artifact mtimes.
