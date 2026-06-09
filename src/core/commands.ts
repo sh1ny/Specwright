@@ -264,6 +264,30 @@ const CONFIG_KEY_DESCRIPTORS = {
     parse: parsePositiveIntegerValue,
     format: formatConfigValue,
   },
+  "agents.researcher.model": {
+    get: (config) => config.agents.researcher.model,
+    set: (config, value) => ({ ...config, agents: { ...config.agents, researcher: { ...config.agents.researcher, model: value as string } } }),
+    parse: parseStringValue,
+    format: formatConfigValue,
+  },
+  "agents.planner.model": {
+    get: (config) => config.agents.planner.model,
+    set: (config, value) => ({ ...config, agents: { ...config.agents, planner: { ...config.agents.planner, model: value as string } } }),
+    parse: parseStringValue,
+    format: formatConfigValue,
+  },
+  "agents.executor.model": {
+    get: (config) => config.agents.executor.model,
+    set: (config, value) => ({ ...config, agents: { ...config.agents, executor: { ...config.agents.executor, model: value as string } } }),
+    parse: parseStringValue,
+    format: formatConfigValue,
+  },
+  "agents.verifier.model": {
+    get: (config) => config.agents.verifier.model,
+    set: (config, value) => ({ ...config, agents: { ...config.agents, verifier: { ...config.agents.verifier, model: value as string } } }),
+    parse: parseStringValue,
+    format: formatConfigValue,
+  },
   "packs.roots": {
     get: (config) => config.packs.roots,
     set: (config, value) => ({ ...config, packs: { ...config.packs, roots: value as string[] } }),
