@@ -1,0 +1,197 @@
+{
+  "version": 1,
+  "changes": {
+    "0001": {
+      "id": "0001",
+      "slug": "self-hosted-core-workflow",
+      "title": "self-hosted core workflow",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "verifying",
+      "step": "verify",
+      "createdAt": "2026-06-08T21:24:05.658Z",
+      "updatedAt": "2026-06-08T22:11:23.496Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Add first-class decisions artifact",
+          "status": "done",
+          "updatedAt": "2026-06-08T21:51:49.479Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Harden command flag parsing",
+          "status": "done",
+          "updatedAt": "2026-06-08T21:51:49.479Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Strengthen OMP adapter verification",
+          "status": "done",
+          "updatedAt": "2026-06-08T21:51:49.479Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Verify and hand off self-hosted workflow",
+          "status": "done",
+          "updatedAt": "2026-06-08T21:51:49.479Z"
+        }
+      }
+    },
+    "0002": {
+      "id": "0002",
+      "slug": "create-specwright-config-that-we-can-use-to-set-get-config-variables",
+      "title": "Create specwright config that we can use to set/get config variables",
+      "kind": "research",
+      "pack": "core",
+      "mode": "lite",
+      "status": "verifying",
+      "step": "verify",
+      "createdAt": "2026-06-08T22:13:22.338Z",
+      "updatedAt": "2026-06-08T22:51:40.781Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Cover config command regression behavior",
+          "status": "in-progress",
+          "updatedAt": "2026-06-08T22:50:19.820Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Add typed config key descriptors",
+          "status": "in-progress",
+          "updatedAt": "2026-06-08T22:51:02.127Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Register config get and set command",
+          "status": "in-progress",
+          "updatedAt": "2026-06-08T22:34:40.576Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Verify OMP argument compatibility",
+          "status": "in-progress",
+          "updatedAt": "2026-06-08T22:36:47.035Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Run focused feature checks",
+          "status": "pending",
+          "updatedAt": "2026-06-08T22:30:03.812Z"
+        }
+      }
+    },
+    "0003": {
+      "id": "0003",
+      "slug": "make-the-discuss-phase-command-more-interactive",
+      "title": "Make the discuss phase/command more interactive.",
+      "kind": "refactor",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-08T22:54:58.680Z",
+      "updatedAt": "2026-06-08T22:54:58.680Z",
+      "tasks": {}
+    },
+    "0004": {
+      "id": "0004",
+      "slug": "make-the-discuss-phase-command-more-interactive",
+      "title": "Make the discuss phase/command more interactive.",
+      "kind": "refactor",
+      "pack": "core",
+      "mode": "lite",
+      "status": "executing",
+      "step": "execute",
+      "createdAt": "2026-06-08T22:55:50.226Z",
+      "updatedAt": "2026-06-08T23:43:47.097Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Render OMP-led discuss prompt",
+          "status": "in-progress",
+          "updatedAt": "2026-06-08T23:19:35.966Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Cover core discuss prompt behavior",
+          "status": "in-progress",
+          "updatedAt": "2026-06-08T23:21:46.760Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Cover OMP discuss delivery",
+          "status": "in-progress",
+          "updatedAt": "2026-06-08T23:43:47.097Z"
+        }
+      }
+    },
+    "0005": {
+      "id": "0005",
+      "slug": "integrate-git-and-gh-commands",
+      "title": "Integrate git and gh commands",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "verifying",
+      "step": "verify",
+      "createdAt": "2026-06-08T23:46:49.378Z",
+      "updatedAt": "2026-06-09T06:20:34.402Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Add workflow config keys",
+          "status": "done",
+          "updatedAt": "2026-06-09T05:38:11.943Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Add git and gh runner",
+          "status": "done",
+          "updatedAt": "2026-06-09T05:49:16.991Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Branch and commit new changes",
+          "status": "done",
+          "updatedAt": "2026-06-09T05:53:18.386Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Add checkpoint command prompts",
+          "status": "done",
+          "updatedAt": "2026-06-09T06:02:54.690Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Generate rich PR bodies",
+          "status": "done",
+          "updatedAt": "2026-06-09T06:13:39.438Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Implement publish modes",
+          "status": "in-progress",
+          "updatedAt": "2026-06-09T06:15:07.178Z"
+        }
+      }
+    },
+    "0006": {
+      "id": "0006",
+      "slug": "state-safeguards",
+      "title": "State Safeguards",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-09T06:22:47.489Z",
+      "updatedAt": "2026-06-09T06:22:47.489Z",
+      "tasks": {}
+    }
+  },
+  "updatedAt": "2026-06-09T06:22:47.489Z",
+  "currentChange": "0006"
+}
