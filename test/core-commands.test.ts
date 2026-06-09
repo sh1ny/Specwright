@@ -84,6 +84,20 @@ test("invalid enum option values fail and valid values still work", async () => 
   expect(validOnline.ok).toBe(true);
 });
 
+test("init writes default lifecycle agent model config", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-agent-config-defaults-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const config = await readConfig(cwd);
+  expect(config.agents).toEqual({
+    researcher: { model: "pi/task" },
+    planner: { model: "pi/plan" },
+    executor: { model: "pi/task" },
+    verifier: { model: "pi/task" },
+  });
+});
+
 test("config get returns supported scalar and array values", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-config-get-"));
   const ctx = testContext(cwd);

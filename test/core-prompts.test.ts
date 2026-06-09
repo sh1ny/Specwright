@@ -30,6 +30,36 @@ test("lifecycle spawn strategy routes each phase to configured agent model", () 
   }
 });
 
+test("fresh init defaults route lifecycle prompts to matching agents and models", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-default-routing-prompts-"));
+  const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+
+  const changeDir = join(cwd, ".specwright/changes/0001-inventory-crafting");
+  await writeFile(join(changeDir, "intent.md"), "# Intent\n\n## Goal\n\nBuild inventory.\n", "utf8");
+  await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\n## Local evidence\n\n- Existing inventory evidence.\n", "utf8");
+  await writeFile(
+    join(changeDir, "tasks.md"),
+    "- [ ] T001: Build inventory\n  - Files: `src/core/commands.ts`\n  - Action: Wire inventory.\n  - Acceptance: Inventory works.\n  - Verification: Run prompt tests.\n",
+    "utf8",
+  );
+
+  const expected = [
+    { argv: ["research", "--online", "never", "--print-prompt"], agent: "specwright-researcher", model: "pi/task" },
+    { argv: ["plan", "--print-prompt"], agent: "specwright-planner", model: "pi/plan" },
+    { argv: ["execute", "--task", "T001", "--print-prompt"], agent: "specwright-executor", model: "pi/task" },
+    { argv: ["verify", "--print-prompt"], agent: "specwright-verifier", model: "pi/task" },
+  ] as const;
+
+  for (const { argv, agent, model } of expected) {
+    const result = await runSpecwrightCommand(ctx, argv);
+    expect(result.ok).toBe(true);
+    expect(result.prompt).toContain(`spawn \`${agent}\``);
+    expect(result.prompt).toContain(`configured model \`${model}\``);
+  }
+});
+
 test("research prompt includes online research and fallback", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-prompts-"));
   const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };

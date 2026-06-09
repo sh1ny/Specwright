@@ -5,6 +5,7 @@ import { join } from "node:path";
 import specwrightOmpExtension from "../src/runtime/omp/extension";
 import { defaultConfig } from "../src/core/state";
 import { installOmpAdapter } from "../src/runtime/omp/install";
+import { runSpecwrightCommand } from "../src/core/commands";
 import { refreshStatus } from "../src/runtime/omp/status";
 import type { ExtensionApiLike, OmpCommandContextLike } from "../src/runtime/omp/types";
 
@@ -268,6 +269,25 @@ test("OMP adapter installs project-local extension files", async () => {
   expect(verifier).toContain("model: custom/verify");
   expect(verifier).toContain("tools: read,grep,find,lsp,bash,browser");
   expect(verifier).toContain("spawns: []");
+});
+
+test("specwright init installs default lifecycle agent models in OMP frontmatter", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-default-models-"));
+  const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const expected = [
+    ["specwright-researcher.md", "model: pi/task"],
+    ["specwright-planner.md", "model: pi/plan"],
+    ["specwright-executor.md", "model: pi/task"],
+    ["specwright-verifier.md", "model: pi/task"],
+  ] as const;
+
+  for (const [file, model] of expected) {
+    const agent = await readFile(join(cwd, ".omp/agents", file), "utf8");
+    expect(agent).toContain(model);
+    expect(agent).toContain("spawns: []");
+  }
 });
 
 test("OMP adapter can regenerate one agent without rewriting other artifacts", async () => {
