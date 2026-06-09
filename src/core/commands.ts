@@ -728,6 +728,9 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
     if (!change.tasks[args.task]) {
       return fail(`Task not found: ${args.task}`);
     }
+    if (syncResult.issues.length > 0) {
+      return fail(`Task sync issues: ${syncResult.issues.map(i => i.message).join("; ")}`);
+    }
     if (syncResult.changed) {
       await updateCachedChange(ctx.cwd, change);
     }
