@@ -309,62 +309,62 @@
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "planning",
-      "step": "plan",
+      "status": "executing",
+      "step": "execute",
       "createdAt": "2026-06-09T15:17:04.618Z",
-      "updatedAt": "2026-06-09T16:40:25.313Z",
+      "updatedAt": "2026-06-09T17:04:30.950Z",
       "tasks": {
         "T001": {
           "id": "T001",
-          "title": "Add model role config shape",
-          "status": "pending",
-          "updatedAt": "2026-06-09T15:20:49.223Z"
+          "title": "Add agent model config shape",
+          "status": "done",
+          "updatedAt": "2026-06-09T16:57:26.553Z"
         },
         "T002": {
           "id": "T002",
-          "title": "Expose model roles through config commands",
-          "status": "pending",
-          "updatedAt": "2026-06-09T15:20:49.223Z"
+          "title": "Expose agent model config commands",
+          "status": "done",
+          "updatedAt": "2026-06-09T16:57:26.553Z"
         },
         "T003": {
           "id": "T003",
           "title": "Render OMP agents from config",
-          "status": "pending",
-          "updatedAt": "2026-06-09T15:20:49.223Z"
+          "status": "done",
+          "updatedAt": "2026-06-09T16:57:26.553Z"
         },
         "T004": {
           "id": "T004",
-          "title": "Regenerate agents on model role changes",
-          "status": "pending",
-          "updatedAt": "2026-06-09T15:20:49.223Z"
+          "title": "Regenerate agents on model changes",
+          "status": "done",
+          "updatedAt": "2026-06-09T16:57:26.553Z"
         },
         "T005": {
           "id": "T005",
           "title": "Add lifecycle spawn strategy helper",
-          "status": "pending",
-          "updatedAt": "2026-06-09T15:20:49.223Z"
+          "status": "done",
+          "updatedAt": "2026-06-09T16:57:26.553Z"
         },
         "T006": {
           "id": "T006",
-          "title": "Wire spawn strategy into lifecycle prompts",
-          "status": "pending",
-          "updatedAt": "2026-06-09T15:20:49.223Z"
+          "title": "Wire routing into lifecycle prompts",
+          "status": "done",
+          "updatedAt": "2026-06-09T17:01:28.423Z"
         },
         "T007": {
           "id": "T007",
-          "title": "Verify default routing behavior",
-          "status": "pending",
-          "updatedAt": "2026-06-09T15:20:49.223Z"
+          "title": "Verify routed defaults end to end",
+          "status": "done",
+          "updatedAt": "2026-06-09T17:04:09.224Z"
         },
         "T008": {
           "id": "T008",
           "title": "Run focused quality gates",
-          "status": "pending",
-          "updatedAt": "2026-06-09T15:20:49.223Z"
+          "status": "done",
+          "updatedAt": "2026-06-09T17:06:16.110Z"
         }
       }
     }
   },
-  "updatedAt": "2026-06-09T16:40:25.313Z",
+  "updatedAt": "2026-06-09T17:06:16.110Z",
   "currentChange": "0008"
 }
