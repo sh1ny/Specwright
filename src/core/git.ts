@@ -206,7 +206,6 @@ async function readArtifact(cwd: string, change: ChangeState, file: string): Pro
 function isBoilerplateLine(line: string): boolean {
   const trimmed = line.trim();
   return (
-    trimmed === "" ||
     trimmed.startsWith("<!--") ||
     trimmed.startsWith("<frozen-after-approval") ||
     trimmed.startsWith("</frozen-after-approval") ||

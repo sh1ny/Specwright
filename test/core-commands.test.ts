@@ -297,7 +297,7 @@ test("phase checkpoint does not sync task metadata but stages state.json when ta
   const stateAfter = await readFile(join(cwd, ".specwright/state.json"), "utf8");
   expect(stateAfter).toBe(stateBefore);
   const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
-  expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([planPath, tasksPath, ".specwright/state.json"].sort());
+  expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([planPath, tasksPath].sort());
 });
 
 test("task checkpoint stages derived state when task sync changes cache", async () => {
@@ -317,7 +317,7 @@ test("task checkpoint stages derived state when task sync changes cache", async 
   const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
   expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([".specwright/state.json", "tracked.txt"].sort());
 });
-test("task checkpoint stages state.json even when only task metadata changed", async () => {
+test("task checkpoint commits tasks.md when only non-cached task metadata changed", async () => {
   const cwd = await initGitRepo("specwright-checkpoint-task-meta-");
   const ctx = testContext(cwd);
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
@@ -328,13 +328,13 @@ test("task checkpoint stages state.json even when only task metadata changed", a
   // First checkpoint — syncs task into state
   const checkpoint1 = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", "tracked.txt"]);
   expect(checkpoint1.ok).toBe(true);
-  // Edit metadata only (Files bullet), not checkbox or title
+  // Edit metadata only (Files bullet), not checkbox or title. Files metadata is not cached in state.
   await writeFile(join(cwd, tasksPath), "- [ ] T001: Build inventory\n  - Files: `other.txt`\n", "utf8");
-  // Second checkpoint — metadata-only change should still stage state.json because tasks.md is in files
+  // Second checkpoint commits the changed tasks.md; unchanged tracked.txt and unchanged state.json are not part of the git diff.
   const checkpoint2 = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", `${tasksPath},tracked.txt`]);
   expect(checkpoint2.ok).toBe(true);
   const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
-  expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([".specwright/state.json", tasksPath, "tracked.txt"].sort());
+  expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([tasksPath].sort());
 });
 test("task checkpoint fails when sync detects duplicate task IDs", async () => {
   const cwd = await initGitRepo("specwright-checkpoint-task-dup-");
@@ -351,7 +351,7 @@ test("task checkpoint fails when sync detects duplicate task IDs", async () => {
   const stateBefore = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
   const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", `${tasksPath},tracked.txt`]);
   expect(checkpoint.ok).toBe(false);
-  expect(checkpoint.summary).toContain("duplicate");
+  expect(checkpoint.summary).toContain("Duplicate");
   const stateAfter = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
   expect(stateAfter).toEqual(stateBefore);
 });
@@ -370,7 +370,7 @@ test("task checkpoint fails when sync detects malformed task lines", async () =>
   const stateBefore = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
   const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", `${tasksPath},tracked.txt`]);
   expect(checkpoint.ok).toBe(false);
-  expect(checkpoint.summary).toContain("malformed");
+  expect(checkpoint.summary).toContain("Malformed");
   const stateAfter = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
   expect(stateAfter).toEqual(stateBefore);
 });
@@ -644,7 +644,7 @@ test("verify reports SW009 for title drift even when tasks.md was edited", async
   const report = JSON.parse(result.summary);
   const sw009 = report.issues.filter((issue: { code: string }) => issue.code === "SW009");
   expect(sw009.length).toBeGreaterThan(0);
-  expect(sw009.some((issue: { message: string }) => issue.message.includes("title drift"))).toBe(true);
+  expect(sw009.some((issue: { message: string }) => issue.message.includes("title changed"))).toBe(true);
   // State should NOT have been updated with the drifted title
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
   expect(state.changes["0001"].tasks.T001.title).toBe("Build inventory");
@@ -1072,6 +1072,11 @@ test("verify on an explicit non-current change does not modify currentChange", a
   await writeFile(
     join(cwd, ".specwright/changes/0001-first/tasks.md"),
     "- [ ] T001: Build something\n",
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-first/intent.md"),
+    "# Intent\n\n## Goal\n\nVerify the first change.\n",
     "utf8",
   );
 

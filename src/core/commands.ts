@@ -725,14 +725,17 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
     const tasksMarkdown = await readFile(join(changeDir(ctx.cwd, change.id, change.slug), "tasks.md"), "utf8");
     const syncResult = syncChangeTasksFromMarkdown(change, tasksMarkdown, ctx.now());
     change = syncResult.change;
-    if (!change.tasks[args.task]) {
-      return fail(`Task not found: ${args.task}`);
-    }
     if (syncResult.issues.length > 0) {
       return fail(`Task sync issues: ${syncResult.issues.map(i => i.message).join("; ")}`);
     }
+    if (!change.tasks[args.task]) {
+      return fail(`Task not found: ${args.task}`);
+    }
     if (syncResult.changed) {
       await updateCachedChange(ctx.cwd, change);
+      if (!filesToStage.includes(stateFile)) {
+        filesToStage.push(stateFile);
+      }
     }
   }
 
@@ -816,7 +819,7 @@ async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<Com
       report.issues.push({
         level: "error",
         code: "SW009",
-        message: `Unreconciled task drift: ${issue.kind}: ${issue.message}`,
+        message: `Unreconciled task drift: ${issue.message}`,
         file: "tasks.md",
       });
     }
