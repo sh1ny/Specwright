@@ -575,7 +575,9 @@ function taskProgress(change: ChangeState | undefined): { total: number; done: n
 }
 
 async function commandDiscuss(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
-  const change = await updateChangeStep(ctx.cwd, await findCurrentChange(ctx.cwd, args.positionals[0]), "discussing", "discuss", ctx.now());
+  let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  change = await syncChangeTasksForCommand(ctx, change);
+  change = await updateChangeStep(ctx.cwd, change, "discussing", "discuss", ctx.now());
   const created = await ensureChangeArtifacts(ctx.cwd, change, ["discussion.md", "intent.md", "constraints.md", "decisions.md"]);
   const config = await loadConfig(ctx.cwd);
   const prompt = `${renderDiscussPrompt({ step: "discuss", change, config, cwd: ctx.cwd })}
@@ -583,11 +585,12 @@ async function commandDiscuss(ctx: CommandContext, args: ParsedArgs): Promise<Co
 ${renderCheckpointClause({ change, unit: { kind: "phase", id: "discuss" }, files: artifactPaths(change, ["discussion.md", "intent.md", "constraints.md", "decisions.md"]) })}`;
   return ok("Prepared discuss prompt.", { filesCreated: created, prompt });
 }
-
 async function commandResearch(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   const config = await loadConfig(ctx.cwd);
   const online = args.online ?? config.defaults.onlineResearch;
-  const change = await updateChangeStep(ctx.cwd, await findCurrentChange(ctx.cwd, args.positionals[0]), "researching", "research", ctx.now());
+  let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  change = await syncChangeTasksForCommand(ctx, change);
+  change = await updateChangeStep(ctx.cwd, change, "researching", "research", ctx.now());
   const created = await ensureChangeArtifacts(ctx.cwd, change, ["research.md", "sources.md", "evidence.md", "options.md"]);
   const prompt = `# Specwright Research: ${change.id}-${change.slug}
 
@@ -621,7 +624,8 @@ ${renderCheckpointClause({ change, unit: { kind: "phase", id: "research" }, file
 }
 
 async function commandPlan(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
-  const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  change = await syncChangeTasksForCommand(ctx, change);
   for (const file of ["intent.md", "research.md", "evidence.md"]) {
     if (!await exists(join(changeDir(ctx.cwd, change.id, change.slug), file))) {
       return fail(`Required artifact missing: ${file}`);
