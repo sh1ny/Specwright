@@ -26,6 +26,7 @@
 - Ran read-only scout `CoreStateScout` over core command/state/types/tests. It confirmed command-local task parsing, `upsertChange()` current-change coupling, checkpoint side effects, and missing drift tests.
 - Ran read-only scout `ValidationOmpScout` over validators and OMP runtime/tests. It confirmed validator task-shape coverage, lack of cache-vs-artifact drift validation, and OMP raw-cache status refresh.
 - Online research not used. `online=auto`; this change is mechanically constrained by local CLI/OMP state behavior and does not depend on external APIs, standards, dependency semantics, or recent third-party behavior.
+- Re-ran bounded local evidence confirmation after discuss reconfirmation. Current source still matches the recorded findings: `src/core/commands.ts:404-800`, `src/core/state.ts:82-127`, `src/core/validators.ts:101-199`, `src/runtime/omp/status.ts:1-18`, and `src/runtime/omp/extension.ts:34-37`.
 
 ## Decisions supported
 
