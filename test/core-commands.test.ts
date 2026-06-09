@@ -336,6 +336,44 @@ test("task checkpoint stages state.json even when only task metadata changed", a
   const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
   expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([".specwright/state.json", tasksPath, "tracked.txt"].sort());
 });
+test("task checkpoint fails when sync detects duplicate task IDs", async () => {
+  const cwd = await initGitRepo("specwright-checkpoint-task-dup-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  const tasksPath = ".specwright/changes/0001-inventory-crafting/tasks.md";
+  await writeFile(
+    join(cwd, tasksPath),
+    "- [ ] T001: Build inventory\n- [ ] T001: Duplicate inventory\n",
+    "utf8",
+  );
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+  const stateBefore = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", `${tasksPath},tracked.txt`]);
+  expect(checkpoint.ok).toBe(false);
+  expect(checkpoint.summary).toContain("duplicate");
+  const stateAfter = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(stateAfter).toEqual(stateBefore);
+});
+test("task checkpoint fails when sync detects malformed task lines", async () => {
+  const cwd = await initGitRepo("specwright-checkpoint-task-bad-line-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  const tasksPath = ".specwright/changes/0001-inventory-crafting/tasks.md";
+  await writeFile(
+    join(cwd, tasksPath),
+    "- [maybe] T001: Build inventory\n",
+    "utf8",
+  );
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+  const stateBefore = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", `${tasksPath},tracked.txt`]);
+  expect(checkpoint.ok).toBe(false);
+  expect(checkpoint.summary).toContain("malformed");
+  const stateAfter = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(stateAfter).toEqual(stateBefore);
+});
 
 test("base branch resolves from config, remote HEAD, then main fallback", async () => {
   const configuredCwd = await mkdtemp(join(tmpdir(), "specwright-base-config-"));
@@ -596,6 +634,20 @@ test("verify syncs task artifact changes before updating change status", async (
   expect(state.changes["0001"].step).toBe("verify");
   expect(state.changes["0001"].tasks.T001.status).toBe("done");
   expect(state.changes["0001"].tasks.T002.status).toBe("pending");
+});
+test("verify reports SW009 for title drift even when tasks.md was edited", async () => {
+  const { cwd, ctx, dir } = await createCommandSyncFixture("specwright-verify-drift-", taskListMarkdown(false, false));
+  expect((await runSpecwrightCommand(ctx, ["tasks"])).ok).toBe(true);
+  await writeFile(join(dir, "tasks.md"), taskListMarkdown(false, false).replace("Build inventory", "Build inventory v2"), "utf8");
+  const result = await runSpecwrightCommand(ctx, ["verify", "--json"]);
+  expect(result.ok).toBe(false);
+  const report = JSON.parse(result.summary);
+  const sw009 = report.issues.filter((issue: { code: string }) => issue.code === "SW009");
+  expect(sw009.length).toBeGreaterThan(0);
+  expect(sw009.some((issue: { message: string }) => issue.message.includes("title drift"))).toBe(true);
+  // State should NOT have been updated with the drifted title
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].tasks.T001.title).toBe("Build inventory");
 });
 
 test("handoff syncs task artifact changes before computing completion", async () => {
