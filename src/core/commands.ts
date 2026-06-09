@@ -23,6 +23,7 @@ import {
   loadState,
   saveConfig,
   saveState,
+  syncChangeTasksFromFile,
   upsertChange,
 } from "./state";
 import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, writePullRequestBodyFile } from "./git";
@@ -626,27 +627,6 @@ ${renderCheckpointClause({ change: updated, unit: { kind: "phase", id: "plan" },
   return ok("Prepared plan prompt.", { prompt });
 }
 
-function parseTasks(markdown: string, previous: Record<string, TaskState>, now: Date): Record<string, TaskState> {
-  const tasks: Record<string, TaskState> = {};
-  for (const line of markdown.split(/\r?\n/)) {
-    const match = /^\s*- \[([ xX])] (T\d{3}):\s*(.+?)\s*$/.exec(line);
-    if (!match) continue;
-    const id = match[2] ?? "";
-    const checked = (match[1] ?? "") !== " ";
-    const prior = previous[id];
-    const status = checked ? "done" : prior?.status === "in-progress" || prior?.status === "blocked" ? prior.status : "pending";
-    tasks[id] = { id, title: match[3] ?? "", status, updatedAt: now.toISOString() };
-  }
-  return tasks;
-}
-
-async function parseTasksFromFile(cwd: string, change: ChangeState, now: Date): Promise<ChangeState> {
-  const tasksPath = join(changeDir(cwd, change.id, change.slug), "tasks.md");
-  const markdown = await readFile(tasksPath, "utf8");
-  const updated: ChangeState = { ...change, tasks: parseTasks(markdown, change.tasks, now), updatedAt: now.toISOString() };
-  await upsertChange(cwd, updated);
-  return updated;
-}
 
 function artifactPaths(change: ChangeState, files: readonly string[]): string[] {
   const dir = `.specwright/changes/${change.id}-${change.slug}`;
@@ -677,7 +657,7 @@ function taskFilesFromMarkdown(markdown: string, taskId: string): string[] {
 async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
   if (Object.keys(change.tasks).length === 0) {
-    change = await parseTasksFromFile(ctx.cwd, change, ctx.now());
+    change = (await syncChangeTasksFromFile(ctx.cwd, change, ctx.now())).change;
   }
   if (args.phase && args.task) {
     return fail("Specify exactly one of --phase or --task.");
@@ -716,7 +696,7 @@ async function commandTasks(ctx: CommandContext, args: ParsedArgs): Promise<Comm
   if (!await exists(join(changeDir(ctx.cwd, change.id, change.slug), "plan.md"))) {
     return fail("Required artifact missing: plan.md");
   }
-  const updated = await parseTasksFromFile(ctx.cwd, change, ctx.now());
+  const updated = (await syncChangeTasksFromFile(ctx.cwd, change, ctx.now())).change;
   const config = await loadConfig(ctx.cwd);
   const prompt = `# Specwright Tasks: ${updated.id}-${updated.slug}
 
@@ -747,7 +727,7 @@ async function selectedTask(change: ChangeState, taskId: string | undefined): Pr
 async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
   if (Object.keys(change.tasks).length === 0) {
-    change = await parseTasksFromFile(ctx.cwd, change, ctx.now());
+    change = (await syncChangeTasksFromFile(ctx.cwd, change, ctx.now())).change;
   }
   const task = await selectedTask(change, args.task);
   if (!task) {

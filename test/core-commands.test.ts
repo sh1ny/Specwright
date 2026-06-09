@@ -15,7 +15,8 @@ import {
   stageFiles,
   writePullRequestBodyFile,
 } from "../src/core/git";
-import type { ChangeState, SpecwrightConfig } from "../src/core/types";
+import { syncChangeTasksFromMarkdown } from "../src/core/state";
+import type { ChangeState, SpecwrightConfig, TaskSyncIssueKind } from "../src/core/types";
 
 function testContext(cwd: string) {
   return { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
@@ -359,6 +360,49 @@ function changeFixture(id: string, slug: string, title: string): ChangeState {
     tasks: {},
   };
 }
+test("task artifact sync preserves runtime statuses only for matching unchecked tasks", () => {
+  const now = new Date("2026-06-08T01:00:00.000Z");
+  const change: ChangeState = {
+    ...changeFixture("0001", "inventory-crafting", "Inventory Crafting"),
+    tasks: {
+      T001: { id: "T001", title: "Build inventory", status: "in-progress", updatedAt: "old" },
+      T002: { id: "T002", title: "Review recipes", status: "blocked", updatedAt: "old" },
+      T003: { id: "T003", title: "Ship inventory", status: "done", updatedAt: "old" },
+    },
+  };
+
+  const result = syncChangeTasksFromMarkdown(change, [
+    "- [ ] T001: Build inventory",
+    "- [ ] T002: Review crafting recipes",
+    "- [ ] T003: Ship inventory",
+    "- [x] T004: Verify inventory",
+  ].join("\n"), now);
+
+  expect(result.change.tasks.T001?.status).toBe("in-progress");
+  expect(result.change.tasks.T002?.status).toBe("pending");
+  expect(result.change.tasks.T003?.status).toBe("pending");
+  expect(result.change.tasks.T004?.status).toBe("done");
+  expect(result.change.tasks.T002?.title).toBe("Review crafting recipes");
+  expect(result.issues.map((issue) => issue.kind)).toEqual(["title-drift"]);
+});
+
+test("task artifact sync reports malformed and duplicate task lines deterministically", () => {
+  const result = syncChangeTasksFromMarkdown(changeFixture("0001", "inventory-crafting", "Inventory Crafting"), [
+    "- [ ] T001: Build inventory",
+    "- [x] T001: Duplicate inventory",
+    "- [maybe] T002: Bad checkbox",
+    "- [ ] T003 Missing colon",
+    "- [X] T004: Verify inventory",
+  ].join("\n"), new Date("2026-06-08T01:00:00.000Z"));
+  const issueKinds: TaskSyncIssueKind[] = result.issues.map((issue) => issue.kind);
+
+  expect(Object.keys(result.change.tasks)).toEqual(["T001", "T004"]);
+  expect(result.change.tasks.T001?.title).toBe("Build inventory");
+  expect(result.change.tasks.T001?.status).toBe("pending");
+  expect(result.change.tasks.T004?.status).toBe("done");
+  expect(issueKinds).toEqual(["duplicate-task-id", "malformed-task-line", "malformed-task-line"]);
+});
+
 
 test("pull request body is generated from populated Specwright artifacts", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-pr-body-populated-"));
