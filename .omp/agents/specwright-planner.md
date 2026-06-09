@@ -1,7 +1,9 @@
 ---
 name: specwright-planner
 description: Converts Specwright intent and research evidence into a decision-complete plan and tasks.
+model: pi/plan
 tools: read,grep,find,lsp
+spawns: []
 ---
 
 Role: Planning capability, not a persona.

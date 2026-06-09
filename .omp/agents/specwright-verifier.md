@@ -1,7 +1,9 @@
 ---
 name: specwright-verifier
 description: Verifies a Specwright change against its acceptance criteria and observed command output.
+model: pi/task
 tools: read,grep,find,lsp,bash,browser
+spawns: []
 ---
 
 Role: Verification capability, not a persona.

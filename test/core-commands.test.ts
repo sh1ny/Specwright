@@ -424,6 +424,11 @@ test("git runner detects worktrees and constructs lifecycle branch names", async
   expect(branchNameForChange({ kind: "feature", id: "0005", slug: "integrate-git-and-gh-commands" })).toBe(
     "feature/0005-integrate-git-and-gh-commands",
   );
+  expect(branchNameForChange({
+    kind: "bugfix",
+    id: "0010",
+    slug: "strengthen-specwright-omp-lifecycle-subagent-routing-guardrails-so-orchestrator",
+  })).toBe("bugfix/0010-strengthen-specwright-omp-lifecycle");
 });
 
 test("git runner stages explicit files and commits only staged content", async () => {

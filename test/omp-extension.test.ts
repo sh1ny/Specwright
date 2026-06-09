@@ -40,7 +40,7 @@ test("OMP extension registers and handles specwright command", async () => {
   });
 
   expect(notifications.at(-1)).toContain("Specwright ·");
-  expect(statuses.at(-1)).toContain("Specwright · none · idle");
+  expect(statuses.at(-1)).toBeUndefined();
   expect(sentMessages).toHaveLength(0);
 });
 
@@ -153,6 +153,63 @@ test("concurrent refreshStatus calls do not throw ENOENT on temp file rename", a
     expect(result.status).toBe("fulfilled");
   }
   expect(statuses.at(-1)).toContain("Specwright · 0001 · executing · tasks=1/1");
+});
+
+test("concurrent refreshStatus calls update each waiting OMP context", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-concurrent-contexts-"));
+  const changeDir = join(cwd, ".specwright/changes/0001-drift");
+  await mkdir(changeDir, { recursive: true });
+  const taskCount = 999;
+  const tasksMarkdown = `# Tasks\n\n${Array.from({ length: taskCount }, (_, index) => `- [x] T${String(index + 1).padStart(3, "0")}: Concurrent context refresh ${index + 1}`).join("\n")}\n`;
+  await writeFile(join(changeDir, "tasks.md"), tasksMarkdown, "utf8");
+  await writeFile(join(cwd, ".specwright/state.json"), `${JSON.stringify({
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "drift",
+        title: "Drift",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "executing",
+        step: "execute",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: {
+            id: "T001",
+            title: "Concurrent context refresh",
+            status: "pending",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }, null, 2)}\n`, "utf8");
+
+  const firstStatuses: Array<string | undefined> = [];
+  const secondStatuses: Array<string | undefined> = [];
+
+  await Promise.all([
+    refreshStatus({}, {
+      cwd,
+      ui: {
+        setStatus(_key, text) { firstStatuses.push(text); },
+      },
+    }),
+    refreshStatus({}, {
+      cwd,
+      ui: {
+        setStatus(_key, text) { secondStatuses.push(text); },
+      },
+    }),
+  ]);
+
+  expect(firstStatuses.at(-1)).toContain(`Specwright · 0001 · executing · tasks=${taskCount}/${taskCount}`);
+  expect(secondStatuses.at(-1)).toContain(`Specwright · 0001 · executing · tasks=${taskCount}/${taskCount}`);
 });
 
 test("OMP extension sends generated prompts as immediate user messages when idle", async () => {

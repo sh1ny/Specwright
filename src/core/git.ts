@@ -88,8 +88,19 @@ export async function gitWorktreeRoot(cwd: string): Promise<string | undefined> 
   return root === "" ? undefined : root;
 }
 
+const MAX_BRANCH_NAME_LENGTH = 48;
+
+function truncateSlugForBranch(prefix: string, slug: string): string {
+  const available = MAX_BRANCH_NAME_LENGTH - prefix.length;
+  if (available <= 0 || slug.length <= available) {
+    return slug;
+  }
+  return slug.slice(0, available).replace(/-+$/g, "");
+}
+
 export function branchNameForChange(change: Pick<ChangeState, "kind" | "id" | "slug">): string {
-  return `${change.kind}/${change.id}-${change.slug}`;
+  const prefix = `${change.kind}/${change.id}-`;
+  return `${prefix}${truncateSlugForBranch(prefix, change.slug)}`;
 }
 
 export async function switchToBranch(cwd: string, branch: string): Promise<ProcessRunResult> {
