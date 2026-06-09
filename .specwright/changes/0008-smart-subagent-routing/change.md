@@ -11,3 +11,4 @@
 
 ## Summary
 
+Teach Specwright's OMP integration to route lifecycle work through dedicated subagents with configurable model roles. The default routing is planner -> `pi/plan`; researcher, executor, and verifier -> `pi/task`. The implementation keeps OMP as the runtime boundary: Specwright installs OMP-compatible agent definitions and prompt instructions, rather than trying to manage subagent execution directly.
