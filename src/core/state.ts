@@ -239,7 +239,7 @@ export async function syncChangeTasksFromFileIfPresent(cwd: string, change: Chan
     throw error;
   }
   const result = syncChangeTasksFromMarkdown(change, markdown, now);
-  if (result.changed) {
+  if (result.changed && result.issues.length === 0) {
     await updateCachedChange(cwd, result.change);
   }
   return result;
