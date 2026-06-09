@@ -84,6 +84,20 @@ test("invalid enum option values fail and valid values still work", async () => 
   expect(validOnline.ok).toBe(true);
 });
 
+test("init writes default lifecycle agent model config", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-agent-config-defaults-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const config = await readConfig(cwd);
+  expect(config.agents).toEqual({
+    researcher: { model: "pi/task" },
+    planner: { model: "pi/plan" },
+    executor: { model: "pi/task" },
+    verifier: { model: "pi/task" },
+  });
+});
+
 test("config get returns supported scalar and array values", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-config-get-"));
   const ctx = testContext(cwd);
@@ -96,6 +110,17 @@ test("config get returns supported scalar and array values", async () => {
   const enabledPacks = await runSpecwrightCommand(ctx, ["config", "get", "packs.enabled"]);
   expect(enabledPacks.ok).toBe(true);
   expect(JSON.parse(enabledPacks.summary)).toEqual(["core"]);
+
+  for (const [key, expected] of [
+    ["agents.researcher.model", "pi/task"],
+    ["agents.planner.model", "pi/plan"],
+    ["agents.executor.model", "pi/task"],
+    ["agents.verifier.model", "pi/task"],
+  ] as const) {
+    const model = await runSpecwrightCommand(ctx, ["config", "get", key]);
+    expect(model.ok).toBe(true);
+    expect(model.summary).toBe(expected);
+  }
 
   const autoCommit = await runSpecwrightCommand(ctx, ["config", "get", "workflow.autoCommit"]);
   expect(autoCommit.ok).toBe(true);
@@ -148,6 +173,56 @@ test("config set validates and persists supported value types", async () => {
   expect(config.workflow.remote).toBe("upstream");
 });
 
+test("config set persists agent model values without touching unrelated config", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-agent-config-set-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const before = await readConfig(cwd);
+  const result = await runSpecwrightCommand(ctx, ["config", "set", "agents.planner.model", "custom/plan-model"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toBe("Set agents.planner.model.");
+
+  const after = await readConfig(cwd);
+  expect(after.agents.planner.model).toBe("custom/plan-model");
+  expect(after.agents.researcher).toEqual(before.agents.researcher);
+  expect(after.agents.executor).toEqual(before.agents.executor);
+  expect(after.agents.verifier).toEqual(before.agents.verifier);
+  expect(after.project).toEqual(before.project);
+  expect(after.defaults).toEqual(before.defaults);
+  expect(after.packs).toEqual(before.packs);
+  expect(after.runtimes).toEqual(before.runtimes);
+  expect(after.workflow).toEqual(before.workflow);
+});
+
+test("config set regenerates changed OMP agent models when OMP is enabled", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-agent-regenerate-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const packagePath = join(cwd, ".omp/extensions/specwright/package.json");
+  const rulePath = join(cwd, ".omp/rules/specwright-workflow.md");
+  const researcherPath = join(cwd, ".omp/agents/specwright-researcher.md");
+  const plannerPath = join(cwd, ".omp/agents/specwright-planner.md");
+  const packageBefore = await readFile(packagePath, "utf8");
+  const ruleBefore = await readFile(rulePath, "utf8");
+  const researcherBefore = await readFile(researcherPath, "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["config", "set", "agents.planner.model", "custom/plan-model"]);
+  expect(result.ok).toBe(true);
+  expect(result.filesUpdated).toContain(".specwright/config.json");
+  expect(result.filesUpdated).toContain(".omp/agents/specwright-planner.md");
+  expect(result.filesUpdated).not.toContain(".omp/extensions/specwright/package.json");
+  expect(result.filesUpdated).not.toContain(".omp/rules/specwright-workflow.md");
+  expect(result.filesUpdated).not.toContain(".omp/agents/specwright-researcher.md");
+
+  const plannerAfter = await readFile(plannerPath, "utf8");
+  expect(plannerAfter).toContain("model: custom/plan-model");
+  expect(await readFile(packagePath, "utf8")).toBe(packageBefore);
+  expect(await readFile(rulePath, "utf8")).toBe(ruleBefore);
+  expect(await readFile(researcherPath, "utf8")).toBe(researcherBefore);
+});
+
 test("config set rejects invalid input without changing existing config", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-config-invalid-"));
   const ctx = testContext(cwd);
@@ -168,6 +243,8 @@ test("config set rejects invalid input without changing existing config", async 
     ["config", "set", "runtimes.omp.enabled", "yes"],
     ["config", "set", "packs.enabled", "not-json"],
     ["config", "set", "packs.enabled", "[\"core\",3]"],
+    ["config", "set", "agents.executor.model", ""],
+    ["config", "set", "agents.executor.model", "   "],
     ["config", "set", "unknown.key", "value"],
     ["config", "set", "workflow.autoCommit", "yes"],
     ["config", "set", "workflow.publishMode", "maybe"],

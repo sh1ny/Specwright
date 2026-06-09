@@ -301,8 +301,70 @@
           "updatedAt": "2026-06-09T14:51:38.816Z"
         }
       }
+    },
+    "0008": {
+      "id": "0008",
+      "slug": "smart-subagent-routing",
+      "title": "Smart subagent routing",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "done",
+      "step": "handoff",
+      "createdAt": "2026-06-09T15:17:04.618Z",
+      "updatedAt": "2026-06-09T17:20:06.392Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Add agent model config shape",
+          "status": "done",
+          "updatedAt": "2026-06-09T16:57:26.553Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Expose agent model config commands",
+          "status": "done",
+          "updatedAt": "2026-06-09T16:57:26.553Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Render OMP agents from config",
+          "status": "done",
+          "updatedAt": "2026-06-09T16:57:26.553Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Regenerate agents on model changes",
+          "status": "done",
+          "updatedAt": "2026-06-09T16:57:26.553Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Add lifecycle spawn strategy helper",
+          "status": "done",
+          "updatedAt": "2026-06-09T16:57:26.553Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Wire routing into lifecycle prompts",
+          "status": "done",
+          "updatedAt": "2026-06-09T17:01:28.423Z"
+        },
+        "T007": {
+          "id": "T007",
+          "title": "Verify routed defaults end to end",
+          "status": "done",
+          "updatedAt": "2026-06-09T17:04:09.224Z"
+        },
+        "T008": {
+          "id": "T008",
+          "title": "Run focused quality gates",
+          "status": "done",
+          "updatedAt": "2026-06-09T17:06:16.110Z"
+        }
+      }
     }
   },
-  "updatedAt": "2026-06-09T14:51:38.816Z",
-  "currentChange": "0007"
+  "updatedAt": "2026-06-09T17:20:06.392Z",
+  "currentChange": "0008"
 }

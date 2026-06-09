@@ -1,6 +1,6 @@
 import { access, cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { installOmpAdapter } from "../runtime/omp/install";
 import { writeJsonFile } from "./json";
@@ -13,7 +13,7 @@ import {
   specwrightDir,
   statePath,
 } from "./paths";
-import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderSubagentRetryClause } from "./prompts";
+import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderLifecycleSpawnStrategy, renderSubagentRetryClause } from "./prompts";
 import { slugify, nextChangeId } from "./slug";
 import {
   defaultConfig,
@@ -37,6 +37,7 @@ import type {
   CommandResult,
   OnlineResearchMode,
   SpecwrightConfig,
+  SpecwrightAgentName,
   SpecwrightMode,
   WorkflowPublishMode,
   TaskState,
@@ -264,6 +265,30 @@ const CONFIG_KEY_DESCRIPTORS = {
     parse: parsePositiveIntegerValue,
     format: formatConfigValue,
   },
+  "agents.researcher.model": {
+    get: (config) => config.agents.researcher.model,
+    set: (config, value) => ({ ...config, agents: { ...config.agents, researcher: { ...config.agents.researcher, model: value as string } } }),
+    parse: parseStringValue,
+    format: formatConfigValue,
+  },
+  "agents.planner.model": {
+    get: (config) => config.agents.planner.model,
+    set: (config, value) => ({ ...config, agents: { ...config.agents, planner: { ...config.agents.planner, model: value as string } } }),
+    parse: parseStringValue,
+    format: formatConfigValue,
+  },
+  "agents.executor.model": {
+    get: (config) => config.agents.executor.model,
+    set: (config, value) => ({ ...config, agents: { ...config.agents, executor: { ...config.agents.executor, model: value as string } } }),
+    parse: parseStringValue,
+    format: formatConfigValue,
+  },
+  "agents.verifier.model": {
+    get: (config) => config.agents.verifier.model,
+    set: (config, value) => ({ ...config, agents: { ...config.agents, verifier: { ...config.agents.verifier, model: value as string } } }),
+    parse: parseStringValue,
+    format: formatConfigValue,
+  },
   "packs.roots": {
     get: (config) => config.packs.roots,
     set: (config, value) => ({ ...config, packs: { ...config.packs, roots: value as string[] } }),
@@ -320,6 +345,16 @@ function getConfigKeyDescriptor(key: string): ConfigKeyDescriptor | undefined {
     return undefined;
   }
   return CONFIG_KEY_DESCRIPTORS[key as keyof typeof CONFIG_KEY_DESCRIPTORS];
+}
+
+function agentNameForModelConfigKey(key: string): SpecwrightAgentName | undefined {
+  switch (key) {
+    case "agents.researcher.model": return "researcher";
+    case "agents.planner.model": return "planner";
+    case "agents.executor.model": return "executor";
+    case "agents.verifier.model": return "verifier";
+    default: return undefined;
+  }
 }
 
 
@@ -400,7 +435,7 @@ async function commandInit(ctx: CommandContext, args: ParsedArgs): Promise<Comma
 
   updated.push(...await copyBuiltInCorePack(ctx.cwd, args.force));
   created.push(...await ensureProjectFiles(ctx.cwd));
-  updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force }));
+  updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force, config: await loadConfig(ctx.cwd) }));
   return ok("Initialized Specwright in .specwright and installed OMP adapter in .omp.", { filesCreated: created, filesUpdated: updated });
 }
 
@@ -598,6 +633,8 @@ online=${online}
 
 ${renderContextBudget(config)}
 
+${renderLifecycleSpawnStrategy({ step: "research", config })}
+
 Read first:
 - .specwright/changes/${change.id}-${change.slug}/intent.md
 - .specwright/changes/${change.id}-${change.slug}/constraints.md
@@ -636,6 +673,8 @@ async function commandPlan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   const prompt = `# Specwright Plan: ${updated.id}-${updated.slug}
 
 ${renderContextBudget(config)}
+
+${renderLifecycleSpawnStrategy({ step: "plan", config })}
 
 Read first:
 - .specwright/changes/${updated.id}-${updated.slug}/intent.md
@@ -792,7 +831,8 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
   await updateCachedChange(ctx.cwd, updated);
   const tasksMarkdown = await readFile(join(changeDir(ctx.cwd, updated.id, updated.slug), "tasks.md"), "utf8");
   const taskFiles = taskFilesFromMarkdown(tasksMarkdown, task.id);
-  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
+  const config = await loadConfig(ctx.cwd);
+  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\n${renderLifecycleSpawnStrategy({ step: "execute", config })}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
   return ok(`Prepared execute prompt for ${task.id}.`, { prompt });
 }
 
@@ -837,7 +877,7 @@ async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<Com
   }
   const updated = await updateChangeStep(ctx.cwd, syncResult ? syncResult.change : change, "verifying", "verify", ctx.now());
   const config = await loadConfig(ctx.cwd);
-  const prompt = `# Specwright Verify: ${updated.id}-${updated.slug}\n\n${renderContextBudget(config)}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n- .specwright/changes/${updated.id}-${updated.slug}/verify.md\n\nRun the task-specific checks listed in tasks.md and update verify.md with observed command output.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "phase", id: "verify" }, files: artifactPaths(updated, ["verify.md", "tasks.md"]) })}`;
+  const prompt = `# Specwright Verify: ${updated.id}-${updated.slug}\n\n${renderContextBudget(config)}\n\n${renderLifecycleSpawnStrategy({ step: "verify", config })}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n- .specwright/changes/${updated.id}-${updated.slug}/verify.md\n\nRun the task-specific checks listed in tasks.md and update verify.md with observed command output.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "phase", id: "verify" }, files: artifactPaths(updated, ["verify.md", "tasks.md"]) })}`;
   return ok(args.json ? JSON.stringify(report, null, 2) : "Specwright validators passed.", { filesUpdated: [verifyPath], prompt });
 }
 
@@ -918,7 +958,12 @@ async function commandConfig(ctx: CommandContext, args: ParsedArgs): Promise<Com
       return fail(error instanceof Error ? error.message : String(error));
     }
     await saveConfig(ctx.cwd, updated);
-    return ok(`Set ${key}.`, { filesUpdated: [configPath(ctx.cwd)] });
+    const filesUpdated = [relative(ctx.cwd, configPath(ctx.cwd))];
+    const updatedAgent = agentNameForModelConfigKey(key);
+    if (updatedAgent && updated.runtimes.omp.enabled) {
+      filesUpdated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: false, config: updated, regenerateAgents: [updatedAgent] }));
+    }
+    return ok(`Set ${key}.`, { filesUpdated });
   }
 
   return fail("Usage: specwright config get <key> | specwright config set <key> <value>");
