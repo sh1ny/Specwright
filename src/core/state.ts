@@ -145,8 +145,8 @@ export function unreconciledTaskDriftIssues(
   const parsed = parseTaskArtifact(markdown);
   const issues: UnreconciledTaskDriftIssue[] = parsed.issues.map((issue) => ({
     kind: issue.kind,
-    line: issue.line,
     message: issue.message,
+    ...(issue.line !== undefined ? { line: issue.line } : {}),
     ...(issue.taskId ? { taskId: issue.taskId } : {}),
   }));
   const artifactIds = new Set(parsed.tasks.map((task) => task.id));

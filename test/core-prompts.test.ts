@@ -53,7 +53,7 @@ test("fresh init defaults route lifecycle prompts to matching agents and models"
   ] as const;
 
   for (const { argv, agent, model } of expected) {
-    const result = await runSpecwrightCommand(ctx, argv);
+    const result = await runSpecwrightCommand(ctx, [...argv]);
     expect(result.ok).toBe(true);
     expect(result.prompt).toContain(`spawn \`${agent}\``);
     expect(result.prompt).toContain(`configured model \`${model}\``);

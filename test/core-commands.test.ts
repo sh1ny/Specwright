@@ -116,7 +116,7 @@ test("config get returns supported scalar and array values", async () => {
     ["agents.planner.model", "pi/plan"],
     ["agents.executor.model", "pi/task"],
     ["agents.verifier.model", "pi/task"],
-  ]) {
+  ] as const) {
     const model = await runSpecwrightCommand(ctx, ["config", "get", key]);
     expect(model.ok).toBe(true);
     expect(model.summary).toBe(expected);
