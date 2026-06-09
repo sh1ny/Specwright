@@ -25,8 +25,17 @@ test("lifecycle spawn strategy routes each phase to configured agent model", () 
     expect(strategy).toContain(`spawn \`${details.agent}\``);
     expect(strategy).toContain(`configured model \`${details.model}\``);
     expect(strategy).toContain(`\`${details.key}\``);
+    expect(strategy).toContain("lifecycle orchestrator");
+    expect(strategy).toContain("first operational action");
+    expect(strategy).toContain(`While the \`${details.agent}\` subagent is active, do not perform implementation-file reads`);
+    expect(strategy).toContain("code or artifact edits");
+    expect(strategy).toContain("test runs");
+    expect(strategy).toContain("artifact or status updates");
+    expect(strategy).toContain("completion claims");
+    expect(strategy).toContain("report a visible blocker naming the missing component and stop");
+    expect(strategy).toContain("do not proceed with direct inline work");
+    expect(strategy).not.toContain("do the work directly in this agent with the same rules instead of blocking");
     expect(strategy).toContain(`Wait for the \`${details.agent}\` result`);
-    expect(strategy).toContain("do the work directly in this agent");
   }
 });
 

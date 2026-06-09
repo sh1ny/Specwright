@@ -17,11 +17,13 @@ export function renderLifecycleSpawnStrategy(input: {
   const agentName = `specwright-${agent}`;
   const model = input.config.agents[agent].model;
   return `Lifecycle spawn strategy:
-- Use OMP's \`task\` tool to spawn \`${agentName}\` for the ${input.step} lifecycle work.
+- You are the lifecycle orchestrator for this ${input.step} phase.
+- Your first operational action is to use OMP's \`task\` tool to spawn \`${agentName}\` for the ${input.step} lifecycle work.
 - Route to configured model \`${model}\` from \`agents.${agent}.model\`.
 - Pass the full current prompt as the subagent assignment, including read-first files, rules, acceptance, and checkpoint instructions.
+- While the \`${agentName}\` subagent is active, do not perform implementation-file reads, code or artifact edits, test runs, artifact or status updates, or completion claims.
 - Wait for the \`${agentName}\` result before editing artifacts, updating status, or reporting completion.
-- If the \`task\` tool, \`${agentName}\`, or model \`${model}\` is unavailable, do the work directly in this agent with the same rules instead of blocking.
+- If the \`task\` tool, \`${agentName}\`, or model \`${model}\` is unavailable, report a visible blocker naming the missing component and stop; do not proceed with direct inline work.
 - Do not ask the user to switch agents manually and do not spawn recursive lifecycle agents.`;
 }
 
