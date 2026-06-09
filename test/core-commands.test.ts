@@ -15,7 +15,7 @@ import {
   stageFiles,
   writePullRequestBodyFile,
 } from "../src/core/git";
-import { syncChangeTasksFromMarkdown } from "../src/core/state";
+import { syncChangeTasksFromFileIfPresent, syncChangeTasksFromMarkdown, upsertChange } from "../src/core/state";
 import type { ChangeState, SpecwrightConfig, TaskSyncIssueKind } from "../src/core/types";
 
 function testContext(cwd: string) {
@@ -282,25 +282,22 @@ test("checkpoint and commit aliases stage scoped files with deterministic messag
   expect(status.stdout).not.toContain("phase.txt");
 });
 
-test("phase checkpoint does not sync task metadata or stage derived state", async () => {
+test("phase checkpoint does not sync task metadata but stages state.json when tasks.md is present", async () => {
   const cwd = await initGitRepo("specwright-checkpoint-phase-no-sync-");
   const ctx = testContext(cwd);
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
   expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
-
   const planPath = ".specwright/changes/0001-inventory-crafting/plan.md";
   const tasksPath = ".specwright/changes/0001-inventory-crafting/tasks.md";
   await writeFile(join(cwd, planPath), "# Plan\n\nUse evidence.\n", "utf8");
   await writeFile(join(cwd, tasksPath), "- [ ] T001: Build inventory\n  - Files: `tracked.txt`\n", "utf8");
   const stateBefore = await readFile(join(cwd, ".specwright/state.json"), "utf8");
-
   const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--phase", "plan", "--files", `${planPath},${tasksPath}`]);
   expect(checkpoint.ok).toBe(true);
-
   const stateAfter = await readFile(join(cwd, ".specwright/state.json"), "utf8");
   expect(stateAfter).toBe(stateBefore);
   const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
-  expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([planPath, tasksPath].sort());
+  expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([planPath, tasksPath, ".specwright/state.json"].sort());
 });
 
 test("task checkpoint stages derived state when task sync changes cache", async () => {
@@ -319,6 +316,25 @@ test("task checkpoint stages derived state when task sync changes cache", async 
   expect(state.changes["0001"].tasks.T001.status).toBe("pending");
   const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
   expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([".specwright/state.json", "tracked.txt"].sort());
+});
+test("task checkpoint stages state.json even when only task metadata changed", async () => {
+  const cwd = await initGitRepo("specwright-checkpoint-task-meta-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  const tasksPath = ".specwright/changes/0001-inventory-crafting/tasks.md";
+  await writeFile(join(cwd, tasksPath), "- [ ] T001: Build inventory\n  - Files: `tracked.txt`\n", "utf8");
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+  // First checkpoint — syncs task into state
+  const checkpoint1 = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", "tracked.txt"]);
+  expect(checkpoint1.ok).toBe(true);
+  // Edit metadata only (Files bullet), not checkbox or title
+  await writeFile(join(cwd, tasksPath), "- [ ] T001: Build inventory\n  - Files: `other.txt`\n", "utf8");
+  // Second checkpoint — metadata-only change should still stage state.json because tasks.md is in files
+  const checkpoint2 = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", `${tasksPath},tracked.txt`]);
+  expect(checkpoint2.ok).toBe(true);
+  const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
+  expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([".specwright/state.json", tasksPath, "tracked.txt"].sort());
 });
 
 test("base branch resolves from config, remote HEAD, then main fallback", async () => {
@@ -456,6 +472,36 @@ test("syncChangeTasksFromMarkdown emits cached-task-without-artifact issues", ()
   expect(result.issues[0]?.taskId).toBe("T002");
   expect(result.issues[0]?.message).toContain("T002");
 });
+test("syncChangeTasksFromFileIfPresent does not call updateCachedChange when sync returns issues", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-sync-dirty-no-persist-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+
+  let change = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")).changes["0001"];
+  change = {
+    ...change,
+    tasks: {
+      T001: { id: "T001", title: "Build inventory", status: "in-progress", updatedAt: "old" },
+      T002: { id: "T002", title: "Review recipes", status: "blocked", updatedAt: "old" },
+    },
+  };
+  await upsertChange(cwd, change);
+
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"),
+    "# Tasks\n\n- [ ] T001: Build inventory\n- [ ] T001: Duplicate\n",
+    "utf8",
+  );
+
+  const result = await syncChangeTasksFromFileIfPresent(cwd, change, ctx.now());
+  expect(result.issues.length).toBeGreaterThan(0);
+  expect(result.issues.map((issue) => issue.kind)).toContain("duplicate-task-id");
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].tasks.T001.title).toBe("Build inventory");
+  expect(state.changes["0001"].tasks.T002.title).toBe("Review recipes");
+});
 test("task file sync updates a non-current change without changing currentChange", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-passive-task-sync-"));
   const ctx = testContext(cwd);
@@ -566,6 +612,44 @@ test("handoff syncs task artifact changes before computing completion", async ()
   expect(state.changes["0001"].step).toBe("handoff");
   expect(state.changes["0001"].tasks.T001.status).toBe("done");
   expect(state.changes["0001"].tasks.T002.status).toBe("done");
+});
+test("discuss resyncs task artifact changes before rendering prompt", async () => {
+  const { cwd, ctx, dir } = await createCommandSyncFixture("specwright-discuss-sync-", taskListMarkdown(false, false));
+  expect((await runSpecwrightCommand(ctx, ["tasks"])).ok).toBe(true);
+  await writeFile(join(dir, "tasks.md"), taskListMarkdown(true, false), "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["discuss"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].tasks.T001.status).toBe("done");
+  expect(state.changes["0001"].tasks.T002.status).toBe("pending");
+});
+
+test("research resyncs task artifact changes before rendering prompt", async () => {
+  const { cwd, ctx, dir } = await createCommandSyncFixture("specwright-research-sync-", taskListMarkdown(false, false));
+  expect((await runSpecwrightCommand(ctx, ["tasks"])).ok).toBe(true);
+  await writeFile(join(dir, "tasks.md"), taskListMarkdown(true, false), "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["research"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].tasks.T001.status).toBe("done");
+  expect(state.changes["0001"].tasks.T002.status).toBe("pending");
+});
+
+test("plan resyncs task artifact changes before rendering prompt", async () => {
+  const { cwd, ctx, dir } = await createCommandSyncFixture("specwright-plan-sync-", taskListMarkdown(false, false));
+  expect((await runSpecwrightCommand(ctx, ["tasks"])).ok).toBe(true);
+  await writeFile(join(dir, "tasks.md"), taskListMarkdown(true, false), "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["plan"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].tasks.T001.status).toBe("done");
+  expect(state.changes["0001"].tasks.T002.status).toBe("pending");
 });
 
 
@@ -858,4 +942,112 @@ process.exit(2);
   } finally {
     process.env.PATH = originalPath;
   }
+});
+test("discuss on an explicit non-current change does not modify currentChange", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-discuss-non-current-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "First"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Second"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["discuss", "0001"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.currentChange).toBe("0002");
+  expect(state.changes["0001"].step).toBe("discuss");
+});
+
+test("research on an explicit non-current change does not modify currentChange", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-research-non-current-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "First"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Second"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["research", "0001"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.currentChange).toBe("0002");
+  expect(state.changes["0001"].step).toBe("research");
+});
+
+test("plan on an explicit non-current change does not modify currentChange", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-plan-non-current-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "First"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Second"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["plan", "0001"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.currentChange).toBe("0002");
+  expect(state.changes["0001"].step).toBe("plan");
+});
+
+test("execute on an explicit non-current change does not modify currentChange", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-execute-non-current-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "First"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Second"])).ok).toBe(true);
+
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-first/tasks.md"),
+    "- [ ] T001: Build something\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["execute", "0001"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.currentChange).toBe("0002");
+  expect(state.changes["0001"].step).toBe("execute");
+  expect(state.changes["0001"].tasks.T001.status).toBe("in-progress");
+});
+
+test("verify on an explicit non-current change does not modify currentChange", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-verify-non-current-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "First"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Second"])).ok).toBe(true);
+
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-first/tasks.md"),
+    "- [ ] T001: Build something\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["verify", "0001"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.currentChange).toBe("0002");
+  expect(state.changes["0001"].step).toBe("verify");
+});
+
+test("handoff on an explicit non-current change does not modify currentChange", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-handoff-non-current-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "First"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Second"])).ok).toBe(true);
+
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-first/tasks.md"),
+    "- [x] T001: Build something\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["handoff", "0001"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.currentChange).toBe("0002");
+  expect(state.changes["0001"].step).toBe("handoff");
 });

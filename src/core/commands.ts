@@ -716,6 +716,11 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
   }
 
   const filesToStage = [...args.files];
+  const stateFile = ".specwright/state.json";
+  const hasTasksMd = filesToStage.some(f => f === "tasks.md" || f.endsWith("/tasks.md"));
+  if (hasTasksMd && !filesToStage.includes(stateFile)) {
+    filesToStage.push(stateFile);
+  }
   if (args.task) {
     const tasksMarkdown = await readFile(join(changeDir(ctx.cwd, change.id, change.slug), "tasks.md"), "utf8");
     const syncResult = syncChangeTasksFromMarkdown(change, tasksMarkdown, ctx.now());
@@ -723,12 +728,8 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
     if (!change.tasks[args.task]) {
       return fail(`Task not found: ${args.task}`);
     }
-    const stateFile = ".specwright/state.json";
     if (syncResult.changed) {
       await updateCachedChange(ctx.cwd, change);
-      if (!filesToStage.includes(stateFile)) {
-        filesToStage.push(stateFile);
-      }
     }
   }
 
