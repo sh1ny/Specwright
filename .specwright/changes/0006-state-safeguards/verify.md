@@ -23,7 +23,7 @@ Observed output:
 
 ```text
 Test Results:
-   PASS: 36 passed
+   PASS: 45 passed
 ```
 
 Coverage mapping:
