@@ -427,13 +427,26 @@
       "kind": "bugfix",
       "pack": "core",
       "mode": "lite",
-      "status": "discussing",
-      "step": "discuss",
+      "status": "planning",
+      "step": "plan",
       "createdAt": "2026-06-09T20:06:58.070Z",
-      "updatedAt": "2026-06-09T20:06:58.070Z",
-      "tasks": {}
+      "updatedAt": "2026-06-09T21:14:28.008Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Rewrite lifecycle spawn strategy guardrails",
+          "status": "pending",
+          "updatedAt": "2026-06-09T21:14:28.008Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Update lifecycle prompt tests",
+          "status": "pending",
+          "updatedAt": "2026-06-09T21:14:28.008Z"
+        }
+      }
     }
   },
-  "updatedAt": "2026-06-09T20:06:58.070Z",
+  "updatedAt": "2026-06-09T21:14:28.008Z",
   "currentChange": "0010"
 }
