@@ -1,4 +1,29 @@
-import type { ChangeState, PromptInput } from "./types";
+import type { ChangeState, LifecycleStep, PromptInput, SpecwrightAgentName, SpecwrightConfig } from "./types";
+
+const LIFECYCLE_AGENT_BY_STEP = {
+  research: "researcher",
+  plan: "planner",
+  execute: "executor",
+  verify: "verifier",
+} as const satisfies Partial<Record<LifecycleStep, SpecwrightAgentName>>;
+
+export type RoutedLifecycleStep = keyof typeof LIFECYCLE_AGENT_BY_STEP;
+
+export function renderLifecycleSpawnStrategy(input: {
+  step: RoutedLifecycleStep;
+  config: Pick<SpecwrightConfig, "agents">;
+}): string {
+  const agent = LIFECYCLE_AGENT_BY_STEP[input.step];
+  const agentName = `specwright-${agent}`;
+  const model = input.config.agents[agent].model;
+  return `Lifecycle spawn strategy:
+- Use OMP's \`task\` tool to spawn \`${agentName}\` for the ${input.step} lifecycle work.
+- Route to configured model \`${model}\` from \`agents.${agent}.model\`.
+- Pass the full current prompt as the subagent assignment, including read-first files, rules, acceptance, and checkpoint instructions.
+- Wait for the \`${agentName}\` result before editing artifacts, updating status, or reporting completion.
+- If the \`task\` tool, \`${agentName}\`, or model \`${model}\` is unavailable, do the work directly in this agent with the same rules instead of blocking.
+- Do not ask the user to switch agents manually and do not spawn recursive lifecycle agents.`;
+}
 
 export function renderSubagentRetryClause(): string {
   return "Subagent fallback:\n- Prefer lightweight/read-only scouts for mapping work.\n- If a scout/explore agent fails, cancels, returns null, or returns an unusable report, retry the same assignment once with OMP's bundled `task` agent using the same read-only/no-project-wide-command constraints.\n- Record the retry in evidence.md under \"Research attempts\".\n- Do not declare blocked until the retry also fails or the missing fact is not available through tools.";

@@ -2,7 +2,33 @@ import { test, expect } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defaultConfig } from "../src/core/state";
+import { renderLifecycleSpawnStrategy, type RoutedLifecycleStep } from "../src/core/prompts";
 import { runSpecwrightCommand } from "../src/core/commands";
+
+test("lifecycle spawn strategy routes each phase to configured agent model", () => {
+  const config = defaultConfig("prompt-test");
+  config.agents.researcher.model = "custom/research";
+  config.agents.planner.model = "custom/plan";
+  config.agents.executor.model = "custom/execute";
+  config.agents.verifier.model = "custom/verify";
+  const expected: Record<RoutedLifecycleStep, { agent: string; model: string; key: string }> = {
+    research: { agent: "specwright-researcher", model: "custom/research", key: "agents.researcher.model" },
+    plan: { agent: "specwright-planner", model: "custom/plan", key: "agents.planner.model" },
+    execute: { agent: "specwright-executor", model: "custom/execute", key: "agents.executor.model" },
+    verify: { agent: "specwright-verifier", model: "custom/verify", key: "agents.verifier.model" },
+  };
+
+  for (const [step, details] of Object.entries(expected) as Array<[RoutedLifecycleStep, (typeof expected)[RoutedLifecycleStep]]>) {
+    const strategy = renderLifecycleSpawnStrategy({ step, config });
+    expect(strategy).toContain("OMP's `task` tool");
+    expect(strategy).toContain(`spawn \`${details.agent}\``);
+    expect(strategy).toContain(`configured model \`${details.model}\``);
+    expect(strategy).toContain(`\`${details.key}\``);
+    expect(strategy).toContain(`Wait for the \`${details.agent}\` result`);
+    expect(strategy).toContain("do the work directly in this agent");
+  }
+});
 
 test("research prompt includes online research and fallback", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-prompts-"));
