@@ -282,6 +282,45 @@ test("checkpoint and commit aliases stage scoped files with deterministic messag
   expect(status.stdout).not.toContain("phase.txt");
 });
 
+test("phase checkpoint does not sync task metadata or stage derived state", async () => {
+  const cwd = await initGitRepo("specwright-checkpoint-phase-no-sync-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+
+  const planPath = ".specwright/changes/0001-inventory-crafting/plan.md";
+  const tasksPath = ".specwright/changes/0001-inventory-crafting/tasks.md";
+  await writeFile(join(cwd, planPath), "# Plan\n\nUse evidence.\n", "utf8");
+  await writeFile(join(cwd, tasksPath), "- [ ] T001: Build inventory\n  - Files: `tracked.txt`\n", "utf8");
+  const stateBefore = await readFile(join(cwd, ".specwright/state.json"), "utf8");
+
+  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--phase", "plan", "--files", `${planPath},${tasksPath}`]);
+  expect(checkpoint.ok).toBe(true);
+
+  const stateAfter = await readFile(join(cwd, ".specwright/state.json"), "utf8");
+  expect(stateAfter).toBe(stateBefore);
+  const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
+  expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([planPath, tasksPath].sort());
+});
+
+test("task checkpoint stages derived state when task sync changes cache", async () => {
+  const cwd = await initGitRepo("specwright-checkpoint-task-state-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+
+  await writeFile(join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"), "- [ ] T001: Build inventory\n  - Files: `tracked.txt`\n", "utf8");
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+
+  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", "tracked.txt"]);
+  expect(checkpoint.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].tasks.T001.status).toBe("pending");
+  const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
+  expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([".specwright/state.json", "tracked.txt"].sort());
+});
+
 test("base branch resolves from config, remote HEAD, then main fallback", async () => {
   const configuredCwd = await mkdtemp(join(tmpdir(), "specwright-base-config-"));
   const configuredCtx = testContext(configuredCwd);

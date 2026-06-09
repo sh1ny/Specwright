@@ -688,9 +688,6 @@ function taskFilesFromMarkdown(markdown: string, taskId: string): string[] {
 
 async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
-  if (Object.keys(change.tasks).length === 0) {
-    change = (await syncChangeTasksFromFile(ctx.cwd, change, ctx.now())).change;
-  }
   if (args.phase && args.task) {
     return fail("Specify exactly one of --phase or --task.");
   }
@@ -699,9 +696,6 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
   }
   if (args.phase && !CHECKPOINT_PHASES.has(args.phase)) {
     return fail(`Invalid checkpoint phase: ${args.phase}`);
-  }
-  if (args.task && !change.tasks[args.task]) {
-    return fail(`Task not found: ${args.task}`);
   }
   if (!args.files || args.files.length === 0) {
     return fail("At least one file must be supplied with --files.");
@@ -716,9 +710,22 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
     }
   }
 
+  const filesToStage = [...args.files];
+  if (args.task) {
+    const syncResult = await syncChangeTasksFromFile(ctx.cwd, change, ctx.now());
+    change = syncResult.change;
+    if (!change.tasks[args.task]) {
+      return fail(`Task not found: ${args.task}`);
+    }
+    const stateFile = ".specwright/state.json";
+    if (syncResult.changed && !filesToStage.includes(stateFile)) {
+      filesToStage.push(stateFile);
+    }
+  }
+
   const unit = args.task ?? args.phase ?? "";
   const message = `specwright: checkpoint ${change.id}-${change.slug} ${unit}`;
-  await stageFiles(ctx.cwd, args.files);
+  await stageFiles(ctx.cwd, filesToStage);
   await commitStaged(ctx.cwd, message);
   return ok(`Created checkpoint commit for ${unit}.`);
 }

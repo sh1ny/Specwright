@@ -185,13 +185,50 @@
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "discussing",
-      "step": "discuss",
+      "status": "executing",
+      "step": "execute",
       "createdAt": "2026-06-09T06:22:47.489Z",
-      "updatedAt": "2026-06-09T06:46:38.809Z",
-      "tasks": {}
+      "updatedAt": "2026-06-09T07:35:23.869Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Extract task parsing and safe sync",
+          "status": "done",
+          "updatedAt": "2026-06-09T07:35:23.869Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Add passive change state updates",
+          "status": "done",
+          "updatedAt": "2026-06-09T07:35:23.869Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Auto-sync state-dependent CLI commands",
+          "status": "done",
+          "updatedAt": "2026-06-09T07:35:23.869Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Fix checkpoint derived-state side effects",
+          "status": "in-progress",
+          "updatedAt": "2026-06-09T07:35:23.869Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Refresh OMP status through shared sync",
+          "status": "pending",
+          "updatedAt": "2026-06-09T07:35:23.869Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Report unreconciled task drift",
+          "status": "pending",
+          "updatedAt": "2026-06-09T07:35:23.869Z"
+        }
+      }
     }
   },
-  "updatedAt": "2026-06-09T06:46:38.809Z",
+  "updatedAt": "2026-06-09T07:35:23.869Z",
   "currentChange": "0006"
 }
