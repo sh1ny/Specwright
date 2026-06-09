@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { changeDir, configPath, statePath } from "./paths";
 import { readJsonFile, writeJsonFile } from "./json";
-import type { ChangeState, ParsedTaskArtifact, SpecwrightConfig, SpecwrightState, TaskState, TaskSyncIssue, TaskSyncResult } from "./types";
+import type { ChangeState, ParsedTaskArtifact, SpecwrightConfig, SpecwrightState, TaskState, TaskSyncIssue, TaskSyncIssueKind, TaskSyncResult } from "./types";
 
 type StoredSpecwrightConfig = Partial<Omit<SpecwrightConfig, "workflow">> & {
   version?: unknown;
@@ -45,6 +45,15 @@ export function defaultState(now: Date): SpecwrightState {
 
 const TASK_LINE_PATTERN = /^\s*- \[([ xX])] (T\d{3}):\s*(.+?)\s*$/;
 const TASK_CHECKLIST_PATTERN = /^\s*-\s*\[[^\]]*]\s*T\d+/;
+export type UnreconciledTaskDriftKind = TaskSyncIssueKind | "missing-task-artifact" | "cached-task-without-artifact";
+
+export interface UnreconciledTaskDriftIssue {
+  kind: UnreconciledTaskDriftKind;
+  line?: number;
+  taskId?: string;
+  message: string;
+}
+
 
 function taskStatesEqual(left: Record<string, TaskState>, right: Record<string, TaskState>): boolean {
   const leftIds = Object.keys(left);
@@ -102,6 +111,71 @@ export function parseTaskArtifact(markdown: string): { tasks: ParsedTaskArtifact
 
   return { tasks, issues };
 }
+export function unreconciledTaskDriftIssues(
+  change: ChangeState,
+  markdown: string | undefined,
+  taskArtifactRequired: boolean,
+): UnreconciledTaskDriftIssue[] {
+  const cachedTasks = Object.values(change.tasks);
+  if (markdown === undefined) {
+    const issues: UnreconciledTaskDriftIssue[] = [];
+    if (taskArtifactRequired) {
+      issues.push({
+        kind: "missing-task-artifact",
+        message: "tasks.md is missing at execute or later step.",
+      });
+    }
+    for (const task of cachedTasks) {
+      issues.push({
+        kind: "cached-task-without-artifact",
+        taskId: task.id,
+        message: `Cached task ${task.id} exists but tasks.md is missing.`,
+      });
+    }
+    return issues;
+  }
+
+  const parsed = parseTaskArtifact(markdown);
+  const issues: UnreconciledTaskDriftIssue[] = parsed.issues.map((issue) => ({
+    kind: issue.kind,
+    line: issue.line,
+    message: issue.message,
+    ...(issue.taskId ? { taskId: issue.taskId } : {}),
+  }));
+  const artifactIds = new Set(parsed.tasks.map((task) => task.id));
+
+  if (taskArtifactRequired && parsed.tasks.length === 0) {
+    issues.push({
+      kind: "missing-task-artifact",
+      message: "tasks.md has no parseable task artifacts at execute or later step.",
+    });
+  }
+
+  for (const task of parsed.tasks) {
+    const cached = change.tasks[task.id];
+    if (cached && cached.title !== task.title) {
+      issues.push({
+        kind: "title-drift",
+        line: task.line,
+        taskId: task.id,
+        message: `Task ${task.id} title changed from "${cached.title}" to "${task.title}".`,
+      });
+    }
+  }
+
+  for (const task of cachedTasks) {
+    if (!artifactIds.has(task.id)) {
+      issues.push({
+        kind: "cached-task-without-artifact",
+        taskId: task.id,
+        message: `Cached task ${task.id} has no matching tasks.md artifact.`,
+      });
+    }
+  }
+
+  return issues;
+}
+
 
 export function syncChangeTasksFromMarkdown(change: ChangeState, markdown: string, now: Date): TaskSyncResult {
   const parsed = parseTaskArtifact(markdown);
