@@ -40,22 +40,25 @@ test("new creates a current change directory", async () => {
   const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
 
-  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"]);
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Implement an inventory crafting system"]);
   expect(result.ok).toBe(true);
-  await expect(pathExists(join(cwd, ".specwright/changes/0001-inventory-crafting"))).resolves.toBe(true);
 
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
   expect(state.currentChange).toBe("0001");
+  const slug = state.changes["0001"].slug;
+  await expect(pathExists(join(cwd, `.specwright/changes/0001-${slug}`))).resolves.toBe(true);
 });
-
 test("new and discuss create a first-class decisions artifact", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-decisions-"));
   const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
-  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Implement an inventory crafting system"])).ok).toBe(true);
   expect((await runSpecwrightCommand(ctx, ["discuss"])).ok).toBe(true);
 
-  const decisions = await readFile(join(cwd, ".specwright/changes/0001-inventory-crafting/decisions.md"), "utf8");
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
+  const slug = state.changes["0001"].slug;
+
+  const decisions = await readFile(join(cwd, `.specwright/changes/0001-${slug}/decisions.md`), "utf8");
   expect(decisions).toContain("# Decisions");
   expect(decisions).toContain("## Settled");
   expect(decisions).toContain("## Ready state");
@@ -70,26 +73,29 @@ test("new in a git worktree creates a change branch and commits only scaffold fi
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
   await writeFile(join(cwd, "unrelated.txt"), "unrelated\n", "utf8");
 
-  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"]);
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Implement an inventory crafting system"]);
   expect(result.ok).toBe(true);
 
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
+  const slug = state.changes["0001"].slug;
+
   const branch = await expectGit(cwd, ["branch", "--show-current"]);
-  expect(branch.stdout.trim()).toBe("feature/0001-inventory-crafting");
+  expect(branch.stdout.trim()).toBe(`feature/0001-${slug}`);
 
   const subject = await expectGit(cwd, ["log", "-1", "--pretty=%s"]);
-  expect(subject.stdout.trim()).toBe("specwright: start 0001-inventory-crafting");
+  expect(subject.stdout.trim()).toBe(`specwright: start 0001-${slug}`);
 
   const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
   const committedFiles = committed.stdout.trim().split("\n").filter(Boolean).sort();
   expect(committedFiles).toContain(".specwright/state.json");
-  expect(committedFiles).toContain(".specwright/changes/0001-inventory-crafting/intent.md");
-  expect(committedFiles).toContain(".specwright/changes/0001-inventory-crafting/tasks.md");
+  expect(committedFiles).toContain(`.specwright/changes/0001-${slug}/intent.md`);
+  expect(committedFiles).toContain(`.specwright/changes/0001-${slug}/tasks.md`);
   expect(committedFiles).not.toContain(".specwright/config.json");
   expect(committedFiles).not.toContain("unrelated.txt");
 
   const status = await expectGit(cwd, ["status", "--short"]);
   expect(status.stdout).toContain("?? unrelated.txt");
-  expect(status.stdout).not.toContain(".specwright/changes/0001-inventory-crafting");
+  expect(status.stdout).not.toContain(`.specwright/changes/0001-${slug}`);
 });
 
 test("new in a git worktree creates a branch without committing when auto-commit is disabled", async () => {
@@ -98,11 +104,14 @@ test("new in a git worktree creates a branch without committing when auto-commit
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
   expect((await runSpecwrightCommand(ctx, ["config", "set", "workflow.autoCommit", "false"])).ok).toBe(true);
 
-  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"]);
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Implement an inventory crafting system"]);
   expect(result.ok).toBe(true);
 
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
+  const slug = state.changes["0001"].slug;
+
   const branch = await expectGit(cwd, ["branch", "--show-current"]);
-  expect(branch.stdout.trim()).toBe("feature/0001-inventory-crafting");
+  expect(branch.stdout.trim()).toBe(`feature/0001-${slug}`);
 
   const head = await runGit(cwd, ["rev-parse", "--verify", "HEAD"]);
   expect(head.exitCode).not.toBe(0);
