@@ -301,8 +301,21 @@
           "updatedAt": "2026-06-09T14:51:38.816Z"
         }
       }
+    },
+    "0008": {
+      "id": "0008",
+      "slug": "smart-subagent-routing",
+      "title": "Smart subagent routing",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-09T15:17:04.618Z",
+      "updatedAt": "2026-06-09T15:17:04.618Z",
+      "tasks": {}
     }
   },
-  "updatedAt": "2026-06-09T14:51:38.816Z",
-  "currentChange": "0007"
+  "updatedAt": "2026-06-09T15:17:04.618Z",
+  "currentChange": "0008"
 }
