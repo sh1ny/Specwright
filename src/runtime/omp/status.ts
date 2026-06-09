@@ -1,28 +1,48 @@
 import { runSpecwrightCommand } from "../../core/commands";
 import type { OmpContextLike } from "./types";
-let refreshInFlight: Promise<void> | undefined;
+const refreshInFlightByCwd = new Map<string, Promise<string | undefined>>();
+
+async function loadStatusText(cwd: string): Promise<string | undefined> {
+  const existing = refreshInFlightByCwd.get(cwd);
+  if (existing) {
+    return await existing;
+  }
+
+  const pending = (async () => {
+    const result = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["status"]);
+    return result.ok && result.statusText ? result.statusText : undefined;
+  })();
+
+  refreshInFlightByCwd.set(cwd, pending);
+  try {
+    return await pending;
+  } finally {
+    if (refreshInFlightByCwd.get(cwd) === pending) {
+      refreshInFlightByCwd.delete(cwd);
+    }
+  }
+}
+
+export function shouldDisplayStatusText(statusText: string): boolean {
+  return statusText.includes("tasks=");
+}
+
 export async function refreshStatus(_event: unknown, ctx: OmpContextLike): Promise<void> {
-  if (refreshInFlight) {
-    await refreshInFlight;
+  if (typeof ctx.ui?.setStatus !== "function") {
     return;
   }
-  refreshInFlight = (async () => {
-    const cwd = ctx.cwd ?? process.cwd();
-    const result = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["status"]);
-    const statusText = result.statusText;
-    if (!result.ok || !statusText) {
-      ctx.ui?.setStatus?.("specwright", undefined);
-      return;
-    }
-    const usage = ctx.getContextUsage?.();
-    const contextText = typeof usage?.percent === "number" ? ` · ctx ${Math.round(usage.percent)}%` : "";
-    ctx.ui?.setStatus?.("specwright", `${statusText}${contextText}`);
-  })();
-  try {
-    await refreshInFlight;
-  } finally {
-    refreshInFlight = undefined;
+
+  const cwd = ctx.cwd ?? process.cwd();
+  const statusText = await loadStatusText(cwd);
+  if (!statusText) {
+    ctx.ui.setStatus("specwright", undefined);
+    return;
   }
+  if (!shouldDisplayStatusText(statusText)) {
+    ctx.ui.setStatus("specwright", undefined);
+    return;
+  }
+  ctx.ui.setStatus("specwright", statusText);
 }
 
 export function clearStatus(_event: unknown, ctx: OmpContextLike): void {

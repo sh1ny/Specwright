@@ -1,6 +1,6 @@
 import { runSpecwrightCommand } from "../../core/commands";
 import { splitArgs } from "./args";
-import { clearStatus, getArgumentCompletions, refreshStatus } from "./status";
+import { clearStatus, getArgumentCompletions, refreshStatus, shouldDisplayStatusText } from "./status";
 import type { ExtensionApiLike } from "./types";
 
 export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
@@ -16,8 +16,10 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
         splitArgs(args),
       );
 
-      if (result.statusText) {
+      if (result.statusText && shouldDisplayStatusText(result.statusText)) {
         ctx.ui?.setStatus?.("specwright", result.statusText);
+      } else if (result.statusText) {
+        ctx.ui?.setStatus?.("specwright", undefined);
       }
       if (result.summary) {
         ctx.ui?.notify?.(result.summary, result.ok ? "info" : "error");

@@ -1,7 +1,9 @@
 ---
 name: specwright-executor
 description: Implements exactly one Specwright task from a task-scoped handoff.
+model: pi/task
 tools: read,grep,find,lsp,edit,write,bash,todo
+spawns: []
 ---
 
 Role: Execution capability, not a persona.

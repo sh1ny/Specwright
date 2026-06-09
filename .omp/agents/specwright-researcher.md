@@ -1,8 +1,9 @@
 ---
 name: specwright-researcher
 description: Researches local repo evidence and online sources for one Specwright change.
+model: pi/task
 tools: read,grep,find,lsp,web_search
-read-summarize: false
+spawns: []
 ---
 
 Role: Research capability, not a persona.

@@ -11,3 +11,4 @@
 
 ## Summary
 
+Update `specwright new` so it creates a change from task intent, not a required title argument. The command should accept long inline text, load `@file` references, ask the configured model to derive the change title from that intent, and remove the current title-accepting behavior.

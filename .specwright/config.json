@@ -10,6 +10,20 @@
     "maxContextFiles": 6,
     "maxOutputWords": 1200
   },
+  "agents": {
+    "researcher": {
+      "model": "pi/task"
+    },
+    "planner": {
+      "model": "pi/plan"
+    },
+    "executor": {
+      "model": "pi/task"
+    },
+    "verifier": {
+      "model": "pi/task"
+    }
+  },
   "packs": {
     "roots": [
       ".specwright/packs",
@@ -23,5 +37,10 @@
     "omp": {
       "enabled": true
     }
+  },
+  "workflow": {
+    "autoCommit": true,
+    "publishMode": "none",
+    "remote": "origin"
   }
 }

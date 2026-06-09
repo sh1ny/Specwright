@@ -3,7 +3,7 @@ import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSpecwrightCommand } from "../src/core/commands";
-import { runGit } from "../src/core/git";
+import { branchNameForChange, runGit } from "../src/core/git";
 import { slugify } from "../src/core/slug";
 import type { ChangeState, SpecwrightState } from "../src/core/types";
 
@@ -141,7 +141,7 @@ test("new derives title and slug from a long request and uses them for branch an
   expect(change.slug).toBe(slugify(change.title));
 
   const branch = await expectGit(cwd, ["branch", "--show-current"]);
-  expect(branch.stdout.trim()).toBe(`feature/0001-${change.slug}`);
+  expect(branch.stdout.trim()).toBe(branchNameForChange(change));
 
   const subject = await expectGit(cwd, ["log", "-1", "--pretty=%s"]);
   expect(subject.stdout.trim()).toBe(`specwright: start 0001-${change.slug}`);
