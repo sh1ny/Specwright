@@ -7,6 +7,9 @@ export type LifecycleStep = (typeof LIFECYCLE_STEPS)[number];
 export type SpecwrightMode = "lite" | "full";
 export type OnlineResearchMode = "never" | "ask" | "auto" | "require";
 export type WorkflowPublishMode = "none" | "push" | "pr";
+export const SPECWRIGHT_AGENT_NAMES = ["researcher", "planner", "executor", "verifier"] as const;
+export type SpecwrightAgentName = (typeof SPECWRIGHT_AGENT_NAMES)[number];
+
 export type ChangeKind = "feature" | "bugfix" | "refactor" | "research";
 export type ChangeStatus =
   | "discussing"
@@ -18,6 +21,10 @@ export type ChangeStatus =
   | "done"
   | "blocked";
 export type TaskStatus = "pending" | "in-progress" | "done" | "blocked";
+
+export interface SpecwrightAgentConfig {
+  model: string;
+}
 
 export interface SpecwrightConfig {
   version: 1;
@@ -31,6 +38,7 @@ export interface SpecwrightConfig {
     maxContextFiles: number;
     maxOutputWords: number;
   };
+  agents: Record<SpecwrightAgentName, SpecwrightAgentConfig>;
   packs: {
     roots: string[];
     enabled: string[];

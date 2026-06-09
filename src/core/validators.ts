@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { changeDir } from "./paths";
 import { loadConfig, unreconciledTaskDriftIssues } from "./state";
-import type { ChangeState, LifecycleStep, OnlineResearchMode, SpecwrightConfig, SpecwrightMode, WorkflowPublishMode } from "./types";
+import { SPECWRIGHT_AGENT_NAMES } from "./types";
+import type { ChangeState, LifecycleStep, OnlineResearchMode, SpecwrightAgentName, SpecwrightConfig, SpecwrightMode, WorkflowPublishMode } from "./types";
 
 export interface ValidationIssue {
   level: "error" | "warning";
@@ -52,6 +53,13 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
+function validateAgentModel(config: SpecwrightConfig, agent: SpecwrightAgentName): void {
+  const model = config.agents?.[agent]?.model;
+  if (typeof model !== "string" || model.length === 0 || !/\S/.test(model)) {
+    throw new Error(`Invalid agents.${agent}.model`);
+  }
+}
+
 export function validateSpecwrightConfig(config: SpecwrightConfig): void {
   if (config.version !== 1) throw new Error("Invalid config version");
   if (typeof config.project.name !== "string") throw new Error("Invalid project.name");
@@ -67,6 +75,9 @@ export function validateSpecwrightConfig(config: SpecwrightConfig): void {
   if (!isStringArray(config.packs.roots)) throw new Error("Invalid packs.roots");
   if (!isStringArray(config.packs.enabled)) throw new Error("Invalid packs.enabled");
   if (typeof config.runtimes.omp.enabled !== "boolean") throw new Error("Invalid runtimes.omp.enabled");
+  for (const agent of SPECWRIGHT_AGENT_NAMES) {
+    validateAgentModel(config, agent);
+  }
   if (typeof config.workflow.autoCommit !== "boolean") throw new Error("Invalid workflow.autoCommit");
   if (!PUBLISH_MODES.has(config.workflow.publishMode)) throw new Error("Invalid workflow.publishMode");
   if (config.workflow.baseBranch !== undefined) {

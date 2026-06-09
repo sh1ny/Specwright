@@ -2,10 +2,11 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { changeDir, configPath, statePath } from "./paths";
 import { readJsonFile, writeJsonFile } from "./json";
-import type { ChangeState, ParsedTaskArtifact, SpecwrightConfig, SpecwrightState, TaskState, TaskSyncIssue, TaskSyncIssueKind, TaskSyncResult } from "./types";
+import type { ChangeState, ParsedTaskArtifact, SpecwrightAgentConfig, SpecwrightAgentName, SpecwrightConfig, SpecwrightState, TaskState, TaskSyncIssue, TaskSyncIssueKind, TaskSyncResult } from "./types";
 
-type StoredSpecwrightConfig = Partial<Omit<SpecwrightConfig, "workflow">> & {
+type StoredSpecwrightConfig = Partial<Omit<SpecwrightConfig, "agents" | "workflow">> & {
   version?: unknown;
+  agents?: Partial<Record<SpecwrightAgentName, Partial<SpecwrightAgentConfig>>>;
   workflow?: Partial<SpecwrightConfig["workflow"]>;
 };
 
@@ -19,6 +20,12 @@ export function defaultConfig(projectName: string): SpecwrightConfig {
       onlineResearch: "auto",
       maxContextFiles: 6,
       maxOutputWords: 1200,
+    },
+    agents: {
+      researcher: { model: "pi/task" },
+      planner: { model: "pi/plan" },
+      executor: { model: "pi/task" },
+      verifier: { model: "pi/task" },
     },
     packs: {
       roots: [".specwright/packs", "packs"],
@@ -264,6 +271,24 @@ export async function loadConfig(cwd: string): Promise<SpecwrightConfig> {
     defaults: {
       ...defaults.defaults,
       ...existing.defaults,
+    },
+    agents: {
+      researcher: {
+        ...defaults.agents.researcher,
+        ...existing.agents?.researcher,
+      },
+      planner: {
+        ...defaults.agents.planner,
+        ...existing.agents?.planner,
+      },
+      executor: {
+        ...defaults.agents.executor,
+        ...existing.agents?.executor,
+      },
+      verifier: {
+        ...defaults.agents.verifier,
+        ...existing.agents?.verifier,
+      },
     },
     packs: {
       ...defaults.packs,
