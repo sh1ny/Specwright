@@ -426,6 +426,95 @@ test("task file sync updates a non-current change without changing currentChange
   expect(state.changes["0002"].tasks).toEqual({});
 });
 
+type TestCommandContext = ReturnType<typeof testContext>;
+
+function taskListMarkdown(firstChecked: boolean, secondChecked: boolean): string {
+  return [
+    `- [${firstChecked ? "x" : " "}] T001: Build inventory`,
+    "  - Acceptance: Inventory builds.",
+    "  - Verification: bun test inventory.",
+    "",
+    `- [${secondChecked ? "x" : " "}] T002: Review recipes`,
+    "  - Acceptance: Recipes are reviewed.",
+    "  - Verification: bun test recipes.",
+    "",
+  ].join("\n");
+}
+
+async function createCommandSyncFixture(prefix: string, tasksMarkdown: string): Promise<{ cwd: string; ctx: TestCommandContext; dir: string }> {
+  const cwd = await mkdtemp(join(tmpdir(), prefix));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+
+  const dir = join(cwd, ".specwright/changes/0001-inventory-crafting");
+  await writeFile(join(dir, "intent.md"), "# Intent\n\nShip inventory crafting.\n", "utf8");
+  await writeFile(join(dir, "evidence.md"), "# Evidence\n\nLocal evidence exists.\n", "utf8");
+  await writeFile(join(dir, "plan.md"), "# Plan\n\nUse evidence.md.\n", "utf8");
+  await writeFile(join(dir, "tasks.md"), tasksMarkdown, "utf8");
+  await writeFile(join(dir, "verify.md"), "# Verification\n\n## Observed output\n\nObserved command output: ok.\n", "utf8");
+  return { cwd, ctx, dir };
+}
+
+test("status syncs task artifact changes before rendering progress", async () => {
+  const { cwd, ctx } = await createCommandSyncFixture("specwright-status-sync-", taskListMarkdown(true, false));
+
+  const result = await runSpecwrightCommand(ctx, ["status"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toContain("tasks=1/2");
+  expect(result.statusText).toContain("tasks=1/2");
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].tasks.T001.status).toBe("done");
+  expect(state.changes["0001"].tasks.T002.status).toBe("pending");
+});
+
+test("execute syncs task artifact changes before selecting next pending task", async () => {
+  const { cwd, ctx, dir } = await createCommandSyncFixture("specwright-execute-sync-", taskListMarkdown(false, false));
+  expect((await runSpecwrightCommand(ctx, ["tasks"])).ok).toBe(true);
+  await writeFile(join(dir, "tasks.md"), taskListMarkdown(true, false), "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["execute"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toBe("Prepared execute prompt for T002.");
+  expect(result.prompt).toContain("- [ ] T002: Review recipes");
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].tasks.T001.status).toBe("done");
+  expect(state.changes["0001"].tasks.T002.status).toBe("in-progress");
+});
+
+test("verify syncs task artifact changes before updating change status", async () => {
+  const { cwd, ctx, dir } = await createCommandSyncFixture("specwright-verify-sync-", taskListMarkdown(false, false));
+  expect((await runSpecwrightCommand(ctx, ["tasks"])).ok).toBe(true);
+  await writeFile(join(dir, "tasks.md"), taskListMarkdown(true, false), "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["verify"]);
+  expect(result.ok).toBe(true);
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].status).toBe("verifying");
+  expect(state.changes["0001"].step).toBe("verify");
+  expect(state.changes["0001"].tasks.T001.status).toBe("done");
+  expect(state.changes["0001"].tasks.T002.status).toBe("pending");
+});
+
+test("handoff syncs task artifact changes before computing completion", async () => {
+  const { cwd, ctx, dir } = await createCommandSyncFixture("specwright-handoff-sync-", taskListMarkdown(false, false));
+  expect((await runSpecwrightCommand(ctx, ["tasks"])).ok).toBe(true);
+  await writeFile(join(dir, "tasks.md"), taskListMarkdown(true, true), "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["handoff"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("No incomplete tasks.");
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].status).toBe("done");
+  expect(state.changes["0001"].step).toBe("handoff");
+  expect(state.changes["0001"].tasks.T001.status).toBe("done");
+  expect(state.changes["0001"].tasks.T002.status).toBe("done");
+});
+
 
 
 test("pull request body is generated from populated Specwright artifacts", async () => {

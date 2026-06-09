@@ -148,6 +148,24 @@ export async function syncChangeTasksFromFile(cwd: string, change: ChangeState, 
   return result;
 }
 
+export async function syncChangeTasksFromFileIfPresent(cwd: string, change: ChangeState, now: Date): Promise<TaskSyncResult> {
+  const tasksPath = join(changeDir(cwd, change.id, change.slug), "tasks.md");
+  let markdown: string;
+  try {
+    markdown = await readFile(tasksPath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return { change, issues: [], changed: false };
+    }
+    throw error;
+  }
+  const result = syncChangeTasksFromMarkdown(change, markdown, now);
+  if (result.changed) {
+    await updateCachedChange(cwd, result.change);
+  }
+  return result;
+}
+
 export async function loadConfig(cwd: string): Promise<SpecwrightConfig> {
   const existing = await readJsonFile<StoredSpecwrightConfig>(configPath(cwd));
   const defaults = defaultConfig(basename(cwd));

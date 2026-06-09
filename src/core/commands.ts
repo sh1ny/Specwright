@@ -24,6 +24,7 @@ import {
   saveConfig,
   saveState,
   syncChangeTasksFromFile,
+  syncChangeTasksFromFileIfPresent,
   upsertChange,
 } from "./state";
 import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, writePullRequestBodyFile } from "./git";
@@ -406,12 +407,24 @@ async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<Com
   const config = await loadConfig(ctx.cwd);
   const state = await loadState(ctx.cwd);
   const currentChange = state.currentChange ?? null;
-  const currentStatus = currentChange ? state.changes[currentChange]?.status ?? null : null;
-  if (args.json) {
-    return ok(JSON.stringify({ project: config.project.name, currentChange, changeCount: Object.keys(state.changes).length, currentStatus }, null, 2));
+  let current = currentChange ? state.changes[currentChange] : undefined;
+  if (current) {
+    current = await syncChangeTasksForCommand(ctx, current);
   }
-  return ok(`Specwright · ${config.project.name} · current=${currentChange ?? "none"} · changes=${Object.keys(state.changes).length}`, {
-    statusText: `Specwright · ${currentChange ?? "none"} · ${currentStatus ?? "idle"}`,
+  const currentStatus = current?.status ?? null;
+  const progress = taskProgress(current);
+  if (args.json) {
+    return ok(JSON.stringify({
+      project: config.project.name,
+      currentChange,
+      changeCount: Object.keys(state.changes).length,
+      currentStatus,
+      tasks: progress,
+    }, null, 2));
+  }
+  const taskSuffix = progress.total > 0 ? ` · tasks=${progress.done}/${progress.total}` : "";
+  return ok(`Specwright · ${config.project.name} · current=${currentChange ?? "none"} · changes=${Object.keys(state.changes).length}${taskSuffix}`, {
+    statusText: `Specwright · ${currentChange ?? "none"} · ${currentStatus ?? "idle"}${taskSuffix}`,
   });
 }
 
@@ -539,6 +552,25 @@ async function updateChangeStep(cwd: string, change: ChangeState, status: Change
   const updated: ChangeState = { ...change, status, step, updatedAt: now.toISOString() };
   await upsertChange(cwd, updated);
   return updated;
+}
+
+async function syncChangeTasksForCommand(ctx: CommandContext, change: ChangeState): Promise<ChangeState> {
+  return (await syncChangeTasksFromFileIfPresent(ctx.cwd, change, ctx.now())).change;
+}
+
+function taskProgress(change: ChangeState | undefined): { total: number; done: number } {
+  if (!change) {
+    return { total: 0, done: 0 };
+  }
+  let done = 0;
+  let total = 0;
+  for (const task of Object.values(change.tasks)) {
+    total += 1;
+    if (task.status === "done") {
+      done += 1;
+    }
+  }
+  return { total, done };
 }
 
 async function commandDiscuss(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
@@ -696,7 +728,7 @@ async function commandTasks(ctx: CommandContext, args: ParsedArgs): Promise<Comm
   if (!await exists(join(changeDir(ctx.cwd, change.id, change.slug), "plan.md"))) {
     return fail("Required artifact missing: plan.md");
   }
-  const updated = (await syncChangeTasksFromFile(ctx.cwd, change, ctx.now())).change;
+  const updated = await syncChangeTasksForCommand(ctx, change);
   const config = await loadConfig(ctx.cwd);
   const prompt = `# Specwright Tasks: ${updated.id}-${updated.slug}
 
@@ -726,9 +758,7 @@ async function selectedTask(change: ChangeState, taskId: string | undefined): Pr
 
 async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
-  if (Object.keys(change.tasks).length === 0) {
-    change = (await syncChangeTasksFromFile(ctx.cwd, change, ctx.now())).change;
-  }
+  change = await syncChangeTasksForCommand(ctx, change);
   const task = await selectedTask(change, args.task);
   if (!task) {
     return fail(args.task ? `Task not found: ${args.task}` : "No pending Specwright task.");
@@ -744,7 +774,8 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
 }
 
 async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
-  const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  change = await syncChangeTasksForCommand(ctx, change);
   const report = await validateChange(ctx.cwd, change);
   const verifyPath = join(changeDir(ctx.cwd, change.id, change.slug), "verify.md");
   await writeFile(verifyPath, renderValidationReport(report), "utf8");
@@ -759,7 +790,7 @@ async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<Com
 }
 
 async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
-  const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  const change = await syncChangeTasksForCommand(ctx, await findCurrentChange(ctx.cwd, args.positionals[0]));
   const dir = changeDir(ctx.cwd, change.id, change.slug);
   const artifacts = await Promise.all(["intent.md", "evidence.md", "tasks.md", "verify.md"].map(async (file) => {
     try { return await readFile(join(dir, file), "utf8"); } catch { return ""; }
