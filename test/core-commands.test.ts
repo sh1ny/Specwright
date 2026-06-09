@@ -83,6 +83,36 @@ test("invalid enum option values fail and valid values still work", async () => 
   const validOnline = await runSpecwrightCommand(ctx, ["research", "--online", "never"]);
   expect(validOnline.ok).toBe(true);
 });
+test("new rejects missing request with updated usage message", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-missing-request-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const missing = await runSpecwrightCommand(ctx, ["new", "feature"]);
+  expect(missing.ok).toBe(false);
+  expect(missing.exitCode).toBe(1);
+  expect(missing.summary).toBe("Usage: specwright new <kind> <request...>");
+  expect(missing.summary).not.toContain('"<title>"');
+});
+test("new accepts multi-word unquoted request and uses all tokens", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-multiword-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["new", "feature", "Inventory", "Crafting", "System"]);
+  expect(result.ok).toBe(true);
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].title).toBe("Inventory Crafting System");
+  expect(state.changes["0001"].slug).toBe("inventory-crafting-system");
+});
+test("new accepts quoted request as single request", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-new-quoted-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["new", "bugfix", "Fix login redirect after session expiry"]);
+  expect(result.ok).toBe(true);
+  const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
+  expect(state.changes["0001"].title).toBe("Fix login redirect after session expiry");
+  expect(state.changes["0001"].slug).toBe("fix-login-redirect-after-session-expiry");
+});
 
 test("init writes default lifecycle agent model config", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-agent-config-defaults-"));

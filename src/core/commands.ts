@@ -502,20 +502,21 @@ async function existingChangeIds(cwd: string, stateIds: string[]): Promise<strin
 }
 
 async function commandNew(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
-  const [kindArg, title] = args.positionals;
+  const [kindArg, ...requestTokens] = args.positionals;
   if (!CHANGE_KINDS.has(kindArg as ChangeKind)) {
     return fail("Change kind must be one of feature, bugfix, refactor, research.");
   }
-  if (!title) {
-    return fail("Usage: specwright new <kind> \"<title>\"");
+  const request = requestTokens.join(" ").trim();
+  if (!request) {
+    return fail("Usage: specwright new <kind> <request...>");
   }
   if (args.mode && !MODES.has(args.mode)) {
     return fail(`Invalid mode: ${args.mode}`);
   }
-
   const config = await loadConfig(ctx.cwd);
   const state = await loadState(ctx.cwd);
   const id = nextChangeId(await existingChangeIds(ctx.cwd, Object.keys(state.changes)));
+  const title = request;
   const slug = slugify(title);
   const now = ctx.now().toISOString();
   const change: ChangeState = {
