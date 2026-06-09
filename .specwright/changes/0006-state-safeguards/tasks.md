@@ -38,7 +38,7 @@
   - Acceptance: OMP-visible status reflects `tasks.md` changes after session refresh and does not display stale cached task state.
   - Verification: Run the OMP extension/status tests with a fixture where `tasks.md` and cached state disagree; assert the displayed status uses synced state.
 
-- [ ] T006: Report unreconciled task drift
+- [x] T006: Report unreconciled task drift
   - Files: `src/core/validators.ts`, `src/core/state.ts`, `test/core-validators.test.ts`
   - Action: Extend validation to compare task artifacts against cached state and emit a specific issue code for drift that safe sync cannot reconcile, including malformed checklist state, duplicate task IDs, missing task artifacts at execute-or-later phases, or cached tasks for missing artifacts.
   - Acceptance: `verify` reports actionable drift issues instead of silently accepting stale or ambiguous task cache state.
