@@ -60,7 +60,7 @@
 
 ## Wave 4 — End-to-end acceptance
 
-  - [x] T009: Verify the complete OMP integration slice
+  - [ ] T009: Verify the complete OMP integration slice
   - Files: `src/runtime/omp/extension.ts`, `src/runtime/omp/status.ts`, `src/runtime/omp/install.ts`, `src/runtime/omp/prompts.ts`, `src/core/commands.ts`, `src/core/prompts.ts`, `src/runtime/omp/types.ts`, `test/omp-extension.test.ts`, `test/core-prompts.test.ts`, `test/core-commands.test.ts`, `test/core-init.test.ts`
   - Action: Run the targeted automated suite for changed files, then run the manual OMP scenarios for wrong first tool-call blocking, structured validate on malformed `tasks.md`, and drift status rendering.
   - Acceptance: Automated tests pass; manual OMP checks demonstrate lifecycle fail-closed behavior, structured tool validation output, and visible drift status; no unrelated implementation files are changed.

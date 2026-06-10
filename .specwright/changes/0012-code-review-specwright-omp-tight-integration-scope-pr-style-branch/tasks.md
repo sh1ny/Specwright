@@ -26,7 +26,7 @@
 
 ### Wave 2 — Regression coverage
 
-- [ ] T004: Harden OMP extension API and checkpoint tests
+- [x] T004: Harden OMP extension API and checkpoint tests
   - Files: `test/omp-extension.test.ts`; test helpers that fake OMP APIs.
   - Action: Ensure test doubles use `registerTool(definition)`, assert `definition.name`, call `definition.execute(...)`, validate `{ content, details }`, and assert checkpoint executes with exact `checkpoint`, change id, `--phase`, and `--files` argv.
   - Acceptance: Tests fail if the extension returns to the obsolete two-argument tool API, stale tool-call event fields, or drops checkpoint forwarding arguments.
@@ -34,7 +34,7 @@
 
 ### Wave 3 — Workflow artifact cleanup
 
-- [ ] T005: Correct unevidenced 0011 verification claims
+- [x] T005: Correct unevidenced 0011 verification claims
   - Files: `.specwright/changes/0011-specwright-omp-tight-integration-plan-context-specwright-s-omp-integration/verify.md`; its task artifact if T009 status is stored separately.
   - Action: Remove the unevidenced manual OMP PASS claim and uncheck or mark T009 not verified unless fresh manual OMP evidence is actually recorded in the artifact.
   - Acceptance: 0011 artifacts no longer state manual OMP scenarios passed without evidence; recorded verification matches observed commands and outputs only.

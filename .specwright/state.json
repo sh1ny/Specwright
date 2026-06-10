@@ -524,47 +524,47 @@
       "status": "verifying",
       "step": "verify",
       "createdAt": "2026-06-10T14:39:39.328Z",
-      "updatedAt": "2026-06-10T16:32:37.785Z",
+      "updatedAt": "2026-06-10T17:16:50.181Z",
       "tasks": {
         "T001": {
           "id": "T001",
           "title": "Make OMP status refresh non-mutating and race-safe",
           "status": "done",
-          "updatedAt": "2026-06-10T16:32:37.782Z"
+          "updatedAt": "2026-06-10T17:16:11.224Z"
         },
         "T002": {
           "id": "T002",
           "title": "Preserve user-owned OMP files during adapter regeneration",
           "status": "done",
-          "updatedAt": "2026-06-10T16:32:37.782Z"
+          "updatedAt": "2026-06-10T17:16:11.224Z"
         },
         "T003": {
           "id": "T003",
           "title": "Arm lifecycle routing only after successful prompts",
           "status": "done",
-          "updatedAt": "2026-06-10T16:32:37.782Z"
+          "updatedAt": "2026-06-10T17:16:11.224Z"
         },
         "T004": {
           "id": "T004",
           "title": "Harden OMP extension API and checkpoint tests",
-          "status": "pending",
-          "updatedAt": "2026-06-10T16:32:37.782Z"
+          "status": "done",
+          "updatedAt": "2026-06-10T17:16:11.224Z"
         },
         "T005": {
           "id": "T005",
           "title": "Correct unevidenced 0011 verification claims",
-          "status": "pending",
-          "updatedAt": "2026-06-10T16:32:37.782Z"
+          "status": "done",
+          "updatedAt": "2026-06-10T17:16:11.224Z"
         },
         "T006": {
           "id": "T006",
           "title": "Clean the 0011 state title",
           "status": "pending",
-          "updatedAt": "2026-06-10T16:32:37.782Z"
+          "updatedAt": "2026-06-10T17:16:11.224Z"
         }
       }
     }
   },
-  "updatedAt": "2026-06-10T16:32:37.785Z",
+  "updatedAt": "2026-06-10T17:16:50.181Z",
   "currentChange": "0012"
 }

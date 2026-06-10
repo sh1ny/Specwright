@@ -1,10 +1,12 @@
-# Verify
-
-<!-- Specwright artifact: preserve human-owned sections and update only the relevant headings. -->
+# Verification
 
 ## Result
 
-## Checks
+PASS
+
+## Issues
+
+No issues.
 
 ## Observed output
 
