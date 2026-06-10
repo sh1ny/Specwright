@@ -21,6 +21,9 @@ test("OMP extension registers and handles specwright command", async () => {
     on() {},
     registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
     sendUserMessage(content, options) { sentMessages.push(options ? { content: String(content), options } : { content: String(content) }); },
+    registerTool() {},
+    getActiveTools() { return []; },
+    setActiveTools() {},
   };
 
   specwrightOmpExtension(pi);
@@ -54,6 +57,9 @@ test("OMP status refresh syncs tasks.md before rendering status", async () => {
     on(event, handler) { handlers.set(event, handler); },
     registerCommand() {},
     sendUserMessage() {},
+    registerTool() {},
+    getActiveTools() { return []; },
+    setActiveTools() {},
   };
 
   specwrightOmpExtension(pi);
@@ -211,7 +217,6 @@ test("concurrent refreshStatus calls update each waiting OMP context", async () 
   expect(firstStatuses.at(-1)).toContain(`Specwright · 0001 · executing · tasks=${taskCount}/${taskCount}`);
   expect(secondStatuses.at(-1)).toContain(`Specwright · 0001 · executing · tasks=${taskCount}/${taskCount}`);
 });
-
 test("OMP extension sends generated prompts as immediate user messages when idle", async () => {
   const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
   const sentMessages: Array<{ content: string; options?: { deliverAs?: "steer" | "followUp" } }> = [];
@@ -221,6 +226,9 @@ test("OMP extension sends generated prompts as immediate user messages when idle
     on() {},
     registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
     sendUserMessage(content, options) { sentMessages.push(options ? { content: String(content), options } : { content: String(content) }); },
+    registerTool() {},
+    getActiveTools() { return []; },
+    setActiveTools() {},
   };
 
   specwrightOmpExtension(pi);
@@ -247,6 +255,9 @@ test("OMP extension preserves quoted JSON config values", async () => {
     on() {},
     registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
     sendUserMessage() {},
+    registerTool() {},
+    getActiveTools() { return []; },
+    setActiveTools() {},
   };
 
   specwrightOmpExtension(pi);
@@ -366,4 +377,62 @@ test("OMP adapter can regenerate one agent without rewriting other artifacts", a
   expect(planner).toContain("model: custom/plan-model");
   expect(await readFile(indexPath, "utf8")).toBe(indexBefore);
   expect(await readFile(researcherPath, "utf8")).toBe(researcherBefore);
+});
+
+test("widened OMP adapter API surface accepts new fields without breaking existing mocks", async () => {
+  const tools: Array<{ name: string; params: Record<string, unknown> }> = [];
+  let activeTools: string[] = ["existing"];
+  let selectedValue: string | undefined;
+  let inputValue: string | undefined;
+  let editorValue: string | undefined;
+  let confirmed = false;
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on() {},
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool(name, definition) {
+      tools.push({ name, params: definition.parameters ?? {} });
+    },
+    getActiveTools() { return activeTools; },
+    setActiveTools(tools) { activeTools = tools; },
+  };
+  const ctx: OmpCommandContextLike = {
+    cwd: process.cwd(),
+    ui: {
+      notify() {},
+      setStatus() {},
+      async select(message, choices) {
+        return choices[0]?.value;
+      },
+      async input(message, options) {
+        return options?.default ?? "typed";
+      },
+      async editor(content, options) {
+        return content;
+      },
+      async confirm(message) {
+        return true;
+      },
+    },
+  };
+  pi.registerTool("specwright_status", {
+    description: "Return Specwright status as JSON",
+    parameters: {},
+    handler(_params, _context) {
+      return { ok: true };
+    },
+  });
+  pi.setActiveTools?.(["specwright_status"]);
+  expect(tools).toHaveLength(1);
+  expect(tools[0]?.name).toBe("specwright_status");
+  expect(pi.getActiveTools?.()).toEqual(["specwright_status"]);
+  selectedValue = await ctx.ui?.select?.("Pick one", [{ value: "a", label: "A" }]);
+  inputValue = await ctx.ui?.input?.("Type something", { default: "hello" });
+  editorValue = await ctx.ui?.editor?.("code", { language: "ts" });
+  confirmed = await ctx.ui?.confirm?.("Are you sure?") ?? false;
+  expect(selectedValue).toBe("a");
+  expect(inputValue).toBe("hello");
+  expect(editorValue).toBe("code");
+  expect(confirmed).toBe(true);
 });
