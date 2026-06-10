@@ -40,7 +40,7 @@
   - Acceptance: 0011 artifacts no longer state manual OMP scenarios passed without evidence; recorded verification matches observed commands and outputs only.
   - Verification: Inspect the edited 0011 artifacts and confirm no manual OMP PASS/T009 completion claim remains without adjacent evidence.
 
-- [ ] T006: Clean the 0011 state title
+  - [x] T006: Clean the 0011 state title
   - Files: `.specwright/state.json`.
   - Action: Replace the raw markdown/context title for the 0011 state entry with the intended plain change title while preserving id, slug, paths, and status fields.
   - Acceptance: The 0011 title is plain text with no markdown heading/context prose; related state metadata remains aligned.

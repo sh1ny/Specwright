@@ -176,7 +176,7 @@ function commandResultDetails(result: Pick<CommandResult, "ok" | "summary" | "fi
 
 function toolResult(details: CommandResultDetails): ToolResult<CommandResultDetails> {
   return {
-    content: [{ type: "text", text: JSON.stringify(details) }],
+    content: [{ type: "text", text: details.summary }],
     details,
   };
 }
