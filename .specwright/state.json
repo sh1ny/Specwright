@@ -456,65 +456,65 @@
       "status": "executing",
       "step": "execute",
       "createdAt": "2026-06-09T23:08:12.458Z",
-      "updatedAt": "2026-06-10T08:25:29.564Z",
+      "updatedAt": "2026-06-10T14:08:52.695Z",
       "tasks": {
         "T001": {
           "id": "T001",
           "title": "Widen the OMP adapter API surface",
           "status": "done",
-          "updatedAt": "2026-06-10T08:25:29.564Z"
+          "updatedAt": "2026-06-10T14:08:52.695Z"
         },
         "T002": {
           "id": "T002",
           "title": "Split neutral and OMP prompt renderers",
           "status": "done",
-          "updatedAt": "2026-06-10T08:25:29.564Z"
+          "updatedAt": "2026-06-10T14:08:52.695Z"
         },
         "T003": {
           "id": "T003",
           "title": "Add the OMP adapter version marker",
           "status": "done",
-          "updatedAt": "2026-06-10T08:25:29.564Z"
+          "updatedAt": "2026-06-10T14:08:52.695Z"
         },
         "T004": {
           "id": "T004",
           "title": "Select prompt renderers by runtime",
           "status": "done",
-          "updatedAt": "2026-06-10T08:25:29.564Z"
+          "updatedAt": "2026-06-10T14:08:52.695Z"
         },
         "T005": {
           "id": "T005",
           "title": "Register structured Specwright OMP tools",
-          "status": "pending",
-          "updatedAt": "2026-06-10T08:25:29.564Z"
+          "status": "done",
+          "updatedAt": "2026-06-10T14:08:52.695Z"
         },
         "T006": {
           "id": "T006",
           "title": "Enforce lifecycle routing through `tool_call`",
-          "status": "pending",
-          "updatedAt": "2026-06-10T08:25:29.564Z"
+          "status": "done",
+          "updatedAt": "2026-06-10T14:08:52.695Z"
         },
         "T007": {
           "id": "T007",
           "title": "Cache OMP status validation by artifact mtime",
-          "status": "pending",
-          "updatedAt": "2026-06-10T08:25:29.564Z"
+          "status": "done",
+          "updatedAt": "2026-06-10T14:08:52.695Z"
         },
         "T008": {
           "id": "T008",
           "title": "Surface blocked, drift, and checkpoint-needed status",
-          "status": "pending",
-          "updatedAt": "2026-06-10T08:25:29.564Z"
+          "status": "done",
+          "updatedAt": "2026-06-10T14:08:52.695Z"
         },
         "T009": {
           "id": "T009",
           "title": "Verify the complete OMP integration slice",
-          "status": "pending",
-          "updatedAt": "2026-06-10T08:25:29.564Z"
+          "status": "done",
+          "updatedAt": "2026-06-10T14:08:52.695Z"
         }
       }
     }
   },
-  "updatedAt": "2026-06-10T08:25:29.564Z",
+  "updatedAt": "2026-06-10T14:08:52.695Z",
   "currentChange": "0011"
 }
