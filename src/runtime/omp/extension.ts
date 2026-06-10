@@ -1,9 +1,22 @@
 import { runSpecwrightCommand } from "../../core/commands";
 import { splitArgs } from "./args";
 import { clearStatus, getArgumentCompletions, refreshStatus, shouldDisplayStatusText } from "./status";
-import type { ExtensionApiLike } from "./types";
+import type { ExtensionApiLike, ToolCallBlockResult, ToolCallEvent } from "./types";
 
 export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
+  let pendingRoute: { step: string; expectedAgent: string } | null = null;
+
+  const stepToAgent: Record<string, string> = {
+    research: "specwright-researcher",
+    plan: "specwright-planner",
+    execute: "specwright-executor",
+    verify: "specwright-verifier",
+  };
+
+  function clearPendingRoute() {
+    pendingRoute = null;
+  }
+
   pi.setLabel("Specwright");
 
   pi.registerCommand("specwright", {
@@ -11,9 +24,16 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
     getArgumentCompletions,
     handler: async (args, ctx) => {
       await ctx.waitForIdle?.();
+      const argv = splitArgs(args);
+      const subcommand = argv[0] ?? "";
+      if (stepToAgent[subcommand]) {
+        pendingRoute = { step: subcommand, expectedAgent: stepToAgent[subcommand] };
+      } else {
+        pendingRoute = null;
+      }
       const result = await runSpecwrightCommand(
         { cwd: ctx.cwd ?? process.cwd(), runtime: "omp", now: () => new Date() },
-        splitArgs(args),
+        argv,
       );
 
       if (result.statusText && shouldDisplayStatusText(result.statusText)) {
@@ -98,8 +118,30 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
     },
   });
 
-  pi.on("session_start", refreshStatus);
+  pi.on("tool_call", (event) => {
+    if (!pendingRoute) return;
+    const toolCall = event as ToolCallEvent;
+    const isTask = toolCall.name === "task";
+    const agent = toolCall.input?.agent ?? (typeof toolCall.params?.agent === "string" ? toolCall.params.agent : undefined);
+    if (isTask && agent === pendingRoute.expectedAgent) {
+      pendingRoute = null;
+      return;
+    }
+    const blockResult: ToolCallBlockResult = {
+      block: true,
+      reason: `Expected the model to delegate ${pendingRoute.step} to \`${pendingRoute.expectedAgent}\` via the \`task\` tool, but received tool \`${toolCall.name}\` instead.`,
+    };
+    return blockResult;
+  });
+
+  pi.on("session_start", (event, ctx) => {
+    clearPendingRoute();
+    return refreshStatus(event, ctx);
+  });
   pi.on("goal_updated", refreshStatus);
-  pi.on("turn_end", refreshStatus);
+  pi.on("turn_end", (event, ctx) => {
+    clearPendingRoute();
+    return refreshStatus(event, ctx);
+  });
   pi.on("session_shutdown", clearStatus);
 }
