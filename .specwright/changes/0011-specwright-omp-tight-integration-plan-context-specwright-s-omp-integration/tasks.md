@@ -6,19 +6,19 @@
 
 ## Wave 1 — Independent adapter and prompt seams
 
-- [ ] T001: Widen the OMP adapter API surface
+  - [x] T001: Widen the OMP adapter API surface
   - Files: `src/runtime/omp/types.ts`, `test/omp-extension.test.ts`
   - Action: Add `registerTool`, `getActiveTools`, `setActiveTools`, blocking `tool_call` handler typing, and richer `ui.select/input/editor/confirm` fields to the OMP-facing interfaces; update OMP test mocks with safe no-op implementations.
   - Acceptance: The widened interface models the OMP APIs needed by later tasks without changing existing command behavior; all existing OMP extension tests still construct the mock API successfully.
   - Verification: Run `bun test test/omp-extension.test.ts` and confirm existing OMP command coverage still passes.
 
-- [ ] T002: Split neutral and OMP prompt renderers
+- [x] T002: Split neutral and OMP prompt renderers
   - Files: `src/core/prompts.ts`, `src/runtime/omp/prompts.ts`, `test/core-prompts.test.ts`
   - Action: Move lifecycle `task`/model routing and OMP `ask` instructions into OMP-specific prompt helpers; keep core prompt helpers runtime-neutral.
   - Acceptance: CLI/headless prompt text contains no OMP `task` tool or `ask` dialog references; OMP prompt helpers still name the configured lifecycle agents/models.
   - Verification: Run `bun test test/core-prompts.test.ts` with assertions for both neutral and OMP prompt text.
 
-- [ ] T003: Add the OMP adapter version marker
+- [x] T003: Add the OMP adapter version marker
   - Files: `src/runtime/omp/install.ts`, `.omp/extensions/specwright/package.json`, `src/core/commands.ts`, `test/core-init.test.ts`, `test/core-commands.test.ts`
   - Action: Add `"specwrightAdapterVersion": "1"` to generated adapter packages, implement stale-adapter detection, and make OMP-enabled init/config regenerate missing or mismatched adapters.
   - Acceptance: Freshly generated adapters include the marker; missing/mismatched markers trigger regeneration; current markers avoid unnecessary rewrites.
@@ -26,7 +26,7 @@
 
 ## Wave 2 — Runtime behavior cutovers
 
-- [ ] T004: Select prompt renderers by runtime
+- [x] T004: Select prompt renderers by runtime
   - Files: `src/core/commands.ts`, `src/core/prompts.ts`, `src/runtime/omp/prompts.ts`, `test/core-commands.test.ts`, `test/core-prompts.test.ts`
   - Action: Branch lifecycle and discuss prompt assembly on `ctx.runtime === "omp"`; use OMP prompt helpers only for OMP and neutral helpers otherwise.
   - Acceptance: OMP lifecycle prompts preserve `specwright-*` delegation instructions; non-OMP prompts stay lifecycle-correct without OMP-specific tool/dialog prose.
