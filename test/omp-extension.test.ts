@@ -481,6 +481,61 @@ test("OMP adapter can regenerate one agent without rewriting other artifacts", a
   expect(await readFile(researcherPath, "utf8")).toBe(researcherBefore);
 });
 
+test("stale adapter marker regenerates extension files but preserves user-owned rules and agents", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-stale-marker-"));
+  const config = defaultConfig("specwright-omp-stale-marker");
+  await installOmpAdapter({ cwd, force: false, config });
+
+  const packagePath = join(cwd, ".omp/extensions/specwright/package.json");
+  const indexPath = join(cwd, ".omp/extensions/specwright/index.ts");
+  const rulePath = join(cwd, ".omp/rules/specwright-workflow.md");
+  const agentPath = join(cwd, ".omp/agents/specwright-researcher.md");
+
+  // Simulate user ownership by modifying rule and agent files
+  await writeFile(rulePath, "# User-owned rule\n", "utf8");
+  await writeFile(agentPath, "# User-owned agent\n", "utf8");
+  const ruleBefore = await readFile(rulePath, "utf8");
+  const agentBefore = await readFile(agentPath, "utf8");
+
+  // Make the adapter marker stale
+  await writeFile(packagePath, JSON.stringify({ name: "stale", specwrightAdapterVersion: "0" }), "utf8");
+
+  const changed = await installOmpAdapter({ cwd, force: false, regenerateAdapter: true, config });
+  expect(changed).toContain(".omp/extensions/specwright/package.json");
+  expect(changed).toContain(".omp/extensions/specwright/index.ts");
+  expect(changed).not.toContain(".omp/rules/specwright-workflow.md");
+  expect(changed).not.toContain(".omp/agents/specwright-researcher.md");
+
+  expect(await readFile(rulePath, "utf8")).toBe(ruleBefore);
+  expect(await readFile(agentPath, "utf8")).toBe(agentBefore);
+  const pkg = JSON.parse(await readFile(packagePath, "utf8")) as { specwrightAdapterVersion?: string };
+  expect(pkg.specwrightAdapterVersion).toBe("1");
+});
+
+test("force overwrites all adapter files including user-owned rules and agents", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-force-overwrite-"));
+  const config = defaultConfig("specwright-omp-force-overwrite");
+  await installOmpAdapter({ cwd, force: false, config });
+
+  const rulePath = join(cwd, ".omp/rules/specwright-workflow.md");
+  const agentPath = join(cwd, ".omp/agents/specwright-researcher.md");
+
+  // Simulate user ownership
+  await writeFile(rulePath, "# User-owned rule\n", "utf8");
+  await writeFile(agentPath, "# User-owned agent\n", "utf8");
+
+  const changed = await installOmpAdapter({ cwd, force: true, config });
+  expect(changed).toContain(".omp/extensions/specwright/package.json");
+  expect(changed).toContain(".omp/extensions/specwright/index.ts");
+  expect(changed).toContain(".omp/rules/specwright-workflow.md");
+  expect(changed).toContain(".omp/agents/specwright-researcher.md");
+
+  const rule = await readFile(rulePath, "utf8");
+  expect(rule).toContain("source-of-truth workflow artifacts");
+  const agent = await readFile(agentPath, "utf8");
+  expect(agent).toContain("name: specwright-researcher");
+});
+
 test("widened OMP adapter API surface accepts new fields without breaking existing mocks", async () => {
   const tools: Array<{ name: string; params: Record<string, unknown> }> = [];
   let activeTools: string[] = ["existing"];
