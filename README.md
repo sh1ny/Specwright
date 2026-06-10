@@ -2,7 +2,9 @@
 
 Specwright is an early-stage workflow tool for planning, executing, verifying, and handing off software changes with an AI coding agent.
 
-It gives a change a durable home, keeps the lifecycle explicit, and records the evidence needed to understand what happened later. The goal is simple: make agent-assisted work less ad hoc by turning each change into a small set of files, prompts, tasks, checkpoints, and verification notes.
+Right now, Specwright is tied to OMP (Oh My Pi). The core CLI exists, but the current workflow, prompts, agent routing, and integration assumptions are built specifically around OMP.
+
+It gives a change a durable home, keeps the lifecycle explicit, and records the evidence needed to understand what happened later. The goal is simple: make OMP-assisted work less ad hoc by turning each change into a small set of files, prompts, tasks, checkpoints, and verification notes.
 
 Specwright is still young. Expect rough edges, changing command shapes, and incomplete integrations. Use it on a disposable branch until you trust the workflow in your project.
 
