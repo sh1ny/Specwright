@@ -2,6 +2,7 @@
   "name": "specwright-omp-extension",
   "private": true,
   "type": "module",
+  "specwrightAdapterVersion": "1",
   "omp": {
     "extensions": ["./index.ts"]
   }

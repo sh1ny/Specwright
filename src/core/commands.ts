@@ -2,7 +2,7 @@ import { access, cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installOmpAdapter } from "../runtime/omp/install";
+import { adapterNeedsRegeneration, installOmpAdapter } from "../runtime/omp/install";
 import { writeJsonFile } from "./json";
 import {
   changeDir,
@@ -437,7 +437,9 @@ async function commandInit(ctx: CommandContext, args: ParsedArgs): Promise<Comma
 
   updated.push(...await copyBuiltInCorePack(ctx.cwd, args.force));
   created.push(...await ensureProjectFiles(ctx.cwd));
-  updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force, config: await loadConfig(ctx.cwd) }));
+  const config = await loadConfig(ctx.cwd);
+  const needsRegen = await adapterNeedsRegeneration(ctx.cwd);
+  updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force || needsRegen, config }));
   return ok("Initialized Specwright in .specwright and installed OMP adapter in .omp.", { filesCreated: created, filesUpdated: updated });
 }
 
@@ -1034,8 +1036,9 @@ async function commandConfig(ctx: CommandContext, args: ParsedArgs): Promise<Com
     await saveConfig(ctx.cwd, updated);
     const filesUpdated = [relative(ctx.cwd, configPath(ctx.cwd))];
     const updatedAgent = agentNameForModelConfigKey(key);
-    if (updatedAgent && updated.runtimes.omp.enabled) {
-      filesUpdated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: false, config: updated, regenerateAgents: [updatedAgent] }));
+    if (updated.runtimes.omp.enabled) {
+      const needsRegen = await adapterNeedsRegeneration(ctx.cwd);
+      filesUpdated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: needsRegen, config: updated, ...(updatedAgent ? { regenerateAgents: [updatedAgent] as const } : {}) }));
     }
     return ok(`Set ${key}.`, { filesUpdated });
   }

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { access, mkdtemp } from "node:fs/promises";
+import { access, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSpecwrightCommand } from "../src/core/commands";
@@ -23,4 +23,6 @@ test("init creates Specwright and OMP layout", async () => {
   await expect(pathExists(join(cwd, ".specwright/packs/core/pack.json"))).resolves.toBe(true);
   await expect(pathExists(join(cwd, ".omp/extensions/specwright/package.json"))).resolves.toBe(true);
   await expect(pathExists(join(cwd, ".omp/agents/specwright-researcher.md"))).resolves.toBe(true);
+  const packageJson = JSON.parse(await readFile(join(cwd, ".omp/extensions/specwright/package.json"), "utf8"));
+  expect(packageJson.specwrightAdapterVersion).toBe("1");
 });
