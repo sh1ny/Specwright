@@ -1376,3 +1376,151 @@ test("handoff on an explicit non-current change does not modify currentChange", 
   expect(state.currentChange).toBe("0002");
   expect(state.changes["0001"].step).toBe("handoff");
 });
+function ompContext(cwd: string) {
+  return { cwd, runtime: "omp" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+}
+
+test("OMP runtime discuss uses ask dialog references", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-discuss-"));
+  const ctx = ompContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["discuss", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("Use Oh My Pi `ask`");
+  expect(result.prompt).toContain("You are the receiving OMP agent");
+});
+
+test("CLI runtime discuss does not use OMP references", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-cli-discuss-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["discuss", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).not.toContain("Use Oh My Pi `ask`");
+  expect(result.prompt).not.toContain("You are the receiving OMP agent");
+});
+
+test("OMP runtime research uses task tool spawn strategy", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-research-"));
+  const ctx = ompContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["research", "--online", "never", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("OMP's `task` tool");
+  expect(result.prompt).toContain("OMP's bundled `task` agent");
+  expect(result.prompt).not.toContain("retry the same assignment once with the default task agent");
+});
+
+test("CLI runtime research uses neutral spawn strategy", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-cli-research-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["research", "--online", "never", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).not.toContain("OMP's `task` tool");
+  expect(result.prompt).toContain("retry the same assignment once with the default task agent");
+});
+
+test("OMP runtime plan uses task tool spawn strategy", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-plan-"));
+  const ctx = ompContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(join(cwd, ".specwright/changes/0001-inventory-crafting/intent.md"), "# Intent\n", "utf8");
+  await writeFile(join(cwd, ".specwright/changes/0001-inventory-crafting/research.md"), "# Research\n", "utf8");
+  await writeFile(join(cwd, ".specwright/changes/0001-inventory-crafting/evidence.md"), "# Evidence\n", "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["plan", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("OMP's `task` tool");
+  expect(result.prompt).not.toContain("delegate to `specwright-planner`");
+});
+
+test("CLI runtime plan uses neutral spawn strategy", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-cli-plan-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(join(cwd, ".specwright/changes/0001-inventory-crafting/intent.md"), "# Intent\n", "utf8");
+  await writeFile(join(cwd, ".specwright/changes/0001-inventory-crafting/research.md"), "# Research\n", "utf8");
+  await writeFile(join(cwd, ".specwright/changes/0001-inventory-crafting/evidence.md"), "# Evidence\n", "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["plan", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).not.toContain("OMP's `task` tool");
+  expect(result.prompt).toContain("delegate to `specwright-planner`");
+});
+
+test("OMP runtime execute uses task tool spawn strategy", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-execute-"));
+  const ctx = ompContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"),
+    "- [ ] T001: Build inventory\n  - Files: `src/core/commands.ts`\n  - Action: Wire inventory.\n  - Acceptance: Inventory works.\n  - Verification: Run prompt tests.\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["execute", "--task", "T001", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("OMP's `task` tool");
+});
+
+test("CLI runtime execute uses neutral spawn strategy", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-cli-execute-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"),
+    "- [ ] T001: Build inventory\n  - Files: `src/core/commands.ts`\n  - Action: Wire inventory.\n  - Acceptance: Inventory works.\n  - Verification: Run prompt tests.\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["execute", "--task", "T001", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).not.toContain("OMP's `task` tool");
+  expect(result.prompt).toContain("delegate to `specwright-executor`");
+});
+
+test("OMP runtime verify uses task tool spawn strategy", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-verify-"));
+  const ctx = ompContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"),
+    "- [ ] T001: Build inventory\n  - Files: `src/core/commands.ts`\n  - Action: Wire inventory.\n  - Acceptance: Inventory works.\n  - Verification: Run prompt tests.\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["verify", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("OMP's `task` tool");
+});
+
+test("CLI runtime verify uses neutral spawn strategy", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-cli-verify-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"),
+    "- [ ] T001: Build inventory\n  - Files: `src/core/commands.ts`\n  - Action: Wire inventory.\n  - Acceptance: Inventory works.\n  - Verification: Run prompt tests.\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["verify", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).not.toContain("OMP's `task` tool");
+  expect(result.prompt).toContain("delegate to `specwright-verifier`");
+});
