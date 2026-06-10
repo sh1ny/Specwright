@@ -15,6 +15,10 @@
 ### Source request
 @REVIEW-0011-OMP-INTEGRATION.md
 ### Expanded request
+### Discuss clarification
+- Scope includes every review finding from `REVIEW-0011-OMP-INTEGRATION.md`: all HIGH, MEDIUM, and LOW items, including runtime fixes, test gaps, stale adapter overwrite policy, passive status mutation/race behavior, 0011 verification artifact correction, and state metadata cleanup.
+- Research must compare the frozen reviewed ref (`main...refactor/0011-specwright-omp-tight-integration-p`) with the current `bugfix/0012-code-review-specwright-omp-tight-int` branch and produce a finding-by-finding matrix with path evidence.
+- Accepted design direction: passive OMP status refresh is non-mutating and uses direct core readers/validators rather than `verify --json`; stale adapter marker handling preserves existing user-owned rule/agent files unless `--force` or explicit agent regeneration is requested.
 # Code Review: Specwright OMP Tight Integration
 
 **Scope**: PR-style branch diff, `main...refactor/0011-specwright-omp-tight-integration-p`  
