@@ -509,15 +509,15 @@
         "T009": {
           "id": "T009",
           "title": "Verify the complete OMP integration slice",
-          "status": "done",
-          "updatedAt": "2026-06-10T14:08:52.695Z"
+          "status": "pending",
+          "updatedAt": "2026-06-10T17:31:16.264Z"
         }
       }
     },
     "0012": {
       "id": "0012",
       "slug": "code-review-specwright-omp-tight-integration-scope-pr-style-branch",
-      "title": "# Code Review: Specwright OMP Tight Integration **Scope**: PR-style branch",
+      "title": "Code Review: Specwright OMP Tight Integration Scope: PR-style branch",
       "kind": "bugfix",
       "pack": "core",
       "mode": "lite",

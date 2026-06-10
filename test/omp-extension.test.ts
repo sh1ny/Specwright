@@ -1,5 +1,5 @@
 import { test, expect, spyOn } from "bun:test";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import specwrightOmpExtension from "../src/runtime/omp/extension";
@@ -16,11 +16,12 @@ interface SpecwrightStateLike {
 }
 
 async function writeStateAndCaptureMtime(statePath: string, state: SpecwrightStateLike): Promise<{ mtimeMs: number; bytes: number }> {
-  await writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
-  // Settle into a deterministic mtime, then re-stat. Later writes during the
-  // refresh must bump mtime to be detectable.
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  await writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
+  const payload = JSON.stringify(state, null, 2);
+  await writeFile(statePath, payload, "utf8");
+  // Use utimes to pin a deterministic past mtime so that any later rewrite
+  // (even same-content) bumps mtime forward and is caught by expectNoMutation.
+  const past = new Date(Date.now() - 60_000);
+  await utimes(statePath, past, past);
   const handle = await stat(statePath);
   return { mtimeMs: handle.mtimeMs, bytes: handle.size };
 }
@@ -133,6 +134,8 @@ test("OMP status refresh syncs tasks.md before rendering status", async () => {
   await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\nDirect validate path proven.\n", "utf8");
   await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Refresh status\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
   await writeFile(join(changeDir, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
+  const verifyPast = new Date(Date.now() - 60_000);
+  await utimes(join(changeDir, "verify.md"), verifyPast, verifyPast);
   const verifyMtime = await captureFileMtime(join(changeDir, "verify.md"));
   const statePath = join(cwd, ".specwright/state.json");
   const stateMtime = await writeStateAndCaptureMtime(statePath, {
@@ -191,6 +194,8 @@ test("concurrent refreshStatus calls share one in-flight path", async () => {
   await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
   await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Concurrent refresh\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
   await writeFile(join(changeDir, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
+  const verifyPast = new Date(Date.now() - 60_000);
+  await utimes(join(changeDir, "verify.md"), verifyPast, verifyPast);
   const verifyMtime = await captureFileMtime(join(changeDir, "verify.md"));
   const statePath = join(cwd, ".specwright/state.json");
   const stateMtime = await writeStateAndCaptureMtime(statePath, {
@@ -242,6 +247,7 @@ test("concurrent refreshStatus calls share one in-flight path", async () => {
     expect(statuses.at(-1)).toContain("Specwright · 0001 · checkpoint-needed · tasks=1/1");
     // Concurrent refreshes for one cwd must share the in-flight path: only
     // one direct validateChange call (and one state read) handles all of them.
+    expect(validateSpy.mock.calls.length).toBe(1);
     await expectNoMutation(cwd, changeDir, { state: stateMtime, verify: verifyMtime });
   } finally {
     validateSpy.mockRestore();
@@ -658,15 +664,22 @@ test("specwright_status tool returns structured CommandResult shape", async () =
   expect(statusTool).toBeDefined();
   const result = await statusTool!.execute("tool-call", {}, undefined, undefined, { cwd });
   expect(Array.isArray(result.content)).toBe(true);
-  expect(result.content[0]).toHaveProperty("type", "text");
-  expect(typeof result.content[0].text).toBe("string");
+  const content = result.content[0];
+  if (!content) {
+    throw new Error("Expected status tool text content");
+  }
+  expect(content.type).toBe("text");
+  expect(typeof content.text).toBe("string");
   const details = result.details as Record<string, unknown>;
   expect(details.ok).toBe(true);
-  expect(typeof details.summary).toBe("string");
+  const summary = details.summary;
+  if (typeof summary !== "string") {
+    throw new Error("Expected status tool summary");
+  }
   expect(Array.isArray(details.filesCreated)).toBe(true);
   expect(Array.isArray(details.filesUpdated)).toBe(true);
   expect(details.exitCode).toBe(0);
-  expect(result.content[0].text).toBe(details.summary);
+  expect(content.text).toBe(summary);
 });
 
 test("specwright_validate tool returns structured result with validation report", async () => {
@@ -692,15 +705,22 @@ test("specwright_validate tool returns structured result with validation report"
   expect(validateTool).toBeDefined();
   const result = await validateTool!.execute("tool-call", {}, undefined, undefined, { cwd });
   expect(Array.isArray(result.content)).toBe(true);
-  expect(result.content[0]).toHaveProperty("type", "text");
-  expect(typeof result.content[0].text).toBe("string");
+  const content = result.content[0];
+  if (!content) {
+    throw new Error("Expected validate tool text content");
+  }
+  expect(content.type).toBe("text");
+  expect(typeof content.text).toBe("string");
   const details = result.details as Record<string, unknown>;
   expect(typeof details.ok).toBe("boolean");
-  expect(typeof details.summary).toBe("string");
+  const summary = details.summary;
+  if (typeof summary !== "string") {
+    throw new Error("Expected validate tool summary");
+  }
   expect(Array.isArray(details.filesCreated)).toBe(true);
   expect(Array.isArray(details.filesUpdated)).toBe(true);
   expect(details.exitCode).toBeOneOf([0, 1]);
-  expect(result.content[0].text).toBe(details.summary);
+  expect(content.text).toBe(summary);
 });
 
 test("specwright_checkpoint tool rejects phase and task together", async () => {
@@ -813,7 +833,11 @@ test("specwright_checkpoint tool forwards valid params to command", async () => 
     expect(result.summary).not.toBe("Specify exactly one of phase or task.");
     expect(result.summary).not.toBe("At least one file must be supplied.");
     expect(runSpy).toHaveBeenCalledTimes(1);
-    const [, argv] = runSpy.mock.calls[0];
+    const call = runSpy.mock.calls[0];
+    if (!call) {
+      throw new Error("Expected checkpoint command invocation");
+    }
+    const [, argv] = call;
     expect(argv).toEqual(["checkpoint", "", "--phase", "verify", "--files", "tasks.md"]);
   } finally {
     runSpy.mockRestore();
@@ -1670,6 +1694,8 @@ test("concurrent passive OMP events for the same cwd share one validate path", a
   await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
   await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Concurrent passive\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
   await writeFile(join(changeDir, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
+  const verifyPast = new Date(Date.now() - 60_000);
+  await utimes(join(changeDir, "verify.md"), verifyPast, verifyPast);
   const verifyMtime = await captureFileMtime(join(changeDir, "verify.md"));
   const stateMtime = await writeStateAndCaptureMtime(join(cwd, ".specwright/state.json"), {
     version: 1,
