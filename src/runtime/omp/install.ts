@@ -147,17 +147,26 @@ export async function adapterNeedsRegeneration(cwd: string): Promise<boolean> {
     return true;
   }
 }
-export async function installOmpAdapter(input: { cwd: string; force: boolean; config?: Pick<SpecwrightConfig, "agents">; regenerateAgents?: readonly SpecwrightAgentName[] }): Promise<string[]> {
+export async function installOmpAdapter(input: { cwd: string; force: boolean; config?: Pick<SpecwrightConfig, "agents">; regenerateAgents?: readonly SpecwrightAgentName[]; regenerateAdapter?: boolean }): Promise<string[]> {
   const changed: string[] = [];
   const extensionDir = ompExtensionDir(input.cwd);
   const config = input.config ?? defaultConfig(basename(input.cwd));
-  const staticWrites: Array<[string, string]> = [
+  const adapterWrites: Array<[string, string]> = [
     [join(extensionDir, "package.json"), PACKAGE_JSON],
     [join(extensionDir, "index.ts"), await extensionIndexContent(input.cwd)],
+  ];
+  const ruleWrites: Array<[string, string]> = [
     [join(ompRulesDir(input.cwd), "specwright-workflow.md"), WORKFLOW_RULE],
   ];
 
-  for (const [path, content] of staticWrites) {
+  for (const [path, content] of adapterWrites) {
+    const written = await writeOwned(path, content, input.force || input.regenerateAdapter === true);
+    if (written) {
+      changed.push(relative(input.cwd, written));
+    }
+  }
+
+  for (const [path, content] of ruleWrites) {
     const written = await writeOwned(path, content, input.force);
     if (written) {
       changed.push(relative(input.cwd, written));

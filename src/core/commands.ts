@@ -440,7 +440,7 @@ async function commandInit(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   created.push(...await ensureProjectFiles(ctx.cwd));
   const config = await loadConfig(ctx.cwd);
   const needsRegen = await adapterNeedsRegeneration(ctx.cwd);
-  updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force || needsRegen, config }));
+  updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force, regenerateAdapter: needsRegen, config }));
   return ok("Initialized Specwright in .specwright and installed OMP adapter in .omp.", { filesCreated: created, filesUpdated: updated });
 }
 
@@ -1057,7 +1057,7 @@ async function commandConfig(ctx: CommandContext, args: ParsedArgs): Promise<Com
     const updatedAgent = agentNameForModelConfigKey(key);
     if (updated.runtimes.omp.enabled) {
       const needsRegen = await adapterNeedsRegeneration(ctx.cwd);
-      filesUpdated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: needsRegen, config: updated, ...(updatedAgent ? { regenerateAgents: [updatedAgent] as const } : {}) }));
+      filesUpdated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force, regenerateAdapter: needsRegen, config: updated, ...(updatedAgent ? { regenerateAgents: [updatedAgent] as const } : {}) }));
     }
     return ok(`Set ${key}.`, { filesUpdated });
   }

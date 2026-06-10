@@ -28,11 +28,7 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
       await ctx.waitForIdle?.();
       const argv = splitArgs(args);
       const subcommand = argv[0] ?? "";
-      if (stepToAgent[subcommand]) {
-        pendingRoute = { step: subcommand, expectedAgent: stepToAgent[subcommand] };
-      } else {
-        pendingRoute = null;
-      }
+      const expectedAgent = stepToAgent[subcommand];
       const result = await runSpecwrightCommand(
         { cwd: ctx.cwd ?? process.cwd(), runtime: "omp", now: () => new Date() },
         argv,
@@ -46,8 +42,18 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
       if (result.summary) {
         ctx.ui?.notify?.(result.summary, result.ok ? "info" : "error");
       }
-      if (result.prompt) {
-        pi.sendUserMessage(result.prompt);
+      if (expectedAgent !== undefined) {
+        if (result.ok && result.prompt) {
+          pendingRoute = { step: subcommand, expectedAgent };
+          pi.sendUserMessage(result.prompt);
+        } else {
+          pendingRoute = null;
+        }
+      } else {
+        pendingRoute = null;
+        if (result.prompt) {
+          pi.sendUserMessage(result.prompt);
+        }
       }
       if (!result.ok && !ctx.ui) {
         pi.logger?.warn?.("Specwright command failed", result);
@@ -170,7 +176,7 @@ function commandResultDetails(result: Pick<CommandResult, "ok" | "summary" | "fi
 
 function toolResult(details: CommandResultDetails): ToolResult<CommandResultDetails> {
   return {
-    content: [{ type: "text", text: JSON.stringify(details) }],
+    content: [{ type: "text", text: details.summary }],
     details,
   };
 }

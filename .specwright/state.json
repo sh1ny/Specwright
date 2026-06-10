@@ -449,14 +449,14 @@
     "0011": {
       "id": "0011",
       "slug": "specwright-omp-tight-integration-plan-context-specwright-s-omp-integration",
-      "title": "# Specwright OMP Tight-Integration Plan ## Context Specwright’s OMP integration",
+      "title": "Specwright OMP tight integration",
       "kind": "refactor",
       "pack": "core",
       "mode": "lite",
       "status": "verifying",
       "step": "verify",
       "createdAt": "2026-06-09T23:08:12.458Z",
-      "updatedAt": "2026-06-10T14:35:28.760Z",
+      "updatedAt": "2026-06-10T14:38:49.262Z",
       "tasks": {
         "T001": {
           "id": "T001",
@@ -509,12 +509,62 @@
         "T009": {
           "id": "T009",
           "title": "Verify the complete OMP integration slice",
+          "status": "pending",
+          "updatedAt": "2026-06-10T17:31:16.264Z"
+        }
+      }
+    },
+    "0012": {
+      "id": "0012",
+      "slug": "code-review-specwright-omp-tight-integration-scope-pr-style-branch",
+      "title": "Code Review: Specwright OMP Tight Integration Scope: PR-style branch",
+      "kind": "bugfix",
+      "pack": "core",
+      "mode": "lite",
+      "status": "done",
+      "step": "handoff",
+      "createdAt": "2026-06-10T14:39:39.328Z",
+      "updatedAt": "2026-06-10T17:31:16.264Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Make OMP status refresh non-mutating and race-safe",
           "status": "done",
-          "updatedAt": "2026-06-10T14:08:52.695Z"
+          "updatedAt": "2026-06-10T17:18:59.276Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Preserve user-owned OMP files during adapter regeneration",
+          "status": "done",
+          "updatedAt": "2026-06-10T17:18:59.276Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Arm lifecycle routing only after successful prompts",
+          "status": "done",
+          "updatedAt": "2026-06-10T17:18:59.276Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Harden OMP extension API and checkpoint tests",
+          "status": "done",
+          "updatedAt": "2026-06-10T17:18:59.276Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Correct unevidenced 0011 verification claims",
+          "status": "done",
+          "updatedAt": "2026-06-10T17:18:59.276Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Clean the 0011 state title",
+          "status": "done",
+          "updatedAt": "2026-06-10T17:18:59.276Z"
         }
       }
     }
   },
-  "updatedAt": "2026-06-10T14:35:28.760Z",
-  "currentChange": "0011"
+  "updatedAt": "2026-06-10T17:31:16.264Z",
+  "currentChange": "0012"
 }
