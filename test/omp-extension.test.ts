@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect, spyOn } from "bun:test";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -828,4 +828,109 @@ test("unrelated commands do not set lifecycle routes", async () => {
   expect(toolCallHandler).toBeDefined();
   const afterResult = toolCallHandler!({ name: "web_search", params: {} }, { cwd });
   expect(afterResult).toBeUndefined();
+});
+test("status refresh caches result for unchanged artifacts", async () => {
+  const commands = await import("../src/core/commands");
+  const spy = spyOn(commands, "runSpecwrightCommand");
+  spy.mockImplementation(async () => ({ ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=1/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const }));
+
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-cache-hit-"));
+  const changeDirPath = join(cwd, ".specwright/changes/0001-test");
+  await mkdir(changeDirPath, { recursive: true });
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n", "utf8");
+  await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "test",
+        title: "Test",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "executing",
+        step: "execute",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: { id: "T001", title: "Test", status: "done", updatedAt: "2026-01-01T00:00:00.000Z" },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }), "utf8");
+
+  try {
+    await refreshStatus({}, { cwd, ui: { setStatus() {} } });
+    await refreshStatus({}, { cwd, ui: { setStatus() {} } });
+    expect(spy.mock.calls.length).toBe(1);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("status refresh reruns after canonical artifact mtime changes", async () => {
+  const commands = await import("../src/core/commands");
+  const spy = spyOn(commands, "runSpecwrightCommand");
+  spy.mockImplementation(async () => ({ ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=1/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const }));
+
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-cache-miss-"));
+  const changeDirPath = join(cwd, ".specwright/changes/0001-test");
+  await mkdir(changeDirPath, { recursive: true });
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n", "utf8");
+  await writeFile(join(changeDirPath, "plan.md"), "# Plan\n", "utf8");
+  await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "test",
+        title: "Test",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "executing",
+        step: "execute",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: { id: "T001", title: "Test", status: "done", updatedAt: "2026-01-01T00:00:00.000Z" },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }), "utf8");
+
+  try {
+    await refreshStatus({}, { cwd, ui: { setStatus() {} } });
+    await writeFile(join(changeDirPath, "plan.md"), "# Plan\n\nUpdated.\n", "utf8");
+    await refreshStatus({}, { cwd, ui: { setStatus() {} } });
+    expect(spy.mock.calls.length).toBe(2);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("status refresh does not run validation when no change is active", async () => {
+  const commands = await import("../src/core/commands");
+  const spy = spyOn(commands, "runSpecwrightCommand");
+  spy.mockImplementation(async () => ({ ok: true, summary: "test", statusText: "test", filesCreated: [], filesUpdated: [], exitCode: 0 as const }));
+
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-no-change-"));
+  await mkdir(join(cwd, ".specwright"), { recursive: true });
+  await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
+    version: 1,
+    currentChange: null,
+    changes: {},
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }), "utf8");
+
+  try {
+    await refreshStatus({}, { cwd, ui: { setStatus() {} } });
+    expect(spy.mock.calls.length).toBe(0);
+  } finally {
+    spy.mockRestore();
+  }
 });
