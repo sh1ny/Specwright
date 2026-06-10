@@ -597,14 +597,14 @@ test("widened OMP adapter API surface accepts new fields without breaking existi
 });
 
 test("OMP extension registers structured tools", () => {
-  const tools = new Map<string, { description: string; parameters: Record<string, unknown> }>();
+  const tools = new Map<string, ToolDefinition>();
   const pi: ExtensionApiLike = {
     setLabel() {},
     on() {},
     registerCommand() {},
     sendUserMessage() {},
     registerTool(definition) {
-      tools.set(definition.name, { description: definition.description, parameters: definition.parameters as Record<string, unknown> });
+      tools.set(definition.name, definition);
     },
     getActiveTools() { return []; },
     setActiveTools() {},
@@ -614,14 +614,26 @@ test("OMP extension registers structured tools", () => {
   expect(tools.has("specwright_status")).toBe(true);
   expect(tools.has("specwright_checkpoint")).toBe(true);
   expect(tools.has("specwright_validate")).toBe(true);
-  expect(tools.get("specwright_status")?.description).toBe("Return Specwright status as JSON");
-  const checkpointProperties = tools.get("specwright_checkpoint")?.parameters.properties as Record<string, unknown>;
-  const validateProperties = tools.get("specwright_validate")?.parameters.properties as Record<string, unknown>;
-  expect(checkpointProperties).toHaveProperty("change");
-  expect(checkpointProperties).toHaveProperty("phase");
-  expect(checkpointProperties).toHaveProperty("task");
-  expect(checkpointProperties).toHaveProperty("files");
-  expect(validateProperties).toHaveProperty("change");
+  const statusDef = tools.get("specwright_status")!;
+  expect(statusDef.name).toBe("specwright_status");
+  expect(typeof statusDef.label).toBe("string");
+  expect(typeof statusDef.execute).toBe("function");
+  expect(statusDef.description).toBe("Return Specwright status as JSON");
+  const checkpointDef = tools.get("specwright_checkpoint")!;
+  expect(checkpointDef.name).toBe("specwright_checkpoint");
+  expect(typeof checkpointDef.label).toBe("string");
+  expect(typeof checkpointDef.execute).toBe("function");
+  const checkpointProperties = checkpointDef.parameters as { properties?: Record<string, unknown> };
+  expect(checkpointProperties.properties).toHaveProperty("change");
+  expect(checkpointProperties.properties).toHaveProperty("phase");
+  expect(checkpointProperties.properties).toHaveProperty("task");
+  expect(checkpointProperties.properties).toHaveProperty("files");
+  const validateDef = tools.get("specwright_validate")!;
+  expect(validateDef.name).toBe("specwright_validate");
+  expect(typeof validateDef.label).toBe("string");
+  expect(typeof validateDef.execute).toBe("function");
+  const validateProperties = validateDef.parameters as { properties?: Record<string, unknown> };
+  expect(validateProperties.properties).toHaveProperty("change");
 });
 
 test("specwright_status tool returns structured CommandResult shape", async () => {
@@ -644,12 +656,17 @@ test("specwright_status tool returns structured CommandResult shape", async () =
 
   const statusTool = tools.get("specwright_status");
   expect(statusTool).toBeDefined();
-  const result = (await statusTool!.execute("tool-call", {}, undefined, undefined, { cwd })).details as Record<string, unknown>;
-  expect(result.ok).toBe(true);
-  expect(typeof result.summary).toBe("string");
-  expect(Array.isArray(result.filesCreated)).toBe(true);
-  expect(Array.isArray(result.filesUpdated)).toBe(true);
-  expect(result.exitCode).toBe(0);
+  const result = await statusTool!.execute("tool-call", {}, undefined, undefined, { cwd });
+  expect(Array.isArray(result.content)).toBe(true);
+  expect(result.content[0]).toHaveProperty("type", "text");
+  expect(typeof result.content[0].text).toBe("string");
+  const details = result.details as Record<string, unknown>;
+  expect(details.ok).toBe(true);
+  expect(typeof details.summary).toBe("string");
+  expect(Array.isArray(details.filesCreated)).toBe(true);
+  expect(Array.isArray(details.filesUpdated)).toBe(true);
+  expect(details.exitCode).toBe(0);
+  expect(result.content[0].text).toBe(details.summary);
 });
 
 test("specwright_validate tool returns structured result with validation report", async () => {
@@ -673,12 +690,17 @@ test("specwright_validate tool returns structured result with validation report"
 
   const validateTool = tools.get("specwright_validate");
   expect(validateTool).toBeDefined();
-  const result = (await validateTool!.execute("tool-call", {}, undefined, undefined, { cwd })).details as Record<string, unknown>;
-  expect(typeof result.ok).toBe("boolean");
-  expect(typeof result.summary).toBe("string");
-  expect(Array.isArray(result.filesCreated)).toBe(true);
-  expect(Array.isArray(result.filesUpdated)).toBe(true);
-  expect(result.exitCode).toBeOneOf([0, 1]);
+  const result = await validateTool!.execute("tool-call", {}, undefined, undefined, { cwd });
+  expect(Array.isArray(result.content)).toBe(true);
+  expect(result.content[0]).toHaveProperty("type", "text");
+  expect(typeof result.content[0].text).toBe("string");
+  const details = result.details as Record<string, unknown>;
+  expect(typeof details.ok).toBe("boolean");
+  expect(typeof details.summary).toBe("string");
+  expect(Array.isArray(details.filesCreated)).toBe(true);
+  expect(Array.isArray(details.filesUpdated)).toBe(true);
+  expect(details.exitCode).toBeOneOf([0, 1]);
+  expect(result.content[0].text).toBe(details.summary);
 });
 
 test("specwright_checkpoint tool rejects phase and task together", async () => {
@@ -772,13 +794,30 @@ test("specwright_checkpoint tool forwards valid params to command", async () => 
   await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["init"]);
   await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["new", "feature", "Test checkpoint forwarding"]);
 
-  const checkpointTool = tools.get("specwright_checkpoint");
-  expect(checkpointTool).toBeDefined();
-  // Without a git worktree the command will fail, but the error should NOT be about invalid params
-  const result = (await checkpointTool!.execute("tool-call", { change: "", phase: "verify", files: ["tasks.md"] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
-  expect(result.ok).toBe(false);
-  expect(result.summary).not.toBe("Specify exactly one of phase or task.");
-  expect(result.summary).not.toBe("At least one file must be supplied.");
+  const commandsModule = await import("../src/core/commands");
+  const runSpy = spyOn(commandsModule, "runSpecwrightCommand");
+  runSpy.mockImplementation(() =>
+    Promise.resolve({
+      ok: false,
+      summary: "Not a git repository",
+      filesCreated: [],
+      filesUpdated: [],
+      exitCode: 1,
+    })
+  );
+  try {
+    const checkpointTool = tools.get("specwright_checkpoint");
+    expect(checkpointTool).toBeDefined();
+    const result = (await checkpointTool!.execute("tool-call", { change: "", phase: "verify", files: ["tasks.md"] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
+    expect(result.ok).toBe(false);
+    expect(result.summary).not.toBe("Specify exactly one of phase or task.");
+    expect(result.summary).not.toBe("At least one file must be supplied.");
+    expect(runSpy).toHaveBeenCalledTimes(1);
+    const [, argv] = runSpy.mock.calls[0];
+    expect(argv).toEqual(["checkpoint", "", "--phase", "verify", "--files", "tasks.md"]);
+  } finally {
+    runSpy.mockRestore();
+  }
 });
 test("wrong first tool call after lifecycle command is blocked", async () => {
   const commandsModule = await import("../src/core/commands");
