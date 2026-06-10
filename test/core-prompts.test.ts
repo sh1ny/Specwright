@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultConfig } from "../src/core/state";
 import { renderLifecycleSpawnStrategy, type RoutedLifecycleStep } from "../src/core/prompts";
+import {
+  renderOmpLifecycleSpawnStrategy,
+  renderOmpDiscussPrompt,
+  renderOmpSubagentRetryClause,
+} from "../src/runtime/omp/prompts";
 import { runSpecwrightCommand } from "../src/core/commands";
 
 test("lifecycle spawn strategy routes each phase to configured agent model", () => {
@@ -19,12 +24,18 @@ test("lifecycle spawn strategy routes each phase to configured agent model", () 
     verify: { agent: "specwright-verifier", model: "custom/verify", key: "agents.verifier.model" },
   };
 
-  for (const [step, details] of Object.entries(expected) as Array<[RoutedLifecycleStep, (typeof expected)[RoutedLifecycleStep]]>) {
+  for (const [step, details] of Object.entries(expected) as Array<[
+    RoutedLifecycleStep,
+    (typeof expected)[RoutedLifecycleStep],
+  ]>) {
     const strategy = renderLifecycleSpawnStrategy({ step, config });
-    expect(strategy).toContain("OMP's `task` tool");
-    expect(strategy).toContain(`spawn \`${details.agent}\``);
+    expect(strategy).not.toContain("OMP's `task` tool");
+    expect(strategy).toContain(`delegate to \`${details.agent}\``);
     expect(strategy).toContain(`configured model \`${details.model}\``);
     expect(strategy).toContain(`\`${details.key}\``);
+    expect(strategy).toContain("excludes this Lifecycle spawn strategy section");
+    expect(strategy).toContain("MUST NOT tell the subagent that its first action is to delegate to another lifecycle agent");
+    expect(strategy).toContain("MUST NOT include the blocker rule for missing lifecycle delegation");
     expect(strategy).toContain("lifecycle orchestrator");
     expect(strategy).toContain("first operational action");
     expect(strategy).toContain(`While the \`${details.agent}\` subagent is active, do not perform implementation-file reads`);
@@ -36,6 +47,47 @@ test("lifecycle spawn strategy routes each phase to configured agent model", () 
     expect(strategy).toContain("do not proceed with direct inline work");
     expect(strategy).not.toContain("do the work directly in this agent with the same rules instead of blocking");
     expect(strategy).toContain(`Wait for the \`${details.agent}\` result`);
+    expect(strategy).not.toContain("Pass the full current prompt as the subagent assignment");
+  }
+});
+
+test("OMP lifecycle spawn strategy includes task tool and spawn instructions", () => {
+  const config = defaultConfig("prompt-test");
+  config.agents.researcher.model = "custom/research";
+  config.agents.planner.model = "custom/plan";
+  config.agents.executor.model = "custom/execute";
+  config.agents.verifier.model = "custom/verify";
+  const expected: Record<RoutedLifecycleStep, { agent: string; model: string; key: string }> = {
+    research: { agent: "specwright-researcher", model: "custom/research", key: "agents.researcher.model" },
+    plan: { agent: "specwright-planner", model: "custom/plan", key: "agents.planner.model" },
+    execute: { agent: "specwright-executor", model: "custom/execute", key: "agents.executor.model" },
+    verify: { agent: "specwright-verifier", model: "custom/verify", key: "agents.verifier.model" },
+  };
+
+  for (const [step, details] of Object.entries(expected) as Array<[
+    RoutedLifecycleStep,
+    (typeof expected)[RoutedLifecycleStep],
+  ]>) {
+    const strategy = renderOmpLifecycleSpawnStrategy({ step, config });
+    expect(strategy).toContain("OMP's `task` tool");
+    expect(strategy).toContain(`spawn \`${details.agent}\``);
+    expect(strategy).toContain(`configured model \`${details.model}\``);
+    expect(strategy).toContain(`\`${details.key}\``);
+    expect(strategy).toContain("excludes this Lifecycle spawn strategy section");
+    expect(strategy).toContain("MUST NOT tell the subagent that its first action is to spawn another lifecycle agent");
+    expect(strategy).toContain("MUST NOT include the blocker rule for missing lifecycle delegation");
+    expect(strategy).toContain("lifecycle orchestrator");
+    expect(strategy).toContain("first operational action");
+    expect(strategy).toContain(`While the \`${details.agent}\` subagent is active, do not perform implementation-file reads`);
+    expect(strategy).toContain("code or artifact edits");
+    expect(strategy).toContain("test runs");
+    expect(strategy).toContain("artifact or status updates");
+    expect(strategy).toContain("completion claims");
+    expect(strategy).toContain("report a visible blocker naming the missing component and stop");
+    expect(strategy).toContain("do not proceed with direct inline work");
+    expect(strategy).not.toContain("do the work directly in this agent with the same rules instead of blocking");
+    expect(strategy).toContain(`Wait for the \`${details.agent}\` result`);
+    expect(strategy).not.toContain("Pass the full current prompt as the subagent assignment");
   }
 });
 
@@ -64,8 +116,11 @@ test("fresh init defaults route lifecycle prompts to matching agents and models"
   for (const { argv, agent, model } of expected) {
     const result = await runSpecwrightCommand(ctx, [...argv]);
     expect(result.ok).toBe(true);
-    expect(result.prompt).toContain(`spawn \`${agent}\``);
+    expect(result.prompt).toContain(`delegate to \`${agent}\``);
     expect(result.prompt).toContain(`configured model \`${model}\``);
+    expect(result.prompt).toContain("excludes this Lifecycle spawn strategy section");
+    expect(result.prompt).not.toContain("Pass the full current prompt as the subagent assignment");
+    expect(result.prompt).not.toContain("OMP's `task` tool");
   }
 });
 
@@ -79,13 +134,17 @@ test("research prompt includes online research and fallback", async () => {
   expect(result.ok).toBe(true);
   expect(result.prompt).toContain("web_search");
   expect(result.prompt).toContain("sources.md");
-  expect(result.prompt).toContain("retry the same assignment once with OMP's bundled `task` agent");
-  expect(result.prompt).toContain("spawn `specwright-researcher`");
+  expect(result.prompt).toContain("retry the same assignment once with the default task agent");
+  expect(result.prompt).not.toContain("OMP's bundled `task` agent");
+  expect(result.prompt).toContain("delegate to `specwright-researcher`");
   expect(result.prompt).toContain("configured model `pi/task`");
+  expect(result.prompt).toContain("excludes this Lifecycle spawn strategy section");
+  expect(result.prompt).toContain("MUST NOT tell the subagent that its first action is to delegate to another lifecycle agent");
+  expect(result.prompt).not.toContain("Pass the full current prompt as the subagent assignment");
   expect(result.prompt).toContain("specwright checkpoint 0001-inventory-crafting --phase research --files .specwright/changes/0001-inventory-crafting/research.md,.specwright/changes/0001-inventory-crafting/sources.md,.specwright/changes/0001-inventory-crafting/evidence.md,.specwright/changes/0001-inventory-crafting/options.md");
 });
 
-test("discuss prompt requires OMP-led clarification before artifact writes", async () => {
+test("discuss prompt is runtime-neutral without OMP references", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-discuss-prompt-"));
   const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
@@ -94,10 +153,43 @@ test("discuss prompt requires OMP-led clarification before artifact writes", asy
   const result = await runSpecwrightCommand(ctx, ["discuss", "--print-prompt"]);
   expect(result.ok).toBe(true);
   const prompt = result.prompt ?? "";
-  expect(prompt).toContain("You are the receiving OMP agent");
+  expect(prompt).not.toContain("You are the receiving OMP agent");
   expect(prompt).toContain("Inspect bounded local evidence before asking");
   expect(prompt).toContain("Identify 3-4 change-specific gray areas");
   expect(prompt).toContain("Ask the user before writing final artifacts");
+  expect(prompt).toContain("Use structured clarification");
+  expect(prompt).toContain("multi-select");
+  expect(prompt).toContain("recommended defaults");
+  expect(prompt).toContain("option descriptions");
+  expect(prompt).toContain("group related questions");
+  expect(prompt).toContain("numbered plain-text options and wait for the user's answer");
+  expect(prompt).toContain("After each completed gray area, write a short checkpoint");
+  expect(prompt).toContain("Update intent.md, constraints.md, and decisions.md only after the relevant answers are settled");
+  expect(prompt).toContain("`Ready for research`");
+  expect(prompt).toContain("deterministic Specwright CLI has already prepared the discussion artifacts");
+  expect(prompt).toContain("specwright checkpoint 0001-inventory-crafting --phase discuss --files .specwright/changes/0001-inventory-crafting/discussion.md,.specwright/changes/0001-inventory-crafting/intent.md,.specwright/changes/0001-inventory-crafting/constraints.md,.specwright/changes/0001-inventory-crafting/decisions.md");
+  expect(prompt).not.toContain("Lifecycle spawn strategy");
+  expect(prompt).not.toContain("delegate to `specwright-");
+  expect(prompt).not.toContain("Use Oh My Pi `ask`");
+});
+
+test("OMP discuss prompt includes ask dialog references", () => {
+  const config = defaultConfig("prompt-test");
+  const change = {
+    id: "0001",
+    slug: "inventory-crafting",
+    title: "Inventory Crafting",
+    kind: "feature" as const,
+    pack: "core",
+    mode: "lite" as const,
+    status: "discussing" as const,
+    step: "discuss" as const,
+    tasks: {},
+    createdAt: "2026-06-08T00:00:00.000Z",
+    updatedAt: "2026-06-08T00:00:00.000Z",
+  };
+  const prompt = renderOmpDiscussPrompt({ step: "discuss", change, config, cwd: "/tmp" });
+  expect(prompt).toContain("You are the receiving OMP agent");
   expect(prompt).toContain("Use Oh My Pi `ask`");
   expect(prompt).toContain("`multi: true`");
   expect(prompt).toContain("`recommended` defaults");
@@ -108,10 +200,8 @@ test("discuss prompt requires OMP-led clarification before artifact writes", asy
   expect(prompt).toContain("Update intent.md, constraints.md, and decisions.md only after the relevant answers are settled");
   expect(prompt).toContain("`Ready for research`");
   expect(prompt).toContain("deterministic Specwright CLI has already prepared the discussion artifacts");
-  expect(prompt).toContain("specwright checkpoint 0001-inventory-crafting --phase discuss --files .specwright/changes/0001-inventory-crafting/discussion.md,.specwright/changes/0001-inventory-crafting/intent.md,.specwright/changes/0001-inventory-crafting/constraints.md,.specwright/changes/0001-inventory-crafting/decisions.md");
   expect(prompt).not.toContain("Lifecycle spawn strategy");
-  expect(prompt).not.toContain("spawn `specwright-");
-  expect(prompt).not.toContain("CLI can call `ask`");
+  expect(prompt).not.toContain("delegate to `specwright-");
 });
 
 test("plan and tasks prompts require CLI-parseable checklist tasks", async () => {
@@ -127,7 +217,7 @@ test("plan and tasks prompts require CLI-parseable checklist tasks", async () =>
   expect(planResult.prompt).toContain("Do NOT use task headings such as ### T001");
   expect(planResult.prompt).toContain("only checklist lines define executable tasks");
   expect(planResult.prompt).toContain("specwright checkpoint 0001-inventory-crafting --phase plan --files .specwright/changes/0001-inventory-crafting/plan.md,.specwright/changes/0001-inventory-crafting/tasks.md");
-  expect(planResult.prompt).toContain("spawn `specwright-planner`");
+  expect(planResult.prompt).toContain("delegate to `specwright-planner`");
   expect(planResult.prompt).toContain("configured model `pi/plan`");
   expect(planResult.prompt).not.toContain("\n  - [ ]");
 
@@ -138,7 +228,7 @@ test("plan and tasks prompts require CLI-parseable checklist tasks", async () =>
   expect(tasksResult.prompt).toContain("Do NOT write task IDs as headings such as ### T001");
   expect(tasksResult.prompt).toContain("specwright checkpoint 0001-inventory-crafting --phase tasks --files .specwright/changes/0001-inventory-crafting/tasks.md");
   expect(tasksResult.prompt).not.toContain("Lifecycle spawn strategy");
-  expect(tasksResult.prompt).not.toContain("spawn `specwright-");
+  expect(tasksResult.prompt).not.toContain("delegate to `specwright-");
 });
 
 test("execute prompt includes scoped checkpoint command from task files", async () => {
@@ -165,11 +255,18 @@ test("execute prompt includes scoped checkpoint command from task files", async 
   const result = await runSpecwrightCommand(ctx, ["execute", "--task", "T001", "--print-prompt"]);
   expect(result.ok).toBe(true);
   expect(result.prompt).toContain("specwright checkpoint 0001-inventory-crafting --task T001 --files src/core/commands.ts,test/core-commands.test.ts");
-  expect(result.prompt).toContain("spawn `specwright-executor`");
+  expect(result.prompt).toContain("delegate to `specwright-executor`");
   expect(result.prompt).toContain("configured model `pi/task`");
 
   const verifyResult = await runSpecwrightCommand(ctx, ["verify", "--print-prompt"]);
   expect(verifyResult.ok).toBe(true);
-  expect(verifyResult.prompt).toContain("spawn `specwright-verifier`");
+  expect(verifyResult.prompt).toContain("delegate to `specwright-verifier`");
   expect(verifyResult.prompt).toContain("configured model `pi/task`");
+});
+
+test("OMP subagent retry clause references bundled task agent", () => {
+  const clause = renderOmpSubagentRetryClause();
+  expect(clause).toContain("OMP's bundled `task` agent");
+  expect(clause).toContain("retry the same assignment once");
+  expect(clause).toContain("read-only/no-project-wide-command constraints");
 });
