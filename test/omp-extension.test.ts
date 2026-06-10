@@ -436,3 +436,186 @@ test("widened OMP adapter API surface accepts new fields without breaking existi
   expect(editorValue).toBe("code");
   expect(confirmed).toBe(true);
 });
+
+test("OMP extension registers structured tools", () => {
+  const tools = new Map<string, { description: string; parameters: Record<string, unknown> }>();
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on() {},
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool(name, definition) {
+      tools.set(name, { description: definition.description, parameters: definition.parameters ?? {} });
+    },
+    getActiveTools() { return []; },
+    setActiveTools() {},
+  };
+
+  specwrightOmpExtension(pi);
+  expect(tools.has("specwright_status")).toBe(true);
+  expect(tools.has("specwright_checkpoint")).toBe(true);
+  expect(tools.has("specwright_validate")).toBe(true);
+  expect(tools.get("specwright_status")?.description).toBe("Return Specwright status as JSON");
+  expect(tools.get("specwright_checkpoint")?.parameters).toHaveProperty("change");
+  expect(tools.get("specwright_checkpoint")?.parameters).toHaveProperty("phase");
+  expect(tools.get("specwright_checkpoint")?.parameters).toHaveProperty("task");
+  expect(tools.get("specwright_checkpoint")?.parameters).toHaveProperty("files");
+  expect(tools.get("specwright_validate")?.parameters).toHaveProperty("change");
+});
+
+test("specwright_status tool returns structured CommandResult shape", async () => {
+  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on() {},
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool(name, definition) {
+      tools.set(name, { handler: definition.handler });
+    },
+    getActiveTools() { return []; },
+    setActiveTools() {},
+  };
+
+  specwrightOmpExtension(pi);
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-status-tool-"));
+  await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["init"]);
+
+  const statusTool = tools.get("specwright_status");
+  expect(statusTool).toBeDefined();
+  const result = await statusTool!.handler({}, { cwd }) as Record<string, unknown>;
+  expect(result.ok).toBe(true);
+  expect(typeof result.summary).toBe("string");
+  expect(Array.isArray(result.filesCreated)).toBe(true);
+  expect(Array.isArray(result.filesUpdated)).toBe(true);
+  expect(result.exitCode).toBe(0);
+});
+
+test("specwright_validate tool returns structured result with validation report", async () => {
+  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on() {},
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool(name, definition) {
+      tools.set(name, { handler: definition.handler });
+    },
+    getActiveTools() { return []; },
+    setActiveTools() {},
+  };
+
+  specwrightOmpExtension(pi);
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-validate-tool-"));
+  await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["init"]);
+  await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["new", "feature", "Test validation tool"]);
+
+  const validateTool = tools.get("specwright_validate");
+  expect(validateTool).toBeDefined();
+  const result = await validateTool!.handler({}, { cwd }) as Record<string, unknown>;
+  expect(typeof result.ok).toBe("boolean");
+  expect(typeof result.summary).toBe("string");
+  expect(Array.isArray(result.filesCreated)).toBe(true);
+  expect(Array.isArray(result.filesUpdated)).toBe(true);
+  expect(result.exitCode).toBeOneOf([0, 1]);
+});
+
+test("specwright_checkpoint tool rejects phase and task together", async () => {
+  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on() {},
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool(name, definition) {
+      tools.set(name, { handler: definition.handler });
+    },
+    getActiveTools() { return []; },
+    setActiveTools() {},
+  };
+
+  specwrightOmpExtension(pi);
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-both-"));
+  const checkpointTool = tools.get("specwright_checkpoint");
+  expect(checkpointTool).toBeDefined();
+  const result = await checkpointTool!.handler({ change: "", phase: "verify", task: "T001", files: ["tasks.md"] }, { cwd }) as Record<string, unknown>;
+  expect(result.ok).toBe(false);
+  expect(result.summary).toBe("Specify exactly one of phase or task.");
+  expect(result.exitCode).toBe(1);
+});
+
+test("specwright_checkpoint tool rejects missing phase and task", async () => {
+  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on() {},
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool(name, definition) {
+      tools.set(name, { handler: definition.handler });
+    },
+    getActiveTools() { return []; },
+    setActiveTools() {},
+  };
+
+  specwrightOmpExtension(pi);
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-none-"));
+  const checkpointTool = tools.get("specwright_checkpoint");
+  expect(checkpointTool).toBeDefined();
+  const result = await checkpointTool!.handler({ change: "", files: ["tasks.md"] }, { cwd }) as Record<string, unknown>;
+  expect(result.ok).toBe(false);
+  expect(result.summary).toBe("Specify exactly one of phase or task.");
+  expect(result.exitCode).toBe(1);
+});
+
+test("specwright_checkpoint tool rejects empty files array", async () => {
+  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on() {},
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool(name, definition) {
+      tools.set(name, { handler: definition.handler });
+    },
+    getActiveTools() { return []; },
+    setActiveTools() {},
+  };
+
+  specwrightOmpExtension(pi);
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-empty-files-"));
+  const checkpointTool = tools.get("specwright_checkpoint");
+  expect(checkpointTool).toBeDefined();
+  const result = await checkpointTool!.handler({ change: "", phase: "verify", files: [] }, { cwd }) as Record<string, unknown>;
+  expect(result.ok).toBe(false);
+  expect(result.summary).toBe("At least one file must be supplied.");
+  expect(result.exitCode).toBe(1);
+});
+
+test("specwright_checkpoint tool forwards valid params to command", async () => {
+  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on() {},
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool(name, definition) {
+      tools.set(name, { handler: definition.handler });
+    },
+    getActiveTools() { return []; },
+    setActiveTools() {},
+  };
+
+  specwrightOmpExtension(pi);
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-forward-"));
+  await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["init"]);
+  await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["new", "feature", "Test checkpoint forwarding"]);
+
+  const checkpointTool = tools.get("specwright_checkpoint");
+  expect(checkpointTool).toBeDefined();
+  // Without a git worktree the command will fail, but the error should NOT be about invalid params
+  const result = await checkpointTool!.handler({ change: "", phase: "verify", files: ["tasks.md"] }, { cwd }) as Record<string, unknown>;
+  expect(result.ok).toBe(false);
+  expect(result.summary).not.toBe("Specify exactly one of phase or task.");
+  expect(result.summary).not.toBe("At least one file must be supplied.");
+});
