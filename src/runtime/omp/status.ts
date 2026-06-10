@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { runSpecwrightCommand } from "../../core/commands";
 import { changeDir } from "../../core/paths";
 import { loadState } from "../../core/state";
+import type { ValidationReport } from "../../core/validators";
 import type { OmpContextLike } from "./types";
 
 const refreshInFlightByCwd = new Map<string, Promise<string | undefined>>();
@@ -22,6 +23,7 @@ interface StatusCacheEntry {
 }
 
 const statusCache = new Map<string, StatusCacheEntry>();
+const lastDisplayedStatusByCwd = new Map<string, string | undefined>();
 
 async function getCurrentChange(cwd: string): Promise<{ id: string; slug: string } | undefined> {
   const state = await loadState(cwd);
@@ -92,8 +94,56 @@ async function loadStatusText(cwd: string): Promise<string | undefined> {
   }
 
   const pending = (async () => {
-    const result = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["status"]);
-    const statusText = result.ok && result.statusText ? result.statusText : undefined;
+    let currentChange: string | undefined;
+    let currentStatus: string | undefined;
+    let progress = { total: 0, done: 0 };
+
+    const statusResult = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["status", "--json"]);
+    if (statusResult.summary) {
+      try {
+        const data = JSON.parse(statusResult.summary);
+        currentChange = data.currentChange;
+        currentStatus = data.currentStatus;
+        progress = data.tasks ?? progress;
+      } catch {
+        // JSON parse failed; fall back to plain status
+      }
+    }
+
+    if (!currentChange) {
+      const plainResult = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["status"]);
+      if (plainResult.ok && plainResult.statusText) {
+        return plainResult.statusText;
+      }
+      return undefined;
+    }
+
+    let report: ValidationReport | undefined;
+    const verifyResult = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["verify", "--json"]);
+    if (verifyResult.summary) {
+      try {
+        report = JSON.parse(verifyResult.summary);
+      } catch {
+        // Ignore parse errors
+      }
+    }
+
+    let statusText: string | undefined;
+    if (report && !report.ok) {
+      const driftIssues = report.issues.filter((issue) => issue.code === "SW009");
+      if (driftIssues.length > 0) {
+        statusText = `Specwright · ${change.id} · drift · tasks=${progress.done}/${progress.total}`;
+      } else {
+        const firstError = report.issues.find((issue) => issue.level === "error");
+        const code = firstError?.code ?? "error";
+        statusText = `Specwright · ${change.id} · blocked · ${code}`;
+      }
+    } else if (progress.total > 0 && progress.done === progress.total && currentStatus !== "done") {
+      statusText = `Specwright · ${change.id} · checkpoint-needed · tasks=${progress.done}/${progress.total}`;
+    } else {
+      const taskSuffix = progress.total > 0 ? ` · tasks=${progress.done}/${progress.total}` : "";
+      statusText = `Specwright · ${change.id} · ${currentStatus ?? "idle"}${taskSuffix}`;
+    }
 
     // Recompute the key after command execution so that any files the command
     // itself modified (e.g. state.json after task sync) are reflected in the
@@ -122,7 +172,12 @@ async function loadStatusText(cwd: string): Promise<string | undefined> {
 }
 
 export function shouldDisplayStatusText(statusText: string): boolean {
-  return statusText.includes("tasks=");
+  return (
+    statusText.includes("tasks=") ||
+    statusText.includes("blocked") ||
+    statusText.includes("drift") ||
+    statusText.includes("checkpoint-needed")
+  );
 }
 
 export async function refreshStatus(_event: unknown, ctx: OmpContextLike): Promise<void> {
@@ -134,17 +189,38 @@ export async function refreshStatus(_event: unknown, ctx: OmpContextLike): Promi
   const statusText = await loadStatusText(cwd);
   if (!statusText) {
     ctx.ui.setStatus("specwright", undefined);
+    lastDisplayedStatusByCwd.set(cwd, undefined);
     return;
   }
   if (!shouldDisplayStatusText(statusText)) {
     ctx.ui.setStatus("specwright", undefined);
+    lastDisplayedStatusByCwd.set(cwd, undefined);
     return;
   }
+
+  const lastStatus = lastDisplayedStatusByCwd.get(cwd);
+  if (lastStatus !== statusText && (statusText.includes("blocked") || statusText.includes("drift") || statusText.includes("checkpoint-needed")) && typeof ctx.ui?.notify === "function") {
+    const changeMatch = statusText.match(/Specwright · ([^·]+) ·/);
+    const change = changeMatch?.[1]?.trim() ?? "change";
+    if (statusText.includes("blocked")) {
+      const codeMatch = statusText.match(/blocked · (.+)$/);
+      const code = codeMatch?.[1] ?? "error";
+      ctx.ui.notify(`Specwright: ${change} is blocked (${code})`, "warning");
+    } else if (statusText.includes("drift")) {
+      ctx.ui.notify(`Specwright: ${change} has task drift`, "warning");
+    } else if (statusText.includes("checkpoint-needed")) {
+      ctx.ui.notify(`Specwright: ${change} needs checkpoint`, "warning");
+    }
+  }
+
   ctx.ui.setStatus("specwright", statusText);
+  lastDisplayedStatusByCwd.set(cwd, statusText);
 }
 
 export function clearStatus(_event: unknown, ctx: OmpContextLike): void {
+  const cwd = ctx.cwd ?? process.cwd();
   ctx.ui?.setStatus?.("specwright", undefined);
+  lastDisplayedStatusByCwd.set(cwd, undefined);
 }
 
 export function getArgumentCompletions(prefix: string): Array<{ value: string; label?: string; description?: string }> {

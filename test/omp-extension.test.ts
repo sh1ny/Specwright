@@ -65,6 +65,16 @@ test("OMP status refresh syncs tasks.md before rendering status", async () => {
   specwrightOmpExtension(pi);
   expect(label).toBe("Specwright");
 
+  const commands = await import("../src/core/commands");
+  const originalRun = commands.runSpecwrightCommand;
+  const spy = spyOn(commands, "runSpecwrightCommand");
+  spy.mockImplementation(async (_ctx, args) => {
+    if (args.includes("--json") && args.includes("verify")) {
+      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    return originalRun(_ctx, args);
+  });
+
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-refresh-"));
   const changeDir = join(cwd, ".specwright/changes/0001-drift");
   await mkdir(changeDir, { recursive: true });
@@ -97,18 +107,32 @@ test("OMP status refresh syncs tasks.md before rendering status", async () => {
     updatedAt: "2026-01-01T00:00:00.000Z",
   }, null, 2)}\n`, "utf8");
 
-  const refresh = handlers.get("session_start");
-  expect(refresh).toBeDefined();
-  await refresh?.({}, {
-    cwd,
-    ui: {
-      setStatus(_key, text) { statuses.push(text); },
-    },
-  });
+  try {
+    const refresh = handlers.get("session_start");
+    expect(refresh).toBeDefined();
+    await refresh?.({}, {
+      cwd,
+      ui: {
+        setStatus(_key, text) { statuses.push(text); },
+      },
+    });
 
-  expect(statuses.at(-1)).toContain("Specwright · 0001 · executing · tasks=1/1");
+    expect(statuses.at(-1)).toContain("Specwright · 0001 · checkpoint-needed · tasks=1/1");
+  } finally {
+    spy.mockRestore();
+  }
 });
 test("concurrent refreshStatus calls do not throw ENOENT on temp file rename", async () => {
+  const commands = await import("../src/core/commands");
+  const originalRun = commands.runSpecwrightCommand;
+  const spy = spyOn(commands, "runSpecwrightCommand");
+  spy.mockImplementation(async (_ctx, args) => {
+    if (args.includes("--json") && args.includes("verify")) {
+      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    return originalRun(_ctx, args);
+  });
+
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-concurrent-"));
   const changeDir = join(cwd, ".specwright/changes/0001-drift");
   await mkdir(changeDir, { recursive: true });
@@ -149,19 +173,33 @@ test("concurrent refreshStatus calls do not throw ENOENT on temp file rename", a
     },
   };
 
-  const results = await Promise.allSettled([
-    refreshStatus({}, ctx),
-    refreshStatus({}, ctx),
-    refreshStatus({}, ctx),
-  ]);
+  try {
+    const results = await Promise.allSettled([
+      refreshStatus({}, ctx),
+      refreshStatus({}, ctx),
+      refreshStatus({}, ctx),
+    ]);
 
-  for (const result of results) {
-    expect(result.status).toBe("fulfilled");
+    for (const result of results) {
+      expect(result.status).toBe("fulfilled");
+    }
+    expect(statuses.at(-1)).toContain("Specwright · 0001 · checkpoint-needed · tasks=1/1");
+  } finally {
+    spy.mockRestore();
   }
-  expect(statuses.at(-1)).toContain("Specwright · 0001 · executing · tasks=1/1");
 });
 
 test("concurrent refreshStatus calls update each waiting OMP context", async () => {
+  const commands = await import("../src/core/commands");
+  const originalRun = commands.runSpecwrightCommand;
+  const spy = spyOn(commands, "runSpecwrightCommand");
+  spy.mockImplementation(async (_ctx, args) => {
+    if (args.includes("--json") && args.includes("verify")) {
+      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    return originalRun(_ctx, args);
+  });
+
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-concurrent-contexts-"));
   const changeDir = join(cwd, ".specwright/changes/0001-drift");
   await mkdir(changeDir, { recursive: true });
@@ -199,23 +237,27 @@ test("concurrent refreshStatus calls update each waiting OMP context", async () 
   const firstStatuses: Array<string | undefined> = [];
   const secondStatuses: Array<string | undefined> = [];
 
-  await Promise.all([
-    refreshStatus({}, {
-      cwd,
-      ui: {
-        setStatus(_key, text) { firstStatuses.push(text); },
-      },
-    }),
-    refreshStatus({}, {
-      cwd,
-      ui: {
-        setStatus(_key, text) { secondStatuses.push(text); },
-      },
-    }),
-  ]);
+  try {
+    await Promise.all([
+      refreshStatus({}, {
+        cwd,
+        ui: {
+          setStatus(_key, text) { firstStatuses.push(text); },
+        },
+      }),
+      refreshStatus({}, {
+        cwd,
+        ui: {
+          setStatus(_key, text) { secondStatuses.push(text); },
+        },
+      }),
+    ]);
 
-  expect(firstStatuses.at(-1)).toContain(`Specwright · 0001 · executing · tasks=${taskCount}/${taskCount}`);
-  expect(secondStatuses.at(-1)).toContain(`Specwright · 0001 · executing · tasks=${taskCount}/${taskCount}`);
+    expect(firstStatuses.at(-1)).toContain(`Specwright · 0001 · checkpoint-needed · tasks=${taskCount}/${taskCount}`);
+    expect(secondStatuses.at(-1)).toContain(`Specwright · 0001 · checkpoint-needed · tasks=${taskCount}/${taskCount}`);
+  } finally {
+    spy.mockRestore();
+  }
 });
 test("OMP extension sends generated prompts as immediate user messages when idle", async () => {
   const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
@@ -832,7 +874,15 @@ test("unrelated commands do not set lifecycle routes", async () => {
 test("status refresh caches result for unchanged artifacts", async () => {
   const commands = await import("../src/core/commands");
   const spy = spyOn(commands, "runSpecwrightCommand");
-  spy.mockImplementation(async () => ({ ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=1/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const }));
+  spy.mockImplementation(async (_ctx, args) => {
+    if (args.includes("--json") && args.includes("status")) {
+      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "executing", tasks: { total: 1, done: 1 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    if (args.includes("--json") && args.includes("verify")) {
+      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    return { ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=1/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+  });
 
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-cache-hit-"));
   const changeDirPath = join(cwd, ".specwright/changes/0001-test");
@@ -864,16 +914,23 @@ test("status refresh caches result for unchanged artifacts", async () => {
   try {
     await refreshStatus({}, { cwd, ui: { setStatus() {} } });
     await refreshStatus({}, { cwd, ui: { setStatus() {} } });
-    expect(spy.mock.calls.length).toBe(1);
+    expect(spy.mock.calls.length).toBe(2);
   } finally {
     spy.mockRestore();
   }
 });
-
 test("status refresh reruns after canonical artifact mtime changes", async () => {
   const commands = await import("../src/core/commands");
   const spy = spyOn(commands, "runSpecwrightCommand");
-  spy.mockImplementation(async () => ({ ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=1/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const }));
+  spy.mockImplementation(async (_ctx, args) => {
+    if (args.includes("--json") && args.includes("status")) {
+      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "executing", tasks: { total: 1, done: 1 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    if (args.includes("--json") && args.includes("verify")) {
+      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    return { ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=1/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+  });
 
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-cache-miss-"));
   const changeDirPath = join(cwd, ".specwright/changes/0001-test");
@@ -907,7 +964,7 @@ test("status refresh reruns after canonical artifact mtime changes", async () =>
     await refreshStatus({}, { cwd, ui: { setStatus() {} } });
     await writeFile(join(changeDirPath, "plan.md"), "# Plan\n\nUpdated.\n", "utf8");
     await refreshStatus({}, { cwd, ui: { setStatus() {} } });
-    expect(spy.mock.calls.length).toBe(2);
+    expect(spy.mock.calls.length).toBe(4);
   } finally {
     spy.mockRestore();
   }
@@ -930,6 +987,260 @@ test("status refresh does not run validation when no change is active", async ()
   try {
     await refreshStatus({}, { cwd, ui: { setStatus() {} } });
     expect(spy.mock.calls.length).toBe(0);
+  } finally {
+    spy.mockRestore();
+  }
+});
+test("OMP status surfaces blocked with first error code", async () => {
+  const commands = await import("../src/core/commands");
+  const spy = spyOn(commands, "runSpecwrightCommand");
+  spy.mockImplementation(async (_ctx, args) => {
+    if (args.includes("--json") && args.includes("status")) {
+      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "executing", tasks: { total: 1, done: 0 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    if (args.includes("--json") && args.includes("verify")) {
+      return { ok: false, summary: JSON.stringify({ ok: false, issues: [{ level: "error", code: "SW001", message: "missing intent" }] }), filesCreated: [], filesUpdated: [], exitCode: 1 as const };
+    }
+    return { ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=0/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+  });
+
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-blocked-"));
+  const changeDirPath = join(cwd, ".specwright/changes/0001-test");
+  await mkdir(changeDirPath, { recursive: true });
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [ ] T001: Test\n", "utf8");
+  await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "test",
+        title: "Test",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "executing",
+        step: "execute",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: { id: "T001", title: "Test", status: "pending", updatedAt: "2026-01-01T00:00:00.000Z" },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }), "utf8");
+
+  const statuses: Array<string | undefined> = [];
+  const notifications: Array<{ message: string; type?: string | undefined }> = [];
+  try {
+    await refreshStatus({}, {
+      cwd,
+      ui: {
+        setStatus(_key, text) { statuses.push(text); },
+        notify(message, type) { notifications.push({ message, type }); },
+      },
+    });
+    expect(statuses.at(-1)).toBe("Specwright · 0001 · blocked · SW001");
+    expect(notifications.length).toBe(1);
+    expect(notifications[0]).toBeDefined();
+    expect(notifications[0]!.message).toBe("Specwright: 0001 is blocked (SW001)");
+    expect(notifications[0]!.type).toBe("warning");
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("OMP status surfaces drift for SW009 task drift", async () => {
+  const commands = await import("../src/core/commands");
+  const spy = spyOn(commands, "runSpecwrightCommand");
+  spy.mockImplementation(async (_ctx, args) => {
+    if (args.includes("--json") && args.includes("status")) {
+      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "executing", tasks: { total: 1, done: 1 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    if (args.includes("--json") && args.includes("verify")) {
+      return { ok: false, summary: JSON.stringify({ ok: false, issues: [{ level: "error", code: "SW009", message: "Unreconciled task drift: title changed" }] }), filesCreated: [], filesUpdated: [], exitCode: 1 as const };
+    }
+    return { ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=1/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+  });
+
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-drift-"));
+  const changeDirPath = join(cwd, ".specwright/changes/0001-test");
+  await mkdir(changeDirPath, { recursive: true });
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n", "utf8");
+  await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "test",
+        title: "Test",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "executing",
+        step: "execute",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: { id: "T001", title: "Test", status: "done", updatedAt: "2026-01-01T00:00:00.000Z" },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }), "utf8");
+
+  const statuses: Array<string | undefined> = [];
+  const notifications: Array<{ message: string; type?: string | undefined }> = [];
+  try {
+    await refreshStatus({}, {
+      cwd,
+      ui: {
+        setStatus(_key, text) { statuses.push(text); },
+        notify(message, type) { notifications.push({ message, type }); },
+      },
+    });
+    expect(statuses.at(-1)).toBe("Specwright · 0001 · drift · tasks=1/1");
+    expect(notifications.length).toBe(1);
+    expect(notifications[0]).toBeDefined();
+    expect(notifications[0]!.message).toBe("Specwright: 0001 has task drift");
+    expect(notifications[0]!.type).toBe("warning");
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("OMP status surfaces checkpoint-needed when all tasks done but change not done", async () => {
+  const commands = await import("../src/core/commands");
+  const spy = spyOn(commands, "runSpecwrightCommand");
+  spy.mockImplementation(async (_ctx, args) => {
+    if (args.includes("--json") && args.includes("status")) {
+      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "verifying", tasks: { total: 2, done: 2 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    if (args.includes("--json") && args.includes("verify")) {
+      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    return { ok: true, summary: "test", statusText: "Specwright · 0001 · verifying · tasks=2/2", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+  });
+
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-"));
+  const changeDirPath = join(cwd, ".specwright/changes/0001-test");
+  await mkdir(changeDirPath, { recursive: true });
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n- [x] T002: Test 2\n", "utf8");
+  await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "test",
+        title: "Test",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "verifying",
+        step: "verify",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: { id: "T001", title: "Test", status: "done", updatedAt: "2026-01-01T00:00:00.000Z" },
+          T002: { id: "T002", title: "Test 2", status: "done", updatedAt: "2026-01-01T00:00:00.000Z" },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }), "utf8");
+
+  const statuses: Array<string | undefined> = [];
+  const notifications: Array<{ message: string; type?: string | undefined }> = [];
+  try {
+    await refreshStatus({}, {
+      cwd,
+      ui: {
+        setStatus(_key, text) { statuses.push(text); },
+        notify(message, type) { notifications.push({ message, type }); },
+      },
+    });
+    expect(statuses.at(-1)).toBe("Specwright · 0001 · checkpoint-needed · tasks=2/2");
+    expect(notifications.length).toBe(1);
+    expect(notifications[0]).toBeDefined();
+    expect(notifications[0]!.message).toBe("Specwright: 0001 needs checkpoint");
+    expect(notifications[0]!.type).toBe("warning");
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("OMP status warning notifications are sent only on transitions", async () => {
+  const commands = await import("../src/core/commands");
+  const spy = spyOn(commands, "runSpecwrightCommand");
+  let callIndex = 0;
+  spy.mockImplementation(async (_ctx, args) => {
+    callIndex += 1;
+    if (args.includes("--json") && args.includes("status")) {
+      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "executing", tasks: { total: 1, done: 0 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    if (args.includes("--json") && args.includes("verify")) {
+      // First two calls have errors, third call passes
+      if (callIndex <= 4) {
+        return { ok: false, summary: JSON.stringify({ ok: false, issues: [{ level: "error", code: "SW001", message: "missing intent" }] }), filesCreated: [], filesUpdated: [], exitCode: 1 as const };
+      }
+      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+    }
+    return { ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=0/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+  });
+
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-transition-"));
+  const changeDirPath = join(cwd, ".specwright/changes/0001-test");
+  await mkdir(changeDirPath, { recursive: true });
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [ ] T001: Test\n", "utf8");
+  await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "test",
+        title: "Test",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "executing",
+        step: "execute",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: { id: "T001", title: "Test", status: "pending", updatedAt: "2026-01-01T00:00:00.000Z" },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }), "utf8");
+
+  const notifications: Array<{ message: string; type?: string | undefined }> = [];
+  const ctx = {
+    cwd,
+    ui: {
+      setStatus() {},
+      notify(message: string, type?: string) { notifications.push({ message, type }); },
+    },
+  };
+  try {
+    // First refresh: transitions to blocked → notify
+    await refreshStatus({}, ctx);
+    expect(notifications.length).toBe(1);
+
+    // Second refresh: same blocked status → no new notify
+    await refreshStatus({}, ctx);
+    expect(notifications.length).toBe(1);
+
+    // Simulate a cache-busting change so verify re-runs and now passes
+    await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [ ] T001: Test updated\n", "utf8");
+
+    // Third refresh: transitions away from blocked → no notify (only warn on entry)
+    await refreshStatus({}, ctx);
+    expect(notifications.length).toBe(1);
   } finally {
     spy.mockRestore();
   }
