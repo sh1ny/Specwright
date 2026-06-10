@@ -2,7 +2,7 @@ import { access, cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installOmpAdapter } from "../runtime/omp/install";
+import { adapterNeedsRegeneration, installOmpAdapter } from "../runtime/omp/install";
 import { writeJsonFile } from "./json";
 import {
   changeDir,
@@ -14,6 +14,7 @@ import {
   statePath,
 } from "./paths";
 import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderLifecycleSpawnStrategy, renderSubagentRetryClause } from "./prompts";
+import { renderOmpDiscussPrompt, renderOmpLifecycleSpawnStrategy, renderOmpSubagentRetryClause } from "../runtime/omp/prompts";
 import { slugify, nextChangeId } from "./slug";
 import {
   defaultConfig,
@@ -437,7 +438,9 @@ async function commandInit(ctx: CommandContext, args: ParsedArgs): Promise<Comma
 
   updated.push(...await copyBuiltInCorePack(ctx.cwd, args.force));
   created.push(...await ensureProjectFiles(ctx.cwd));
-  updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force, config: await loadConfig(ctx.cwd) }));
+  const config = await loadConfig(ctx.cwd);
+  const needsRegen = await adapterNeedsRegeneration(ctx.cwd);
+  updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force || needsRegen, config }));
   return ok("Initialized Specwright in .specwright and installed OMP adapter in .omp.", { filesCreated: created, filesUpdated: updated });
 }
 
@@ -689,7 +692,10 @@ async function commandDiscuss(ctx: CommandContext, args: ParsedArgs): Promise<Co
   change = await updateChangeStep(ctx.cwd, change, "discussing", "discuss", ctx.now());
   const created = await ensureChangeArtifacts(ctx.cwd, change, ["discussion.md", "intent.md", "constraints.md", "decisions.md"]);
   const config = await loadConfig(ctx.cwd);
-  const prompt = `${renderDiscussPrompt({ step: "discuss", change, config, cwd: ctx.cwd })}
+  const discussPrompt = ctx.runtime === "omp"
+    ? renderOmpDiscussPrompt({ step: "discuss", change, config, cwd: ctx.cwd })
+    : renderDiscussPrompt({ step: "discuss", change, config, cwd: ctx.cwd });
+  const prompt = `${discussPrompt}
 
 ${renderCheckpointClause({ change, unit: { kind: "phase", id: "discuss" }, files: artifactPaths(change, ["discussion.md", "intent.md", "constraints.md", "decisions.md"]) })}`;
   return ok("Prepared discuss prompt.", { filesCreated: created, prompt });
@@ -701,13 +707,19 @@ async function commandResearch(ctx: CommandContext, args: ParsedArgs): Promise<C
   change = await syncChangeTasksForCommand(ctx, change);
   change = await updateChangeStep(ctx.cwd, change, "researching", "research", ctx.now());
   const created = await ensureChangeArtifacts(ctx.cwd, change, ["research.md", "sources.md", "evidence.md", "options.md"]);
+  const lifecycleStrategy = ctx.runtime === "omp"
+    ? renderOmpLifecycleSpawnStrategy({ step: "research", config })
+    : renderLifecycleSpawnStrategy({ step: "research", config });
+  const subagentRetry = ctx.runtime === "omp"
+    ? renderOmpSubagentRetryClause()
+    : renderSubagentRetryClause();
   const prompt = `# Specwright Research: ${change.id}-${change.slug}
 
 online=${online}
 
 ${renderContextBudget(config)}
 
-${renderLifecycleSpawnStrategy({ step: "research", config })}
+${lifecycleStrategy}
 
 Read first:
 - .specwright/changes/${change.id}-${change.slug}/intent.md
@@ -728,7 +740,7 @@ Research rules:
 - Store source summaries and URLs, not full copied web pages.
 - Produce at least two implementation options in options.md unless the change is mechanically constrained by existing code.
 
-${renderSubagentRetryClause()}
+${subagentRetry}
 
 ${renderCheckpointClause({ change, unit: { kind: "phase", id: "research" }, files: artifactPaths(change, ["research.md", "sources.md", "evidence.md", "options.md"]) })}`;
   return ok("Prepared research prompt.", { filesCreated: created, prompt });
@@ -744,11 +756,14 @@ async function commandPlan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   }
   const updated = await updateChangeStep(ctx.cwd, change, "planning", "plan", ctx.now());
   const config = await loadConfig(ctx.cwd);
+  const lifecycleStrategy = ctx.runtime === "omp"
+    ? renderOmpLifecycleSpawnStrategy({ step: "plan", config })
+    : renderLifecycleSpawnStrategy({ step: "plan", config });
   const prompt = `# Specwright Plan: ${updated.id}-${updated.slug}
 
 ${renderContextBudget(config)}
 
-${renderLifecycleSpawnStrategy({ step: "plan", config })}
+${lifecycleStrategy}
 
 Read first:
 - .specwright/changes/${updated.id}-${updated.slug}/intent.md
@@ -906,7 +921,10 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const tasksMarkdown = await readFile(join(changeDir(ctx.cwd, updated.id, updated.slug), "tasks.md"), "utf8");
   const taskFiles = taskFilesFromMarkdown(tasksMarkdown, task.id);
   const config = await loadConfig(ctx.cwd);
-  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\n${renderLifecycleSpawnStrategy({ step: "execute", config })}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
+  const lifecycleStrategy = ctx.runtime === "omp"
+    ? renderOmpLifecycleSpawnStrategy({ step: "execute", config })
+    : renderLifecycleSpawnStrategy({ step: "execute", config });
+  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\n${lifecycleStrategy}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
   return ok(`Prepared execute prompt for ${task.id}.`, { prompt });
 }
 
@@ -951,7 +969,10 @@ async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<Com
   }
   const updated = await updateChangeStep(ctx.cwd, syncResult ? syncResult.change : change, "verifying", "verify", ctx.now());
   const config = await loadConfig(ctx.cwd);
-  const prompt = `# Specwright Verify: ${updated.id}-${updated.slug}\n\n${renderContextBudget(config)}\n\n${renderLifecycleSpawnStrategy({ step: "verify", config })}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n- .specwright/changes/${updated.id}-${updated.slug}/verify.md\n\nRun the task-specific checks listed in tasks.md and update verify.md with observed command output.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "phase", id: "verify" }, files: artifactPaths(updated, ["verify.md", "tasks.md"]) })}`;
+  const lifecycleStrategy = ctx.runtime === "omp"
+    ? renderOmpLifecycleSpawnStrategy({ step: "verify", config })
+    : renderLifecycleSpawnStrategy({ step: "verify", config });
+  const prompt = `# Specwright Verify: ${updated.id}-${updated.slug}\n\n${renderContextBudget(config)}\n\n${lifecycleStrategy}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n- .specwright/changes/${updated.id}-${updated.slug}/verify.md\n\nRun the task-specific checks listed in tasks.md and update verify.md with observed command output.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "phase", id: "verify" }, files: artifactPaths(updated, ["verify.md", "tasks.md"]) })}`;
   return ok(args.json ? JSON.stringify(report, null, 2) : "Specwright validators passed.", { filesUpdated: [verifyPath], prompt });
 }
 
@@ -1034,8 +1055,9 @@ async function commandConfig(ctx: CommandContext, args: ParsedArgs): Promise<Com
     await saveConfig(ctx.cwd, updated);
     const filesUpdated = [relative(ctx.cwd, configPath(ctx.cwd))];
     const updatedAgent = agentNameForModelConfigKey(key);
-    if (updatedAgent && updated.runtimes.omp.enabled) {
-      filesUpdated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: false, config: updated, regenerateAgents: [updatedAgent] }));
+    if (updated.runtimes.omp.enabled) {
+      const needsRegen = await adapterNeedsRegeneration(ctx.cwd);
+      filesUpdated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: needsRegen, config: updated, ...(updatedAgent ? { regenerateAgents: [updatedAgent] as const } : {}) }));
     }
     return ok(`Set ${key}.`, { filesUpdated });
   }

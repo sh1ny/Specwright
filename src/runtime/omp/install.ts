@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -41,6 +41,7 @@ const PACKAGE_JSON = `{
   "name": "specwright-omp-extension",
   "private": true,
   "type": "module",
+  "specwrightAdapterVersion": "1",
   "omp": {
     "extensions": ["./index.ts"]
   }
@@ -136,6 +137,16 @@ spawns: []
 ${definition.body}`;
 }
 
+export async function adapterNeedsRegeneration(cwd: string): Promise<boolean> {
+  const packagePath = join(ompExtensionDir(cwd), "package.json");
+  try {
+    const content = await readFile(packagePath, "utf8");
+    const json = JSON.parse(content) as { specwrightAdapterVersion?: string };
+    return json.specwrightAdapterVersion !== "1";
+  } catch {
+    return true;
+  }
+}
 export async function installOmpAdapter(input: { cwd: string; force: boolean; config?: Pick<SpecwrightConfig, "agents">; regenerateAgents?: readonly SpecwrightAgentName[] }): Promise<string[]> {
   const changed: string[] = [];
   const extensionDir = ompExtensionDir(input.cwd);
