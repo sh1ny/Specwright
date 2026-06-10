@@ -781,181 +781,280 @@ test("specwright_checkpoint tool forwards valid params to command", async () => 
   expect(result.summary).not.toBe("At least one file must be supplied.");
 });
 test("wrong first tool call after lifecycle command is blocked", async () => {
-  const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
-  const toolCallResults: Array<unknown> = [];
-  let toolCallHandler: ((event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>) | undefined;
-  const pi: ExtensionApiLike = {
-    setLabel() {},
-    on(event, handler) {
-      if (event === "tool_call") {
-        toolCallHandler = handler as (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>;
-      }
-    },
-    registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
-    sendUserMessage() {},
-    registerTool() {},
-    getActiveTools() { return []; },
-    setActiveTools() {},
-  };
+  const commandsModule = await import("../src/core/commands");
+  const runSpy = spyOn(commandsModule, "runSpecwrightCommand");
+  runSpy.mockImplementation(() =>
+    Promise.resolve({
+      ok: true,
+      summary: "",
+      filesCreated: [],
+      filesUpdated: [],
+      prompt: "# Research prompt",
+      exitCode: 0,
+    })
+  );
+  try {
+    const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
+    const toolCallResults: Array<unknown> = [];
+    const sentMessages: Array<{ content: string; options?: { deliverAs?: "steer" | "followUp" } }> = [];
+    let toolCallHandler: ((event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>) | undefined;
+    const pi: ExtensionApiLike = {
+      setLabel() {},
+      on(event, handler) {
+        if (event === "tool_call") {
+          toolCallHandler = handler as (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>;
+        }
+      },
+      registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
+      sendUserMessage(content, options) { sentMessages.push(options ? { content: String(content), options } : { content: String(content) }); },
+      registerTool() {},
+      getActiveTools() { return []; },
+      setActiveTools() {},
+    };
 
-  specwrightOmpExtension(pi);
-  const command = commands.get("specwright");
-  expect(command).toBeDefined();
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-block-"));
-  await command!.handler("research 0001", { cwd, waitForIdle: async () => {} });
-  expect(toolCallHandler).toBeDefined();
-  const blockResult = toolCallHandler!({ toolName: "web_search", input: { query: "test" } }, { cwd });
-  toolCallResults.push(blockResult);
-  expect(blockResult).toEqual({
-    block: true,
-    reason: "Expected the model to delegate research to `specwright-researcher` via the `task` tool, but received tool `web_search` instead.",
-  });
+    specwrightOmpExtension(pi);
+    const command = commands.get("specwright");
+    expect(command).toBeDefined();
+    const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-block-"));
+    await command!.handler("research 0001", { cwd, waitForIdle: async () => {} });
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.content).toBe("# Research prompt");
+    expect(toolCallHandler).toBeDefined();
+    const blockResult = toolCallHandler!({ toolName: "web_search", input: { query: "test" } }, { cwd });
+    toolCallResults.push(blockResult);
+    expect(blockResult).toEqual({
+      block: true,
+      reason: "Expected the model to delegate research to `specwright-researcher` via the `task` tool, but received tool `web_search` instead.",
+    });
+  } finally {
+    runSpy.mockRestore();
+  }
 });
 
 test("correct task call clears pending route and is not blocked", async () => {
-  const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
-  let toolCallHandler: ((event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>) | undefined;
-  const pi: ExtensionApiLike = {
-    setLabel() {},
-    on(event, handler) {
-      if (event === "tool_call") {
-        toolCallHandler = handler as (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>;
-      }
-    },
-    registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
-    sendUserMessage() {},
-    registerTool() {},
-    getActiveTools() { return []; },
-    setActiveTools() {},
-  };
+  const commandsModule = await import("../src/core/commands");
+  const runSpy = spyOn(commandsModule, "runSpecwrightCommand");
+  runSpy.mockImplementation(() =>
+    Promise.resolve({
+      ok: true,
+      summary: "",
+      filesCreated: [],
+      filesUpdated: [],
+      prompt: "# Plan prompt",
+      exitCode: 0,
+    })
+  );
+  try {
+    const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
+    let toolCallHandler: ((event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>) | undefined;
+    const pi: ExtensionApiLike = {
+      setLabel() {},
+      on(event, handler) {
+        if (event === "tool_call") {
+          toolCallHandler = handler as (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>;
+        }
+      },
+      registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
+      sendUserMessage() {},
+      registerTool() {},
+      getActiveTools() { return []; },
+      setActiveTools() {},
+    };
 
-  specwrightOmpExtension(pi);
-  const command = commands.get("specwright");
-  expect(command).toBeDefined();
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-clear-"));
-  await command!.handler("plan 0001", { cwd, waitForIdle: async () => {} });
-  const passResult = toolCallHandler!({ toolName: "task", input: { agent: "specwright-planner" } }, { cwd });
-  expect(passResult).toBeUndefined();
+    specwrightOmpExtension(pi);
+    const command = commands.get("specwright");
+    expect(command).toBeDefined();
+    const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-clear-"));
+    await command!.handler("plan 0001", { cwd, waitForIdle: async () => {} });
+    const passResult = toolCallHandler!({ toolName: "task", input: { agent: "specwright-planner" } }, { cwd });
+    expect(passResult).toBeUndefined();
 
-  const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
-  expect(afterResult).toBeUndefined();
+    const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
+    expect(afterResult).toBeUndefined();
+  } finally {
+    runSpy.mockRestore();
+  }
 });
 
 test("turn_end clears pending route so subsequent wrong calls pass", async () => {
-  const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
-  const handlers = new Map<string, (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>>();
-  const pi: ExtensionApiLike = {
-    setLabel() {},
-    on(event, handler) { handlers.set(event, handler); },
-    registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
-    sendUserMessage() {},
-    registerTool() {},
-    getActiveTools() { return []; },
-    setActiveTools() {},
-  };
+  const commandsModule = await import("../src/core/commands");
+  const runSpy = spyOn(commandsModule, "runSpecwrightCommand");
+  runSpy.mockImplementation(() =>
+    Promise.resolve({
+      ok: true,
+      summary: "",
+      filesCreated: [],
+      filesUpdated: [],
+      prompt: "# Execute prompt",
+      exitCode: 0,
+    })
+  );
+  try {
+    const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
+    const handlers = new Map<string, (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>>();
+    const pi: ExtensionApiLike = {
+      setLabel() {},
+      on(event, handler) { handlers.set(event, handler); },
+      registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
+      sendUserMessage() {},
+      registerTool() {},
+      getActiveTools() { return []; },
+      setActiveTools() {},
+    };
 
-  specwrightOmpExtension(pi);
-  const command = commands.get("specwright");
-  expect(command).toBeDefined();
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-turn-end-"));
-  await command!.handler("execute 0001", { cwd, waitForIdle: async () => {} });
+    specwrightOmpExtension(pi);
+    const command = commands.get("specwright");
+    expect(command).toBeDefined();
+    const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-turn-end-"));
+    await command!.handler("execute 0001", { cwd, waitForIdle: async () => {} });
 
-  const turnEndHandler = handlers.get("turn_end");
-  expect(turnEndHandler).toBeDefined();
-  await turnEndHandler!({}, { cwd });
+    const turnEndHandler = handlers.get("turn_end");
+    expect(turnEndHandler).toBeDefined();
+    await turnEndHandler!({}, { cwd });
 
-  const toolCallHandler = handlers.get("tool_call");
-  expect(toolCallHandler).toBeDefined();
-  const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
-  expect(afterResult).toBeUndefined();
+    const toolCallHandler = handlers.get("tool_call");
+    expect(toolCallHandler).toBeDefined();
+    const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
+    expect(afterResult).toBeUndefined();
+  } finally {
+    runSpy.mockRestore();
+  }
 });
 
 test("session_start clears pending route so subsequent wrong calls pass", async () => {
-  const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
-  const handlers = new Map<string, (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>>();
-  const pi: ExtensionApiLike = {
-    setLabel() {},
-    on(event, handler) { handlers.set(event, handler); },
-    registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
-    sendUserMessage() {},
-    registerTool() {},
-    getActiveTools() { return []; },
-    setActiveTools() {},
-  };
+  const commandsModule = await import("../src/core/commands");
+  const runSpy = spyOn(commandsModule, "runSpecwrightCommand");
+  runSpy.mockImplementation(() =>
+    Promise.resolve({
+      ok: true,
+      summary: "",
+      filesCreated: [],
+      filesUpdated: [],
+      prompt: "# Verify prompt",
+      exitCode: 0,
+    })
+  );
+  try {
+    const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
+    const handlers = new Map<string, (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>>();
+    const pi: ExtensionApiLike = {
+      setLabel() {},
+      on(event, handler) { handlers.set(event, handler); },
+      registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
+      sendUserMessage() {},
+      registerTool() {},
+      getActiveTools() { return []; },
+      setActiveTools() {},
+    };
 
-  specwrightOmpExtension(pi);
-  const command = commands.get("specwright");
-  expect(command).toBeDefined();
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-session-start-"));
-  await command!.handler("verify 0001", { cwd, waitForIdle: async () => {} });
+    specwrightOmpExtension(pi);
+    const command = commands.get("specwright");
+    expect(command).toBeDefined();
+    const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-session-start-"));
+    await command!.handler("verify 0001", { cwd, waitForIdle: async () => {} });
 
-  const sessionStartHandler = handlers.get("session_start");
-  expect(sessionStartHandler).toBeDefined();
-  await sessionStartHandler!({}, { cwd });
+    const sessionStartHandler = handlers.get("session_start");
+    expect(sessionStartHandler).toBeDefined();
+    await sessionStartHandler!({}, { cwd });
 
-  const toolCallHandler = handlers.get("tool_call");
-  expect(toolCallHandler).toBeDefined();
-  const afterResult = toolCallHandler!({ toolName: "read_file", input: {} }, { cwd });
-  expect(afterResult).toBeUndefined();
+    const toolCallHandler = handlers.get("tool_call");
+    expect(toolCallHandler).toBeDefined();
+    const afterResult = toolCallHandler!({ toolName: "read_file", input: {} }, { cwd });
+    expect(afterResult).toBeUndefined();
+  } finally {
+    runSpy.mockRestore();
+  }
 });
 
 test("superseding lifecycle command replaces pending route", async () => {
-  const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
-  let toolCallHandler: ((event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>) | undefined;
-  const pi: ExtensionApiLike = {
-    setLabel() {},
-    on(event, handler) {
-      if (event === "tool_call") {
-        toolCallHandler = handler as (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>;
-      }
-    },
-    registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
-    sendUserMessage() {},
-    registerTool() {},
-    getActiveTools() { return []; },
-    setActiveTools() {},
-  };
+  const commandsModule = await import("../src/core/commands");
+  const runSpy = spyOn(commandsModule, "runSpecwrightCommand");
+  runSpy.mockImplementation(() =>
+    Promise.resolve({
+      ok: true,
+      summary: "",
+      filesCreated: [],
+      filesUpdated: [],
+      prompt: "# Lifecycle prompt",
+      exitCode: 0,
+    })
+  );
+  try {
+    const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
+    let toolCallHandler: ((event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>) | undefined;
+    const pi: ExtensionApiLike = {
+      setLabel() {},
+      on(event, handler) {
+        if (event === "tool_call") {
+          toolCallHandler = handler as (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>;
+        }
+      },
+      registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
+      sendUserMessage() {},
+      registerTool() {},
+      getActiveTools() { return []; },
+      setActiveTools() {},
+    };
 
-  specwrightOmpExtension(pi);
-  const command = commands.get("specwright");
-  expect(command).toBeDefined();
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-supersede-"));
-  await command!.handler("research 0001", { cwd, waitForIdle: async () => {} });
-  await command!.handler("plan 0001", { cwd, waitForIdle: async () => {} });
-  expect(toolCallHandler).toBeDefined();
-  const blockResult = toolCallHandler!({ toolName: "task", input: { agent: "specwright-researcher" } }, { cwd });
-  expect(blockResult).toEqual({
-    block: true,
-    reason: "Expected the model to delegate plan to `specwright-planner` via the `task` tool, but received tool `task` instead.",
-  });
+    specwrightOmpExtension(pi);
+    const command = commands.get("specwright");
+    expect(command).toBeDefined();
+    const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-supersede-"));
+    await command!.handler("research 0001", { cwd, waitForIdle: async () => {} });
+    await command!.handler("plan 0001", { cwd, waitForIdle: async () => {} });
+    expect(toolCallHandler).toBeDefined();
+    const blockResult = toolCallHandler!({ toolName: "task", input: { agent: "specwright-researcher" } }, { cwd });
+    expect(blockResult).toEqual({
+      block: true,
+      reason: "Expected the model to delegate plan to `specwright-planner` via the `task` tool, but received tool `task` instead.",
+    });
+  } finally {
+    runSpy.mockRestore();
+  }
 });
 
 test("non-lifecycle command clears pending route", async () => {
-  const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
-  let toolCallHandler: ((event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>) | undefined;
-  const pi: ExtensionApiLike = {
-    setLabel() {},
-    on(event, handler) {
-      if (event === "tool_call") {
-        toolCallHandler = handler as (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>;
-      }
-    },
-    registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
-    sendUserMessage() {},
-    registerTool() {},
-    getActiveTools() { return []; },
-    setActiveTools() {},
-  };
+  const commandsModule = await import("../src/core/commands");
+  const runSpy = spyOn(commandsModule, "runSpecwrightCommand");
+  runSpy.mockImplementation(() =>
+    Promise.resolve({
+      ok: true,
+      summary: "",
+      filesCreated: [],
+      filesUpdated: [],
+      prompt: "# Research prompt",
+      exitCode: 0,
+    })
+  );
+  try {
+    const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
+    let toolCallHandler: ((event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>) | undefined;
+    const pi: ExtensionApiLike = {
+      setLabel() {},
+      on(event, handler) {
+        if (event === "tool_call") {
+          toolCallHandler = handler as (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>;
+        }
+      },
+      registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
+      sendUserMessage() {},
+      registerTool() {},
+      getActiveTools() { return []; },
+      setActiveTools() {},
+    };
 
-  specwrightOmpExtension(pi);
-  const command = commands.get("specwright");
-  expect(command).toBeDefined();
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-non-lifecycle-"));
-  await command!.handler("research 0001", { cwd, waitForIdle: async () => {} });
-  await command!.handler("status", { cwd, waitForIdle: async () => {} });
-  expect(toolCallHandler).toBeDefined();
-  const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
-  expect(afterResult).toBeUndefined();
+    specwrightOmpExtension(pi);
+    const command = commands.get("specwright");
+    expect(command).toBeDefined();
+    const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-non-lifecycle-"));
+    await command!.handler("research 0001", { cwd, waitForIdle: async () => {} });
+    await command!.handler("status", { cwd, waitForIdle: async () => {} });
+    expect(toolCallHandler).toBeDefined();
+    const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
+    expect(afterResult).toBeUndefined();
+  } finally {
+    runSpy.mockRestore();
+  }
 });
 
 test("unrelated commands do not set lifecycle routes", async () => {
@@ -983,6 +1082,94 @@ test("unrelated commands do not set lifecycle routes", async () => {
   expect(toolCallHandler).toBeDefined();
   const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
   expect(afterResult).toBeUndefined();
+});
+
+test("failed lifecycle command does not arm route", async () => {
+  const commandsModule = await import("../src/core/commands");
+  const runSpy = spyOn(commandsModule, "runSpecwrightCommand");
+  runSpy.mockImplementation(() =>
+    Promise.resolve({
+      ok: false,
+      summary: "Change not found",
+      filesCreated: [],
+      filesUpdated: [],
+      exitCode: 1,
+    })
+  );
+  try {
+    const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
+    const sentMessages: Array<{ content: string; options?: { deliverAs?: "steer" | "followUp" } }> = [];
+    let toolCallHandler: ((event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>) | undefined;
+    const pi: ExtensionApiLike = {
+      setLabel() {},
+      on(event, handler) {
+        if (event === "tool_call") {
+          toolCallHandler = handler as (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>;
+        }
+      },
+      registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
+      sendUserMessage(content, options) { sentMessages.push(options ? { content: String(content), options } : { content: String(content) }); },
+      registerTool() {},
+      getActiveTools() { return []; },
+      setActiveTools() {},
+    };
+
+    specwrightOmpExtension(pi);
+    const command = commands.get("specwright");
+    expect(command).toBeDefined();
+    const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-fail-noarm-"));
+    await command!.handler("plan 0001", { cwd, waitForIdle: async () => {} });
+    expect(sentMessages).toHaveLength(0);
+    expect(toolCallHandler).toBeDefined();
+    const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
+    expect(afterResult).toBeUndefined();
+  } finally {
+    runSpy.mockRestore();
+  }
+});
+
+test("lifecycle command without prompt does not arm route", async () => {
+  const commandsModule = await import("../src/core/commands");
+  const runSpy = spyOn(commandsModule, "runSpecwrightCommand");
+  runSpy.mockImplementation(() =>
+    Promise.resolve({
+      ok: true,
+      summary: "Already up to date",
+      filesCreated: [],
+      filesUpdated: [],
+      exitCode: 0,
+    })
+  );
+  try {
+    const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
+    const sentMessages: Array<{ content: string; options?: { deliverAs?: "steer" | "followUp" } }> = [];
+    let toolCallHandler: ((event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>) | undefined;
+    const pi: ExtensionApiLike = {
+      setLabel() {},
+      on(event, handler) {
+        if (event === "tool_call") {
+          toolCallHandler = handler as (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>;
+        }
+      },
+      registerCommand(name, options) { commands.set(name, { handler: options.handler }); },
+      sendUserMessage(content, options) { sentMessages.push(options ? { content: String(content), options } : { content: String(content) }); },
+      registerTool() {},
+      getActiveTools() { return []; },
+      setActiveTools() {},
+    };
+
+    specwrightOmpExtension(pi);
+    const command = commands.get("specwright");
+    expect(command).toBeDefined();
+    const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-noprompt-noarm-"));
+    await command!.handler("research 0001", { cwd, waitForIdle: async () => {} });
+    expect(sentMessages).toHaveLength(0);
+    expect(toolCallHandler).toBeDefined();
+    const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
+    expect(afterResult).toBeUndefined();
+  } finally {
+    runSpy.mockRestore();
+  }
 });
 test("status refresh caches result for unchanged artifacts", async () => {
   const validators = await import("../src/core/validators");

@@ -28,11 +28,7 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
       await ctx.waitForIdle?.();
       const argv = splitArgs(args);
       const subcommand = argv[0] ?? "";
-      if (stepToAgent[subcommand]) {
-        pendingRoute = { step: subcommand, expectedAgent: stepToAgent[subcommand] };
-      } else {
-        pendingRoute = null;
-      }
+      const isLifecycle = stepToAgent[subcommand] !== undefined;
       const result = await runSpecwrightCommand(
         { cwd: ctx.cwd ?? process.cwd(), runtime: "omp", now: () => new Date() },
         argv,
@@ -46,8 +42,18 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
       if (result.summary) {
         ctx.ui?.notify?.(result.summary, result.ok ? "info" : "error");
       }
-      if (result.prompt) {
-        pi.sendUserMessage(result.prompt);
+      if (isLifecycle) {
+        if (result.ok && result.prompt) {
+          pendingRoute = { step: subcommand, expectedAgent: stepToAgent[subcommand] };
+          pi.sendUserMessage(result.prompt);
+        } else {
+          pendingRoute = null;
+        }
+      } else {
+        pendingRoute = null;
+        if (result.prompt) {
+          pi.sendUserMessage(result.prompt);
+        }
       }
       if (!result.ok && !ctx.ui) {
         pi.logger?.warn?.("Specwright command failed", result);
