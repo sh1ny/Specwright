@@ -48,7 +48,7 @@ test("OMP extension registers and handles specwright command", async () => {
 });
 
 test("OMP status refresh syncs tasks.md before rendering status", async () => {
-  const handlers = new Map<string, (event: unknown, ctx: OmpCommandContextLike) => void | Promise<unknown>>();
+  const handlers = new Map<string, (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>>();
   const statuses: Array<string | undefined> = [];
   let label = "";
 

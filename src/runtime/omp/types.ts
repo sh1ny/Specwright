@@ -17,7 +17,7 @@ export interface ToolCallBlockResult {
 
 export interface ExtensionApiLike {
   setLabel(label: string): void;
-  on(event: string, handler: (event: unknown, ctx: OmpContextLike) => void | Promise<unknown>): void;
+  on(event: string, handler: (event: unknown, ctx: OmpContextLike) => unknown | Promise<unknown>): void;
   registerCommand(name: string, options: {
     description?: string;
     getArgumentCompletions?: (prefix: string) => Array<{ value: string; label?: string; description?: string }> | null;
