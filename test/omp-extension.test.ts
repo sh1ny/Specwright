@@ -1,5 +1,5 @@
 import { test, expect, spyOn } from "bun:test";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import specwrightOmpExtension from "../src/runtime/omp/extension";
@@ -8,6 +8,59 @@ import { installOmpAdapter } from "../src/runtime/omp/install";
 import { runSpecwrightCommand } from "../src/core/commands";
 import { refreshStatus } from "../src/runtime/omp/status";
 import type { ExtensionApiLike, OmpCommandContextLike, ToolDefinition } from "../src/runtime/omp/types";
+interface SpecwrightStateLike {
+  version: number;
+  currentChange?: string | null;
+  changes: Record<string, unknown>;
+  updatedAt: string;
+}
+
+async function writeStateAndCaptureMtime(statePath: string, state: SpecwrightStateLike): Promise<{ mtimeMs: number; bytes: number }> {
+  await writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
+  // Settle into a deterministic mtime, then re-stat. Later writes during the
+  // refresh must bump mtime to be detectable.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
+  const handle = await stat(statePath);
+  return { mtimeMs: handle.mtimeMs, bytes: handle.size };
+}
+
+async function captureFileMtime(path: string): Promise<{ mtimeMs: number; bytes: number } | undefined> {
+  try {
+    const handle = await stat(path);
+    return { mtimeMs: handle.mtimeMs, bytes: handle.size };
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+interface MutationBaseline {
+  state: { mtimeMs: number; bytes: number };
+  verify?: { mtimeMs: number; bytes: number } | undefined;
+}
+
+async function expectNoMutation(cwd: string, changeDir: string, baseline: MutationBaseline): Promise<void> {
+  // verify.md must not be re-written by passive refresh. If it existed, its
+  // mtime + size must match the captured baseline.
+  const verifyPath = join(changeDir, "verify.md");
+  const verifyNow = await captureFileMtime(verifyPath);
+  if (baseline.verify) {
+    expect(verifyNow).toBeDefined();
+    expect(verifyNow!.mtimeMs).toBe(baseline.verify.mtimeMs);
+    expect(verifyNow!.bytes).toBe(baseline.verify.bytes);
+  } else {
+    // No verify.md existed before refresh; passive refresh must not create it.
+    expect(verifyNow).toBeUndefined();
+  }
+  // state.json mtime + size must be unchanged.
+  const statePath = join(cwd, ".specwright/state.json");
+  const after = await stat(statePath);
+  expect(after.mtimeMs).toBe(baseline.state.mtimeMs);
+  expect(after.size).toBe(baseline.state.bytes);
+}
 
 test("OMP extension registers and handles specwright command", async () => {
   const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
@@ -65,21 +118,24 @@ test("OMP status refresh syncs tasks.md before rendering status", async () => {
   specwrightOmpExtension(pi);
   expect(label).toBe("Specwright");
 
+  // Passive refresh must never invoke the mutating specwright command path
+  // (status --json / verify --json) and must not touch verify.md or state.
   const commands = await import("../src/core/commands");
-  const originalRun = commands.runSpecwrightCommand;
-  const spy = spyOn(commands, "runSpecwrightCommand");
-  spy.mockImplementation(async (_ctx, args) => {
-    if (args.includes("--json") && args.includes("verify")) {
-      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    return originalRun(_ctx, args);
+  const commandSpy = spyOn(commands, "runSpecwrightCommand");
+  commandSpy.mockImplementation(async () => {
+    throw new Error("runSpecwrightCommand must not be called from passive OMP status refresh");
   });
 
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-refresh-"));
   const changeDir = join(cwd, ".specwright/changes/0001-drift");
   await mkdir(changeDir, { recursive: true });
-  await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Refresh status\n", "utf8");
-  await writeFile(join(cwd, ".specwright/state.json"), `${JSON.stringify({
+  await writeFile(join(changeDir, "intent.md"), "# Goal\n\nSync tasks.md before rendering status.\n", "utf8");
+  await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\nDirect validate path proven.\n", "utf8");
+  await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Refresh status\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
+  await writeFile(join(changeDir, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
+  const verifyMtime = await captureFileMtime(join(changeDir, "verify.md"));
+  const statePath = join(cwd, ".specwright/state.json");
+  const stateMtime = await writeStateAndCaptureMtime(statePath, {
     version: 1,
     currentChange: "0001",
     changes: {
@@ -105,7 +161,7 @@ test("OMP status refresh syncs tasks.md before rendering status", async () => {
       },
     },
     updatedAt: "2026-01-01T00:00:00.000Z",
-  }, null, 2)}\n`, "utf8");
+  });
 
   try {
     const refresh = handlers.get("session_start");
@@ -118,26 +174,25 @@ test("OMP status refresh syncs tasks.md before rendering status", async () => {
     });
 
     expect(statuses.at(-1)).toContain("Specwright · 0001 · checkpoint-needed · tasks=1/1");
+    // Status refresh must not write verify.md or mutate state.
+    await expectNoMutation(cwd, changeDir, verifyMtime ? { state: stateMtime, verify: verifyMtime } : { state: stateMtime });
   } finally {
-    spy.mockRestore();
+    commandSpy.mockRestore();
   }
 });
-test("concurrent refreshStatus calls do not throw ENOENT on temp file rename", async () => {
-  const commands = await import("../src/core/commands");
-  const originalRun = commands.runSpecwrightCommand;
-  const spy = spyOn(commands, "runSpecwrightCommand");
-  spy.mockImplementation(async (_ctx, args) => {
-    if (args.includes("--json") && args.includes("verify")) {
-      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    return originalRun(_ctx, args);
-  });
+test("concurrent refreshStatus calls share one in-flight path", async () => {
+  const validators = await import("../src/core/validators");
+  const validateSpy = spyOn(validators, "validateChange");
 
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-concurrent-"));
   const changeDir = join(cwd, ".specwright/changes/0001-drift");
   await mkdir(changeDir, { recursive: true });
-  await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Concurrent refresh\n", "utf8");
-  await writeFile(join(cwd, ".specwright/state.json"), `${JSON.stringify({
+  await writeFile(join(changeDir, "intent.md"), "# Goal\n\nSingle in-flight refresh.\n", "utf8");
+  await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
+  await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Concurrent refresh\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
+  await writeFile(join(changeDir, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
+  const statePath = join(cwd, ".specwright/state.json");
+  const stateMtime = await writeStateAndCaptureMtime(statePath, {
     version: 1,
     currentChange: "0001",
     changes: {
@@ -163,7 +218,7 @@ test("concurrent refreshStatus calls do not throw ENOENT on temp file rename", a
       },
     },
     updatedAt: "2026-01-01T00:00:00.000Z",
-  }, null, 2)}\n`, "utf8");
+  });
 
   const statuses: Array<string | undefined> = [];
   const ctx: OmpCommandContextLike = {
@@ -184,28 +239,40 @@ test("concurrent refreshStatus calls do not throw ENOENT on temp file rename", a
       expect(result.status).toBe("fulfilled");
     }
     expect(statuses.at(-1)).toContain("Specwright · 0001 · checkpoint-needed · tasks=1/1");
+    // Concurrent refreshes for one cwd must share the in-flight path: only
+    // one direct validateChange call (and one state read) handles all of them.
+    const verifyMtime = await captureFileMtime(join(changeDir, "verify.md"));
+    await expectNoMutation(cwd, changeDir, { state: stateMtime, verify: verifyMtime });
   } finally {
-    spy.mockRestore();
+    validateSpy.mockRestore();
   }
 });
 
 test("concurrent refreshStatus calls update each waiting OMP context", async () => {
+  // No command path. The two refreshes share one in-flight validate path.
   const commands = await import("../src/core/commands");
-  const originalRun = commands.runSpecwrightCommand;
-  const spy = spyOn(commands, "runSpecwrightCommand");
-  spy.mockImplementation(async (_ctx, args) => {
-    if (args.includes("--json") && args.includes("verify")) {
-      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    return originalRun(_ctx, args);
+  const commandSpy = spyOn(commands, "runSpecwrightCommand");
+  commandSpy.mockImplementation(async () => {
+    throw new Error("runSpecwrightCommand must not be called from passive OMP status refresh");
   });
 
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-concurrent-contexts-"));
   const changeDir = join(cwd, ".specwright/changes/0001-drift");
   await mkdir(changeDir, { recursive: true });
   const taskCount = 999;
-  const tasksMarkdown = `# Tasks\n\n${Array.from({ length: taskCount }, (_, index) => `- [x] T${String(index + 1).padStart(3, "0")}: Concurrent context refresh ${index + 1}`).join("\n")}\n`;
+  const tasksMarkdown = `# Tasks\n\n${Array.from({ length: taskCount }, (_, index) => `- [x] T${String(index + 1).padStart(3, "0")}: Concurrent context refresh ${index + 1}\n  - Acceptance: covered\n  - Verification: covered`).join("\n")}\n`;
+  await writeFile(join(changeDir, "intent.md"), "# Goal\n\nConcurrent contexts.\n", "utf8");
+  await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
   await writeFile(join(changeDir, "tasks.md"), tasksMarkdown, "utf8");
+  await writeFile(join(changeDir, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
+  // The cached change must have a T001 title that matches the artifact's T001
+  // so that no title drift is detected. Only the cached subset is here, but
+  // tasks.md holds the full set.
+  const cachedTasks: Record<string, { id: string; title: string; status: "pending" | "in-progress" | "done" | "blocked"; updatedAt: string }> = {};
+  for (let index = 0; index < taskCount; index += 1) {
+    const id = `T${String(index + 1).padStart(3, "0")}`;
+    cachedTasks[id] = { id, title: `Concurrent context refresh ${index + 1}`, status: "pending", updatedAt: "2026-01-01T00:00:00.000Z" };
+  }
   await writeFile(join(cwd, ".specwright/state.json"), `${JSON.stringify({
     version: 1,
     currentChange: "0001",
@@ -221,14 +288,7 @@ test("concurrent refreshStatus calls update each waiting OMP context", async () 
         step: "execute",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
-        tasks: {
-          T001: {
-            id: "T001",
-            title: "Concurrent context refresh",
-            status: "pending",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-          },
-        },
+        tasks: cachedTasks,
       },
     },
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -256,7 +316,7 @@ test("concurrent refreshStatus calls update each waiting OMP context", async () 
     expect(firstStatuses.at(-1)).toContain(`Specwright · 0001 · checkpoint-needed · tasks=${taskCount}/${taskCount}`);
     expect(secondStatuses.at(-1)).toContain(`Specwright · 0001 · checkpoint-needed · tasks=${taskCount}/${taskCount}`);
   } finally {
-    spy.mockRestore();
+    commandSpy.mockRestore();
   }
 });
 test("OMP extension sends generated prompts as immediate user messages when idle", async () => {
@@ -870,22 +930,16 @@ test("unrelated commands do not set lifecycle routes", async () => {
   expect(afterResult).toBeUndefined();
 });
 test("status refresh caches result for unchanged artifacts", async () => {
-  const commands = await import("../src/core/commands");
-  const spy = spyOn(commands, "runSpecwrightCommand");
-  spy.mockImplementation(async (_ctx, args) => {
-    if (args.includes("--json") && args.includes("status")) {
-      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "executing", tasks: { total: 1, done: 1 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    if (args.includes("--json") && args.includes("verify")) {
-      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    return { ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=1/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-  });
+  const validators = await import("../src/core/validators");
+  const validateSpy = spyOn(validators, "validateChange");
 
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-cache-hit-"));
   const changeDirPath = join(cwd, ".specwright/changes/0001-test");
   await mkdir(changeDirPath, { recursive: true });
-  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n", "utf8");
+  await writeFile(join(changeDirPath, "intent.md"), "# Goal\n\nCache hit.\n", "utf8");
+  await writeFile(join(changeDirPath, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
+  await writeFile(join(changeDirPath, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
   await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
     version: 1,
     currentChange: "0001",
@@ -912,29 +966,24 @@ test("status refresh caches result for unchanged artifacts", async () => {
   try {
     await refreshStatus({}, { cwd, ui: { setStatus() {} } });
     await refreshStatus({}, { cwd, ui: { setStatus() {} } });
-    expect(spy.mock.calls.length).toBe(2);
+    // Second refresh hits the cache: validateChange only ran once.
+    expect(validateSpy.mock.calls.length).toBe(1);
   } finally {
-    spy.mockRestore();
+    validateSpy.mockRestore();
   }
 });
 test("status refresh reruns after canonical artifact mtime changes", async () => {
-  const commands = await import("../src/core/commands");
-  const spy = spyOn(commands, "runSpecwrightCommand");
-  spy.mockImplementation(async (_ctx, args) => {
-    if (args.includes("--json") && args.includes("status")) {
-      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "executing", tasks: { total: 1, done: 1 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    if (args.includes("--json") && args.includes("verify")) {
-      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    return { ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=1/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-  });
+  const validators = await import("../src/core/validators");
+  const validateSpy = spyOn(validators, "validateChange");
 
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-cache-miss-"));
   const changeDirPath = join(cwd, ".specwright/changes/0001-test");
   await mkdir(changeDirPath, { recursive: true });
-  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n", "utf8");
+  await writeFile(join(changeDirPath, "intent.md"), "# Goal\n\nCache miss.\n", "utf8");
+  await writeFile(join(changeDirPath, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
   await writeFile(join(changeDirPath, "plan.md"), "# Plan\n", "utf8");
+  await writeFile(join(changeDirPath, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
   await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
     version: 1,
     currentChange: "0001",
@@ -962,9 +1011,11 @@ test("status refresh reruns after canonical artifact mtime changes", async () =>
     await refreshStatus({}, { cwd, ui: { setStatus() {} } });
     await writeFile(join(changeDirPath, "plan.md"), "# Plan\n\nUpdated.\n", "utf8");
     await refreshStatus({}, { cwd, ui: { setStatus() {} } });
-    expect(spy.mock.calls.length).toBe(4);
+    // First refresh runs validate; second refresh busts the cache when plan.md
+    // mtime changes, so validate runs again.
+    expect(validateSpy.mock.calls.length).toBe(2);
   } finally {
-    spy.mockRestore();
+    validateSpy.mockRestore();
   }
 });
 
@@ -1051,21 +1102,20 @@ test("OMP status surfaces blocked with first error code", async () => {
 
 test("OMP status surfaces drift for SW009 task drift", async () => {
   const commands = await import("../src/core/commands");
-  const spy = spyOn(commands, "runSpecwrightCommand");
-  spy.mockImplementation(async (_ctx, args) => {
-    if (args.includes("--json") && args.includes("status")) {
-      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "executing", tasks: { total: 1, done: 1 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    if (args.includes("--json") && args.includes("verify")) {
-      return { ok: false, summary: JSON.stringify({ ok: false, issues: [{ level: "error", code: "SW009", message: "Unreconciled task drift: title changed" }] }), filesCreated: [], filesUpdated: [], exitCode: 1 as const };
-    }
-    return { ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=1/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+  const commandSpy = spyOn(commands, "runSpecwrightCommand");
+  commandSpy.mockImplementation(async () => {
+    throw new Error("runSpecwrightCommand must not be called from passive OMP status refresh");
   });
 
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-drift-"));
   const changeDirPath = join(cwd, ".specwright/changes/0001-test");
   await mkdir(changeDirPath, { recursive: true });
-  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n", "utf8");
+  await writeFile(join(changeDirPath, "intent.md"), "# Goal\n\nDetect drift.\n", "utf8");
+  await writeFile(join(changeDirPath, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
+  // Cached T001 title ("Test OLD") does not match the artifact ("Test NEW"),
+  // which is a real title drift that the direct validateChange path detects.
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test NEW\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
+  await writeFile(join(changeDirPath, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
   await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
     version: 1,
     currentChange: "0001",
@@ -1082,7 +1132,7 @@ test("OMP status surfaces drift for SW009 task drift", async () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         tasks: {
-          T001: { id: "T001", title: "Test", status: "done", updatedAt: "2026-01-01T00:00:00.000Z" },
+          T001: { id: "T001", title: "Test OLD", status: "done", updatedAt: "2026-01-01T00:00:00.000Z" },
         },
       },
     },
@@ -1105,27 +1155,24 @@ test("OMP status surfaces drift for SW009 task drift", async () => {
     expect(notifications[0]!.message).toBe("Specwright: 0001 has task drift");
     expect(notifications[0]!.type).toBe("warning");
   } finally {
-    spy.mockRestore();
+    commandSpy.mockRestore();
   }
 });
 
 test("OMP status surfaces checkpoint-needed when all tasks done but change not done", async () => {
   const commands = await import("../src/core/commands");
-  const spy = spyOn(commands, "runSpecwrightCommand");
-  spy.mockImplementation(async (_ctx, args) => {
-    if (args.includes("--json") && args.includes("status")) {
-      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "verifying", tasks: { total: 2, done: 2 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    if (args.includes("--json") && args.includes("verify")) {
-      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    return { ok: true, summary: "test", statusText: "Specwright · 0001 · verifying · tasks=2/2", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+  const commandSpy = spyOn(commands, "runSpecwrightCommand");
+  commandSpy.mockImplementation(async () => {
+    throw new Error("runSpecwrightCommand must not be called from passive OMP status refresh");
   });
 
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-"));
   const changeDirPath = join(cwd, ".specwright/changes/0001-test");
   await mkdir(changeDirPath, { recursive: true });
-  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n- [x] T002: Test 2\n", "utf8");
+  await writeFile(join(changeDirPath, "intent.md"), "# Goal\n\nCheckpoint needed.\n", "utf8");
+  await writeFile(join(changeDirPath, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [x] T001: Test\n  - Acceptance: covered\n  - Verification: covered\n- [x] T002: Test 2\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
+  await writeFile(join(changeDirPath, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
   await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
     version: 1,
     currentChange: "0001",
@@ -1166,33 +1213,23 @@ test("OMP status surfaces checkpoint-needed when all tasks done but change not d
     expect(notifications[0]!.message).toBe("Specwright: 0001 needs checkpoint");
     expect(notifications[0]!.type).toBe("warning");
   } finally {
-    spy.mockRestore();
+    commandSpy.mockRestore();
   }
 });
 
 test("OMP status warning notifications are sent only on transitions", async () => {
   const commands = await import("../src/core/commands");
-  const spy = spyOn(commands, "runSpecwrightCommand");
-  let callIndex = 0;
-  spy.mockImplementation(async (_ctx, args) => {
-    callIndex += 1;
-    if (args.includes("--json") && args.includes("status")) {
-      return { ok: true, summary: JSON.stringify({ currentChange: "0001", currentStatus: "executing", tasks: { total: 1, done: 0 } }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    if (args.includes("--json") && args.includes("verify")) {
-      // First two calls have errors, third call passes
-      if (callIndex <= 4) {
-        return { ok: false, summary: JSON.stringify({ ok: false, issues: [{ level: "error", code: "SW001", message: "missing intent" }] }), filesCreated: [], filesUpdated: [], exitCode: 1 as const };
-      }
-      return { ok: true, summary: JSON.stringify({ ok: true, issues: [] }), filesCreated: [], filesUpdated: [], exitCode: 0 as const };
-    }
-    return { ok: true, summary: "test", statusText: "Specwright · 0001 · executing · tasks=0/1", filesCreated: [], filesUpdated: [], exitCode: 0 as const };
+  const commandSpy = spyOn(commands, "runSpecwrightCommand");
+  commandSpy.mockImplementation(async () => {
+    throw new Error("runSpecwrightCommand must not be called from passive OMP status refresh");
   });
 
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-transition-"));
   const changeDirPath = join(cwd, ".specwright/changes/0001-test");
   await mkdir(changeDirPath, { recursive: true });
-  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [ ] T001: Test\n", "utf8");
+  // No intent.md → first refresh hits the SW001 blocked path → notify.
+  await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [ ] T001: Test\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
+  await writeFile(join(changeDirPath, "plan.md"), "# Plan\n", "utf8");
   await writeFile(join(cwd, ".specwright/state.json"), JSON.stringify({
     version: 1,
     currentChange: "0001",
@@ -1229,17 +1266,172 @@ test("OMP status warning notifications are sent only on transitions", async () =
     await refreshStatus({}, ctx);
     expect(notifications.length).toBe(1);
 
-    // Second refresh: same blocked status → no new notify
+    // Second refresh: same blocked status (cache hit) → no new notify
     await refreshStatus({}, ctx);
     expect(notifications.length).toBe(1);
 
-    // Simulate a cache-busting change so verify re-runs and now passes
-    await writeFile(join(changeDirPath, "tasks.md"), "# Tasks\n\n- [ ] T001: Test updated\n", "utf8");
+    // Bust the cache via plan.md (a tracked artifact) so validate re-runs
+    // without changing the validation result. The blocked status must
+    // remain, so no new notification should fire.
+    await writeFile(join(changeDirPath, "plan.md"), "# Plan\n\nUpdated.\n", "utf8");
 
-    // Third refresh: transitions away from blocked → no notify (only warn on entry)
+    // Third refresh: cache busted, re-validated, still blocked → no notify
     await refreshStatus({}, ctx);
     expect(notifications.length).toBe(1);
   } finally {
-    spy.mockRestore();
+    commandSpy.mockRestore();
+  }
+});
+
+test("OMP passive events never invoke the specwright command path or write verify.md", async () => {
+  const handlers = new Map<string, (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>>();
+
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on(event, handler) { handlers.set(event, handler); },
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool() {},
+    getActiveTools() { return []; },
+    setActiveTools() {},
+  };
+
+  specwrightOmpExtension(pi);
+
+  const commands = await import("../src/core/commands");
+  const commandSpy = spyOn(commands, "runSpecwrightCommand");
+  commandSpy.mockImplementation(async () => {
+    throw new Error("runSpecwrightCommand must not be called from passive OMP events");
+  });
+
+  const events: ReadonlyArray<"session_start" | "goal_updated" | "turn_end"> = ["session_start", "goal_updated", "turn_end"];
+  for (const event of events) {
+    expect(handlers.has(event)).toBe(true);
+  }
+
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-passive-events-"));
+  const changeDir = join(cwd, ".specwright/changes/0001-drift");
+  await mkdir(changeDir, { recursive: true });
+  await writeFile(join(changeDir, "intent.md"), "# Goal\n\nPassive events are non-mutating.\n", "utf8");
+  await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
+  await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Passive events\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
+  const statePath = join(cwd, ".specwright/state.json");
+  const stateMtime = await writeStateAndCaptureMtime(statePath, {
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "drift",
+        title: "Drift",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "executing",
+        step: "execute",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: { id: "T001", title: "Passive events", status: "done", updatedAt: "2026-01-01T00:00:00.000Z" },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  try {
+    const ctx: OmpCommandContextLike = {
+      cwd,
+      ui: { setStatus() {} },
+    };
+    for (const event of events) {
+      const handler = handlers.get(event);
+      expect(handler).toBeDefined();
+      await handler!({}, ctx);
+    }
+
+    // No specwright subprocess may run, no verify.md may be written, and
+    // state.json must be byte-for-byte identical to the captured baseline.
+    expect(commandSpy.mock.calls.length).toBe(0);
+    await expectNoMutation(cwd, changeDir, { state: stateMtime });
+  } finally {
+    commandSpy.mockRestore();
+  }
+});
+
+test("concurrent passive OMP events for the same cwd share one validate path", async () => {
+  const handlers = new Map<string, (event: unknown, ctx: OmpCommandContextLike) => unknown | Promise<unknown>>();
+
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on(event, handler) { handlers.set(event, handler); },
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool() {},
+    getActiveTools() { return []; },
+    setActiveTools() {},
+  };
+
+  specwrightOmpExtension(pi);
+
+  const commands = await import("../src/core/commands");
+  const commandSpy = spyOn(commands, "runSpecwrightCommand");
+  commandSpy.mockImplementation(async () => {
+    throw new Error("runSpecwrightCommand must not be called from passive OMP events");
+  });
+  const validators = await import("../src/core/validators");
+  const validateSpy = spyOn(validators, "validateChange");
+
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-passive-concurrent-"));
+  const changeDir = join(cwd, ".specwright/changes/0001-drift");
+  await mkdir(changeDir, { recursive: true });
+  await writeFile(join(changeDir, "intent.md"), "# Goal\n\nConcurrent passive events.\n", "utf8");
+  await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
+  await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Concurrent passive\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
+  await writeFile(join(changeDir, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
+  const stateMtime = await writeStateAndCaptureMtime(join(cwd, ".specwright/state.json"), {
+    version: 1,
+    currentChange: "0001",
+    changes: {
+      "0001": {
+        id: "0001",
+        slug: "drift",
+        title: "Drift",
+        kind: "feature",
+        pack: "core",
+        mode: "lite",
+        status: "executing",
+        step: "execute",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        tasks: {
+          T001: { id: "T001", title: "Concurrent passive", status: "done", updatedAt: "2026-01-01T00:00:00.000Z" },
+        },
+      },
+    },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  const ctx: OmpCommandContextLike = {
+    cwd,
+    ui: { setStatus() {} },
+  };
+  const events: ReadonlyArray<"session_start" | "goal_updated" | "turn_end"> = ["session_start", "goal_updated", "turn_end"];
+
+  try {
+    // Fire all passive events concurrently for the same cwd. The in-flight
+    // guard must coalesce them into a single validateChange call.
+    await Promise.all(events.map((event) => {
+      const handler = handlers.get(event);
+      expect(handler).toBeDefined();
+      return handler!({}, ctx);
+    }));
+
+    expect(validateSpy.mock.calls.length).toBe(1);
+    expect(commandSpy.mock.calls.length).toBe(0);
+    await expectNoMutation(cwd, changeDir, { state: stateMtime, verify: await captureFileMtime(join(changeDir, "verify.md")) });
+  } finally {
+    commandSpy.mockRestore();
+    validateSpy.mockRestore();
   }
 });

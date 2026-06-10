@@ -1,9 +1,9 @@
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { runSpecwrightCommand } from "../../core/commands";
 import { changeDir } from "../../core/paths";
-import { loadState } from "../../core/state";
-import type { ValidationReport } from "../../core/validators";
+import { loadState, syncChangeTasksFromMarkdown } from "../../core/state";
+import type { ChangeState } from "../../core/types";
+import { validateChange, type ValidationReport } from "../../core/validators";
 import type { OmpContextLike } from "./types";
 
 const refreshInFlightByCwd = new Map<string, Promise<string | undefined>>();
@@ -24,15 +24,6 @@ interface StatusCacheEntry {
 
 const statusCache = new Map<string, StatusCacheEntry>();
 const lastDisplayedStatusByCwd = new Map<string, string | undefined>();
-
-async function getCurrentChange(cwd: string): Promise<{ id: string; slug: string } | undefined> {
-  const state = await loadState(cwd);
-  const changeId = state.currentChange;
-  if (!changeId) return undefined;
-  const change = state.changes[changeId];
-  if (!change) return undefined;
-  return { id: changeId, slug: change.slug };
-}
 
 async function computeArtifactKey(cwd: string, changeId: string, slug: string): Promise<string> {
   const changePath = changeDir(cwd, changeId, slug);
@@ -68,96 +59,89 @@ async function computeArtifactKey(cwd: string, changeId: string, slug: string): 
 }
 
 async function loadStatusText(cwd: string): Promise<string | undefined> {
+  // Race-safe: capture or create the per-cwd in-flight promise synchronously,
+  // before any `await`, so concurrent callers always share one execution path.
   const existing = refreshInFlightByCwd.get(cwd);
   if (existing) {
     return await existing;
   }
 
-  const change = await getCurrentChange(cwd);
-  if (!change) {
-    return undefined;
-  }
-
-  let artifactKey: string | undefined;
-  try {
-    artifactKey = await computeArtifactKey(cwd, change.id, change.slug);
-  } catch {
-    // If we cannot read artifact metadata, fall through to uncached execution.
-  }
-
-  const cacheKey = `${cwd}:${change.id}`;
-  if (artifactKey) {
-    const cached = statusCache.get(cacheKey);
-    if (cached && cached.artifactKey === artifactKey) {
-      return cached.statusText;
-    }
-  }
-
   const pending = (async () => {
-    let currentChange: string | undefined;
-    let currentStatus: string | undefined;
-    let progress = { total: 0, done: 0 };
+    // Read state directly. No subprocess, no writes.
+    const state = await loadState(cwd);
+    const changeId = state.currentChange;
+    if (!changeId) return undefined;
+    const change = state.changes[changeId];
+    if (!change) return undefined;
 
-    const statusResult = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["status", "--json"]);
-    if (statusResult.summary) {
-      try {
-        const data = JSON.parse(statusResult.summary);
-        currentChange = data.currentChange;
-        currentStatus = data.currentStatus;
-        progress = data.tasks ?? progress;
-      } catch {
-        // JSON parse failed; fall back to plain status
+    let artifactKey: string | undefined;
+    try {
+      artifactKey = await computeArtifactKey(cwd, change.id, change.slug);
+    } catch {
+      // If we cannot read artifact metadata, fall through to uncached execution.
+    }
+
+    const cacheKey = `${cwd}:${change.id}`;
+    if (artifactKey) {
+      const cached = statusCache.get(cacheKey);
+      if (cached && cached.artifactKey === artifactKey) {
+        return cached.statusText;
       }
     }
 
-    if (!currentChange) {
-      const plainResult = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["status"]);
-      if (plainResult.ok && plainResult.statusText) {
-        return plainResult.statusText;
+    // Compute task progress from the cached change, mirroring the in-memory
+    // half of `syncChangeTasksFromFile` so passive refresh sees unchecked
+    const tasksPath = join(changeDir(cwd, change.id, change.slug), "tasks.md");
+    let tasksMarkdown: string | undefined;
+    try {
+      tasksMarkdown = await readFile(tasksPath, "utf8");
+    } catch (error) {
+      if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+        throw error;
       }
-      return undefined;
     }
+    const now = new Date();
+    const sync = tasksMarkdown !== undefined
+      ? syncChangeTasksFromMarkdown(change, tasksMarkdown, now)
+      : { change, issues: [], changed: false };
+    const syncedChange: ChangeState = sync.change;
+    const progress = taskProgress(syncedChange);
 
-    let report: ValidationReport | undefined;
-    const verifyResult = await runSpecwrightCommand({ cwd, runtime: "omp", now: () => new Date() }, ["verify", "--json"]);
-    if (verifyResult.summary) {
-      try {
-        report = JSON.parse(verifyResult.summary);
-      } catch {
-        // Ignore parse errors
+    // Validate directly. `validateChange` is read-only: it never writes
+    // verify.md or updates state.json.
+    const report: ValidationReport = await validateChange(cwd, syncedChange);
+    if (sync.issues.length > 0) {
+      // Surface unreconciled task drift surfaced by the in-memory sync, even
+      // when the cached change has already been reconciled.
+      for (const issue of sync.issues) {
+        report.issues.push({
+          level: "error",
+          code: "SW009",
+          message: `Unreconciled task drift: ${issue.message}`,
+          file: "tasks.md",
+        });
       }
+      report.ok = false;
     }
 
     let statusText: string | undefined;
-    if (report && !report.ok) {
-      const driftIssues = report.issues.filter((issue) => issue.code === "SW009");
-      if (driftIssues.length > 0) {
-        statusText = `Specwright · ${change.id} · drift · tasks=${progress.done}/${progress.total}`;
-      } else {
-        const firstError = report.issues.find((issue) => issue.level === "error");
-        const code = firstError?.code ?? "error";
-        statusText = `Specwright · ${change.id} · blocked · ${code}`;
-      }
-    } else if (progress.total > 0 && progress.done === progress.total && currentStatus !== "done") {
+    const driftIssues = report.issues.filter((issue) => issue.code === "SW009");
+    if (driftIssues.length > 0) {
+      statusText = `Specwright · ${change.id} · drift · tasks=${progress.done}/${progress.total}`;
+    } else if (!report.ok) {
+      const firstError = report.issues.find((issue) => issue.level === "error");
+      const code = firstError?.code ?? "error";
+      statusText = `Specwright · ${change.id} · blocked · ${code}`;
+    } else if (progress.total > 0 && progress.done === progress.total && syncedChange.status !== "done") {
       statusText = `Specwright · ${change.id} · checkpoint-needed · tasks=${progress.done}/${progress.total}`;
     } else {
       const taskSuffix = progress.total > 0 ? ` · tasks=${progress.done}/${progress.total}` : "";
-      statusText = `Specwright · ${change.id} · ${currentStatus ?? "idle"}${taskSuffix}`;
+      statusText = `Specwright · ${change.id} · ${syncedChange.status ?? "idle"}${taskSuffix}`;
     }
 
-    // Recompute the key after command execution so that any files the command
-    // itself modified (e.g. state.json after task sync) are reflected in the
-    // cached key. This prevents the next refresh from always invalidating.
-    let postKey: string | undefined;
-    try {
-      postKey = await computeArtifactKey(cwd, change.id, change.slug);
-    } catch {
-      postKey = artifactKey;
+    if (artifactKey) {
+      statusCache.set(cacheKey, { artifactKey, statusText });
     }
-    if (postKey) {
-      statusCache.set(cacheKey, { artifactKey: postKey, statusText });
-    }
-
     return statusText;
   })();
 
@@ -169,6 +153,17 @@ async function loadStatusText(cwd: string): Promise<string | undefined> {
       refreshInFlightByCwd.delete(cwd);
     }
   }
+}
+
+function taskProgress(change: ChangeState | undefined): { total: number; done: number } {
+  if (!change) return { total: 0, done: 0 };
+  let total = 0;
+  let done = 0;
+  for (const task of Object.values(change.tasks)) {
+    total += 1;
+    if (task.status === "done") done += 1;
+  }
+  return { total, done };
 }
 
 export function shouldDisplayStatusText(statusText: string): boolean {
