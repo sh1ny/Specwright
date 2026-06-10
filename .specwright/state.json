@@ -456,7 +456,7 @@
       "status": "verifying",
       "step": "verify",
       "createdAt": "2026-06-09T23:08:12.458Z",
-      "updatedAt": "2026-06-10T14:35:28.760Z",
+      "updatedAt": "2026-06-10T14:38:49.262Z",
       "tasks": {
         "T001": {
           "id": "T001",
@@ -513,8 +513,21 @@
           "updatedAt": "2026-06-10T14:08:52.695Z"
         }
       }
+    },
+    "0012": {
+      "id": "0012",
+      "slug": "code-review-specwright-omp-tight-integration-scope-pr-style-branch",
+      "title": "# Code Review: Specwright OMP Tight Integration **Scope**: PR-style branch",
+      "kind": "bugfix",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-10T14:39:39.328Z",
+      "updatedAt": "2026-06-10T14:39:39.328Z",
+      "tasks": {}
     }
   },
-  "updatedAt": "2026-06-10T14:35:28.760Z",
-  "currentChange": "0011"
+  "updatedAt": "2026-06-10T14:39:39.328Z",
+  "currentChange": "0012"
 }
