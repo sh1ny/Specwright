@@ -191,6 +191,7 @@ test("concurrent refreshStatus calls share one in-flight path", async () => {
   await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
   await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Concurrent refresh\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
   await writeFile(join(changeDir, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
+  const verifyMtime = await captureFileMtime(join(changeDir, "verify.md"));
   const statePath = join(cwd, ".specwright/state.json");
   const stateMtime = await writeStateAndCaptureMtime(statePath, {
     version: 1,
@@ -241,7 +242,6 @@ test("concurrent refreshStatus calls share one in-flight path", async () => {
     expect(statuses.at(-1)).toContain("Specwright · 0001 · checkpoint-needed · tasks=1/1");
     // Concurrent refreshes for one cwd must share the in-flight path: only
     // one direct validateChange call (and one state read) handles all of them.
-    const verifyMtime = await captureFileMtime(join(changeDir, "verify.md"));
     await expectNoMutation(cwd, changeDir, { state: stateMtime, verify: verifyMtime });
   } finally {
     validateSpy.mockRestore();
@@ -1389,6 +1389,7 @@ test("concurrent passive OMP events for the same cwd share one validate path", a
   await writeFile(join(changeDir, "evidence.md"), "# Evidence\n\nProven.\n", "utf8");
   await writeFile(join(changeDir, "tasks.md"), "# Tasks\n\n- [x] T001: Concurrent passive\n  - Acceptance: covered\n  - Verification: covered\n", "utf8");
   await writeFile(join(changeDir, "verify.md"), "# Verify\n\nobserved output: ok\n", "utf8");
+  const verifyMtime = await captureFileMtime(join(changeDir, "verify.md"));
   const stateMtime = await writeStateAndCaptureMtime(join(cwd, ".specwright/state.json"), {
     version: 1,
     currentChange: "0001",
@@ -1429,7 +1430,7 @@ test("concurrent passive OMP events for the same cwd share one validate path", a
 
     expect(validateSpy.mock.calls.length).toBe(1);
     expect(commandSpy.mock.calls.length).toBe(0);
-    await expectNoMutation(cwd, changeDir, { state: stateMtime, verify: await captureFileMtime(join(changeDir, "verify.md")) });
+    await expectNoMutation(cwd, changeDir, { state: stateMtime, verify: verifyMtime });
   } finally {
     commandSpy.mockRestore();
     validateSpy.mockRestore();

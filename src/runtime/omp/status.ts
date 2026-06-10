@@ -67,82 +67,88 @@ async function loadStatusText(cwd: string): Promise<string | undefined> {
   }
 
   const pending = (async () => {
-    // Read state directly. No subprocess, no writes.
-    const state = await loadState(cwd);
-    const changeId = state.currentChange;
-    if (!changeId) return undefined;
-    const change = state.changes[changeId];
-    if (!change) return undefined;
-
-    let artifactKey: string | undefined;
     try {
-      artifactKey = await computeArtifactKey(cwd, change.id, change.slug);
+      // Read state directly. No subprocess, no writes.
+      const state = await loadState(cwd);
+      const changeId = state.currentChange;
+      if (!changeId) return undefined;
+      const change = state.changes[changeId];
+      if (!change) return undefined;
+
+      let artifactKey: string | undefined;
+      try {
+        artifactKey = await computeArtifactKey(cwd, change.id, change.slug);
+      } catch {
+        // If we cannot read artifact metadata, fall through to uncached execution.
+      }
+
+      const cacheKey = `${cwd}:${change.id}`;
+      if (artifactKey) {
+        const cached = statusCache.get(cacheKey);
+        if (cached && cached.artifactKey === artifactKey) {
+          return cached.statusText;
+        }
+      }
+
+      // Compute task progress from the cached change, mirroring the in-memory
+      // half of `syncChangeTasksFromFile` so passive refresh sees unchecked
+      const tasksPath = join(changeDir(cwd, change.id, change.slug), "tasks.md");
+      let tasksMarkdown: string | undefined;
+      try {
+        tasksMarkdown = await readFile(tasksPath, "utf8");
+      } catch (error) {
+        if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+          throw error;
+        }
+      }
+      const now = new Date();
+      const sync = tasksMarkdown !== undefined
+        ? syncChangeTasksFromMarkdown(change, tasksMarkdown, now)
+        : { change, issues: [], changed: false };
+      const syncedChange: ChangeState = sync.change;
+      const progress = taskProgress(syncedChange);
+
+      // Validate directly. `validateChange` is read-only: it never writes
+      // verify.md or updates state.json.
+      const report: ValidationReport = await validateChange(cwd, syncedChange);
+      if (sync.issues.length > 0) {
+        // Surface unreconciled task drift surfaced by the in-memory sync, even
+        // when the cached change has already been reconciled.
+        for (const issue of sync.issues) {
+          report.issues.push({
+            level: "error",
+            code: "SW009",
+            message: `Unreconciled task drift: ${issue.message}`,
+            file: "tasks.md",
+          });
+        }
+        report.ok = false;
+      }
+
+      let statusText: string | undefined;
+      const driftIssues = report.issues.filter((issue) => issue.code === "SW009");
+      if (driftIssues.length > 0) {
+        statusText = `Specwright · ${change.id} · drift · tasks=${progress.done}/${progress.total}`;
+      } else if (!report.ok) {
+        const firstError = report.issues.find((issue) => issue.level === "error");
+        const code = firstError?.code ?? "error";
+        statusText = `Specwright · ${change.id} · blocked · ${code}`;
+      } else if (progress.total > 0 && progress.done === progress.total && syncedChange.status !== "done") {
+        statusText = `Specwright · ${change.id} · checkpoint-needed · tasks=${progress.done}/${progress.total}`;
+      } else {
+        const taskSuffix = progress.total > 0 ? ` · tasks=${progress.done}/${progress.total}` : "";
+        statusText = `Specwright · ${change.id} · ${syncedChange.status ?? "idle"}${taskSuffix}`;
+      }
+
+      if (artifactKey) {
+        statusCache.set(cacheKey, { artifactKey, statusText });
+      }
+      return statusText;
     } catch {
-      // If we cannot read artifact metadata, fall through to uncached execution.
+      // Degrade safely: passive refresh must never throw through OMP event handlers
+      // when validation or read classification fails.
+      return undefined;
     }
-
-    const cacheKey = `${cwd}:${change.id}`;
-    if (artifactKey) {
-      const cached = statusCache.get(cacheKey);
-      if (cached && cached.artifactKey === artifactKey) {
-        return cached.statusText;
-      }
-    }
-
-    // Compute task progress from the cached change, mirroring the in-memory
-    // half of `syncChangeTasksFromFile` so passive refresh sees unchecked
-    const tasksPath = join(changeDir(cwd, change.id, change.slug), "tasks.md");
-    let tasksMarkdown: string | undefined;
-    try {
-      tasksMarkdown = await readFile(tasksPath, "utf8");
-    } catch (error) {
-      if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
-        throw error;
-      }
-    }
-    const now = new Date();
-    const sync = tasksMarkdown !== undefined
-      ? syncChangeTasksFromMarkdown(change, tasksMarkdown, now)
-      : { change, issues: [], changed: false };
-    const syncedChange: ChangeState = sync.change;
-    const progress = taskProgress(syncedChange);
-
-    // Validate directly. `validateChange` is read-only: it never writes
-    // verify.md or updates state.json.
-    const report: ValidationReport = await validateChange(cwd, syncedChange);
-    if (sync.issues.length > 0) {
-      // Surface unreconciled task drift surfaced by the in-memory sync, even
-      // when the cached change has already been reconciled.
-      for (const issue of sync.issues) {
-        report.issues.push({
-          level: "error",
-          code: "SW009",
-          message: `Unreconciled task drift: ${issue.message}`,
-          file: "tasks.md",
-        });
-      }
-      report.ok = false;
-    }
-
-    let statusText: string | undefined;
-    const driftIssues = report.issues.filter((issue) => issue.code === "SW009");
-    if (driftIssues.length > 0) {
-      statusText = `Specwright · ${change.id} · drift · tasks=${progress.done}/${progress.total}`;
-    } else if (!report.ok) {
-      const firstError = report.issues.find((issue) => issue.level === "error");
-      const code = firstError?.code ?? "error";
-      statusText = `Specwright · ${change.id} · blocked · ${code}`;
-    } else if (progress.total > 0 && progress.done === progress.total && syncedChange.status !== "done") {
-      statusText = `Specwright · ${change.id} · checkpoint-needed · tasks=${progress.done}/${progress.total}`;
-    } else {
-      const taskSuffix = progress.total > 0 ? ` · tasks=${progress.done}/${progress.total}` : "";
-      statusText = `Specwright · ${change.id} · ${syncedChange.status ?? "idle"}${taskSuffix}`;
-    }
-
-    if (artifactKey) {
-      statusCache.set(cacheKey, { artifactKey, statusText });
-    }
-    return statusText;
   })();
 
   refreshInFlightByCwd.set(cwd, pending);
