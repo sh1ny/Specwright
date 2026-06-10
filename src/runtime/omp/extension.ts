@@ -1,7 +1,8 @@
 import { runSpecwrightCommand } from "../../core/commands";
 import { splitArgs } from "./args";
 import { clearStatus, getArgumentCompletions, refreshStatus, shouldDisplayStatusText } from "./status";
-import type { ExtensionApiLike, ToolCallBlockResult, ToolCallEvent } from "./types";
+import type { CommandResult } from "../../core/types";
+import type { ExtensionApiLike, ToolCallBlockResult, ToolCallEvent, ToolResult } from "./types";
 
 export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
   let pendingRoute: { step: string; expectedAgent: string } | null = null;
@@ -12,6 +13,7 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
     execute: "specwright-executor",
     verify: "specwright-verifier",
   };
+  const schemas = toolSchemas(pi);
 
   function clearPendingRoute() {
     pendingRoute = null;
@@ -53,39 +55,40 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
     },
   });
 
-  pi.registerTool("specwright_status", {
+  pi.registerTool({
+    name: "specwright_status",
+    label: "Specwright Status",
     description: "Return Specwright status as JSON",
-    parameters: {},
-    async handler(_params, ctx) {
+    parameters: schemas.empty,
+    approval: "read",
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const result = await runSpecwrightCommand(
         { cwd: ctx.cwd ?? process.cwd(), runtime: "omp", now: () => new Date() },
         ["status", "--json"],
       );
-      return { ok: result.ok, summary: result.summary, filesCreated: result.filesCreated, filesUpdated: result.filesUpdated, exitCode: result.exitCode };
+      return toolResult(commandResultDetails(result));
     },
   });
 
-  pi.registerTool("specwright_checkpoint", {
+  pi.registerTool({
+    name: "specwright_checkpoint",
+    label: "Specwright Checkpoint",
     description: "Create a Specwright checkpoint commit for a phase or task",
-    parameters: {
-      change: { type: "string", description: "Change ID (optional)" },
-      phase: { type: "string", description: "Checkpoint phase (e.g., verify)" },
-      task: { type: "string", description: "Task ID (e.g., T005)" },
-      files: { type: "array", description: "Files to include in the checkpoint" },
-    },
-    async handler(params, ctx) {
+    parameters: schemas.checkpoint,
+    approval: "write",
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const hasPhase = typeof params.phase === "string" && params.phase.length > 0;
       const hasTask = typeof params.task === "string" && params.task.length > 0;
       if (hasPhase && hasTask) {
-        return { ok: false, summary: "Specify exactly one of phase or task.", filesCreated: [], filesUpdated: [], exitCode: 1 };
+        return toolResult({ ok: false, summary: "Specify exactly one of phase or task.", filesCreated: [], filesUpdated: [], exitCode: 1 });
       }
       if (!hasPhase && !hasTask) {
-        return { ok: false, summary: "Specify exactly one of phase or task.", filesCreated: [], filesUpdated: [], exitCode: 1 };
+        return toolResult({ ok: false, summary: "Specify exactly one of phase or task.", filesCreated: [], filesUpdated: [], exitCode: 1 });
       }
       const change = typeof params.change === "string" ? params.change : "";
       const files = Array.isArray(params.files) ? params.files.filter((f): f is string => typeof f === "string") : [];
       if (files.length === 0) {
-        return { ok: false, summary: "At least one file must be supplied.", filesCreated: [], filesUpdated: [], exitCode: 1 };
+        return toolResult({ ok: false, summary: "At least one file must be supplied.", filesCreated: [], filesUpdated: [], exitCode: 1 });
       }
       const argv = ["checkpoint", change];
       if (hasPhase) {
@@ -98,38 +101,39 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
         { cwd: ctx.cwd ?? process.cwd(), runtime: "omp", now: () => new Date() },
         argv,
       );
-      return { ok: result.ok, summary: result.summary, filesCreated: result.filesCreated, filesUpdated: result.filesUpdated, exitCode: result.exitCode };
+      return toolResult(commandResultDetails(result));
     },
   });
 
-  pi.registerTool("specwright_validate", {
+  pi.registerTool({
+    name: "specwright_validate",
+    label: "Specwright Validate",
     description: "Run Specwright validation on the current or specified change",
-    parameters: {
-      change: { type: "string", description: "Change ID (optional)" },
-    },
-    async handler(params, ctx) {
+    parameters: schemas.validate,
+    approval: "read",
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const change = typeof params.change === "string" ? params.change : "";
       const argv = change ? ["verify", change, "--json"] : ["verify", "--json"];
       const result = await runSpecwrightCommand(
         { cwd: ctx.cwd ?? process.cwd(), runtime: "omp", now: () => new Date() },
         argv,
       );
-      return { ok: result.ok, summary: result.summary, filesCreated: result.filesCreated, filesUpdated: result.filesUpdated, exitCode: result.exitCode };
+      return toolResult(commandResultDetails(result));
     },
   });
 
   pi.on("tool_call", (event) => {
     if (!pendingRoute) return;
     const toolCall = event as ToolCallEvent;
-    const isTask = toolCall.name === "task";
-    const agent = toolCall.input?.agent ?? (typeof toolCall.params?.agent === "string" ? toolCall.params.agent : undefined);
+    const isTask = toolCall.toolName === "task";
+    const agent = typeof toolCall.input?.agent === "string" ? toolCall.input.agent : undefined;
     if (isTask && agent === pendingRoute.expectedAgent) {
       pendingRoute = null;
       return;
     }
     const blockResult: ToolCallBlockResult = {
       block: true,
-      reason: `Expected the model to delegate ${pendingRoute.step} to \`${pendingRoute.expectedAgent}\` via the \`task\` tool, but received tool \`${toolCall.name}\` instead.`,
+      reason: `Expected the model to delegate ${pendingRoute.step} to \`${pendingRoute.expectedAgent}\` via the \`task\` tool, but received tool \`${toolCall.toolName}\` instead.`,
     };
     return blockResult;
   });
@@ -144,4 +148,63 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
     return refreshStatus(event, ctx);
   });
   pi.on("session_shutdown", clearStatus);
+}
+
+interface CommandResultDetails {
+  ok: boolean;
+  summary: string;
+  filesCreated: string[];
+  filesUpdated: string[];
+  exitCode: number;
+}
+
+function commandResultDetails(result: Pick<CommandResult, "ok" | "summary" | "filesCreated" | "filesUpdated" | "exitCode">): CommandResultDetails {
+  return {
+    ok: result.ok,
+    summary: result.summary,
+    filesCreated: result.filesCreated,
+    filesUpdated: result.filesUpdated,
+    exitCode: result.exitCode,
+  };
+}
+
+function toolResult(details: CommandResultDetails): ToolResult<CommandResultDetails> {
+  return {
+    content: [{ type: "text", text: JSON.stringify(details) }],
+    details,
+  };
+}
+
+
+function toolSchemas(pi: ExtensionApiLike) {
+  const z = pi.zod;
+  if (!z) {
+    return {
+      empty: { type: "object", properties: {} },
+      validate: { type: "object", properties: { change: { type: "string" } } },
+      checkpoint: {
+        type: "object",
+        properties: {
+          change: { type: "string" },
+          phase: { type: "string" },
+          task: { type: "string" },
+          files: { type: "array", items: { type: "string" } },
+        },
+      },
+    };
+  }
+
+  const optionalString = (description: string) => z.string().describe(description).optional();
+  return {
+    empty: z.object({}),
+    validate: z.object({
+      change: optionalString("Change ID"),
+    }),
+    checkpoint: z.object({
+      change: optionalString("Change ID"),
+      phase: optionalString("Checkpoint phase, e.g. verify"),
+      task: optionalString("Task ID, e.g. T005"),
+      files: z.array(z.string()).describe("Files to include in the checkpoint").optional(),
+    }),
+  };
 }

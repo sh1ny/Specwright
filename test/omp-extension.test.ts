@@ -7,7 +7,7 @@ import { defaultConfig } from "../src/core/state";
 import { installOmpAdapter } from "../src/runtime/omp/install";
 import { runSpecwrightCommand } from "../src/core/commands";
 import { refreshStatus } from "../src/runtime/omp/status";
-import type { ExtensionApiLike, OmpCommandContextLike } from "../src/runtime/omp/types";
+import type { ExtensionApiLike, OmpCommandContextLike, ToolDefinition } from "../src/runtime/omp/types";
 
 test("OMP extension registers and handles specwright command", async () => {
   const commands = new Map<string, { handler: (args: string, ctx: OmpCommandContextLike) => Promise<void> }>();
@@ -433,8 +433,8 @@ test("widened OMP adapter API surface accepts new fields without breaking existi
     on() {},
     registerCommand() {},
     sendUserMessage() {},
-    registerTool(name, definition) {
-      tools.push({ name, params: definition.parameters ?? {} });
+    registerTool(definition) {
+      tools.push({ name: definition.name, params: definition.parameters as Record<string, unknown> });
     },
     getActiveTools() { return activeTools; },
     setActiveTools(tools) { activeTools = tools; },
@@ -458,11 +458,13 @@ test("widened OMP adapter API surface accepts new fields without breaking existi
       },
     },
   };
-  pi.registerTool("specwright_status", {
+  pi.registerTool({
+    name: "specwright_status",
+    label: "Specwright Status",
     description: "Return Specwright status as JSON",
     parameters: {},
-    handler(_params, _context) {
-      return { ok: true };
+    execute() {
+      return { content: [{ type: "text", text: "{}" }], details: { ok: true } };
     },
   });
   pi.setActiveTools?.(["specwright_status"]);
@@ -486,8 +488,8 @@ test("OMP extension registers structured tools", () => {
     on() {},
     registerCommand() {},
     sendUserMessage() {},
-    registerTool(name, definition) {
-      tools.set(name, { description: definition.description, parameters: definition.parameters ?? {} });
+    registerTool(definition) {
+      tools.set(definition.name, { description: definition.description, parameters: definition.parameters as Record<string, unknown> });
     },
     getActiveTools() { return []; },
     setActiveTools() {},
@@ -498,22 +500,24 @@ test("OMP extension registers structured tools", () => {
   expect(tools.has("specwright_checkpoint")).toBe(true);
   expect(tools.has("specwright_validate")).toBe(true);
   expect(tools.get("specwright_status")?.description).toBe("Return Specwright status as JSON");
-  expect(tools.get("specwright_checkpoint")?.parameters).toHaveProperty("change");
-  expect(tools.get("specwright_checkpoint")?.parameters).toHaveProperty("phase");
-  expect(tools.get("specwright_checkpoint")?.parameters).toHaveProperty("task");
-  expect(tools.get("specwright_checkpoint")?.parameters).toHaveProperty("files");
-  expect(tools.get("specwright_validate")?.parameters).toHaveProperty("change");
+  const checkpointProperties = tools.get("specwright_checkpoint")?.parameters.properties as Record<string, unknown>;
+  const validateProperties = tools.get("specwright_validate")?.parameters.properties as Record<string, unknown>;
+  expect(checkpointProperties).toHaveProperty("change");
+  expect(checkpointProperties).toHaveProperty("phase");
+  expect(checkpointProperties).toHaveProperty("task");
+  expect(checkpointProperties).toHaveProperty("files");
+  expect(validateProperties).toHaveProperty("change");
 });
 
 test("specwright_status tool returns structured CommandResult shape", async () => {
-  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const tools = new Map<string, Pick<ToolDefinition, "execute">>();
   const pi: ExtensionApiLike = {
     setLabel() {},
     on() {},
     registerCommand() {},
     sendUserMessage() {},
-    registerTool(name, definition) {
-      tools.set(name, { handler: definition.handler });
+    registerTool(definition) {
+      tools.set(definition.name, { execute: definition.execute });
     },
     getActiveTools() { return []; },
     setActiveTools() {},
@@ -525,7 +529,7 @@ test("specwright_status tool returns structured CommandResult shape", async () =
 
   const statusTool = tools.get("specwright_status");
   expect(statusTool).toBeDefined();
-  const result = await statusTool!.handler({}, { cwd }) as Record<string, unknown>;
+  const result = (await statusTool!.execute("tool-call", {}, undefined, undefined, { cwd })).details as Record<string, unknown>;
   expect(result.ok).toBe(true);
   expect(typeof result.summary).toBe("string");
   expect(Array.isArray(result.filesCreated)).toBe(true);
@@ -534,14 +538,14 @@ test("specwright_status tool returns structured CommandResult shape", async () =
 });
 
 test("specwright_validate tool returns structured result with validation report", async () => {
-  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const tools = new Map<string, Pick<ToolDefinition, "execute">>();
   const pi: ExtensionApiLike = {
     setLabel() {},
     on() {},
     registerCommand() {},
     sendUserMessage() {},
-    registerTool(name, definition) {
-      tools.set(name, { handler: definition.handler });
+    registerTool(definition) {
+      tools.set(definition.name, { execute: definition.execute });
     },
     getActiveTools() { return []; },
     setActiveTools() {},
@@ -554,7 +558,7 @@ test("specwright_validate tool returns structured result with validation report"
 
   const validateTool = tools.get("specwright_validate");
   expect(validateTool).toBeDefined();
-  const result = await validateTool!.handler({}, { cwd }) as Record<string, unknown>;
+  const result = (await validateTool!.execute("tool-call", {}, undefined, undefined, { cwd })).details as Record<string, unknown>;
   expect(typeof result.ok).toBe("boolean");
   expect(typeof result.summary).toBe("string");
   expect(Array.isArray(result.filesCreated)).toBe(true);
@@ -563,14 +567,14 @@ test("specwright_validate tool returns structured result with validation report"
 });
 
 test("specwright_checkpoint tool rejects phase and task together", async () => {
-  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const tools = new Map<string, Pick<ToolDefinition, "execute">>();
   const pi: ExtensionApiLike = {
     setLabel() {},
     on() {},
     registerCommand() {},
     sendUserMessage() {},
-    registerTool(name, definition) {
-      tools.set(name, { handler: definition.handler });
+    registerTool(definition) {
+      tools.set(definition.name, { execute: definition.execute });
     },
     getActiveTools() { return []; },
     setActiveTools() {},
@@ -580,21 +584,21 @@ test("specwright_checkpoint tool rejects phase and task together", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-both-"));
   const checkpointTool = tools.get("specwright_checkpoint");
   expect(checkpointTool).toBeDefined();
-  const result = await checkpointTool!.handler({ change: "", phase: "verify", task: "T001", files: ["tasks.md"] }, { cwd }) as Record<string, unknown>;
+  const result = (await checkpointTool!.execute("tool-call", { change: "", phase: "verify", task: "T001", files: ["tasks.md"] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
   expect(result.ok).toBe(false);
   expect(result.summary).toBe("Specify exactly one of phase or task.");
   expect(result.exitCode).toBe(1);
 });
 
 test("specwright_checkpoint tool rejects missing phase and task", async () => {
-  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const tools = new Map<string, Pick<ToolDefinition, "execute">>();
   const pi: ExtensionApiLike = {
     setLabel() {},
     on() {},
     registerCommand() {},
     sendUserMessage() {},
-    registerTool(name, definition) {
-      tools.set(name, { handler: definition.handler });
+    registerTool(definition) {
+      tools.set(definition.name, { execute: definition.execute });
     },
     getActiveTools() { return []; },
     setActiveTools() {},
@@ -604,21 +608,21 @@ test("specwright_checkpoint tool rejects missing phase and task", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-none-"));
   const checkpointTool = tools.get("specwright_checkpoint");
   expect(checkpointTool).toBeDefined();
-  const result = await checkpointTool!.handler({ change: "", files: ["tasks.md"] }, { cwd }) as Record<string, unknown>;
+  const result = (await checkpointTool!.execute("tool-call", { change: "", files: ["tasks.md"] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
   expect(result.ok).toBe(false);
   expect(result.summary).toBe("Specify exactly one of phase or task.");
   expect(result.exitCode).toBe(1);
 });
 
 test("specwright_checkpoint tool rejects empty files array", async () => {
-  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const tools = new Map<string, Pick<ToolDefinition, "execute">>();
   const pi: ExtensionApiLike = {
     setLabel() {},
     on() {},
     registerCommand() {},
     sendUserMessage() {},
-    registerTool(name, definition) {
-      tools.set(name, { handler: definition.handler });
+    registerTool(definition) {
+      tools.set(definition.name, { execute: definition.execute });
     },
     getActiveTools() { return []; },
     setActiveTools() {},
@@ -628,21 +632,21 @@ test("specwright_checkpoint tool rejects empty files array", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-empty-files-"));
   const checkpointTool = tools.get("specwright_checkpoint");
   expect(checkpointTool).toBeDefined();
-  const result = await checkpointTool!.handler({ change: "", phase: "verify", files: [] }, { cwd }) as Record<string, unknown>;
+  const result = (await checkpointTool!.execute("tool-call", { change: "", phase: "verify", files: [] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
   expect(result.ok).toBe(false);
   expect(result.summary).toBe("At least one file must be supplied.");
   expect(result.exitCode).toBe(1);
 });
 
 test("specwright_checkpoint tool forwards valid params to command", async () => {
-  const tools = new Map<string, { handler: (params: Record<string, unknown>, ctx: OmpCommandContextLike) => unknown | Promise<unknown> }>();
+  const tools = new Map<string, Pick<ToolDefinition, "execute">>();
   const pi: ExtensionApiLike = {
     setLabel() {},
     on() {},
     registerCommand() {},
     sendUserMessage() {},
-    registerTool(name, definition) {
-      tools.set(name, { handler: definition.handler });
+    registerTool(definition) {
+      tools.set(definition.name, { execute: definition.execute });
     },
     getActiveTools() { return []; },
     setActiveTools() {},
@@ -656,7 +660,7 @@ test("specwright_checkpoint tool forwards valid params to command", async () => 
   const checkpointTool = tools.get("specwright_checkpoint");
   expect(checkpointTool).toBeDefined();
   // Without a git worktree the command will fail, but the error should NOT be about invalid params
-  const result = await checkpointTool!.handler({ change: "", phase: "verify", files: ["tasks.md"] }, { cwd }) as Record<string, unknown>;
+  const result = (await checkpointTool!.execute("tool-call", { change: "", phase: "verify", files: ["tasks.md"] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
   expect(result.ok).toBe(false);
   expect(result.summary).not.toBe("Specify exactly one of phase or task.");
   expect(result.summary).not.toBe("At least one file must be supplied.");
@@ -684,9 +688,8 @@ test("wrong first tool call after lifecycle command is blocked", async () => {
   expect(command).toBeDefined();
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-block-"));
   await command!.handler("research 0001", { cwd, waitForIdle: async () => {} });
-
   expect(toolCallHandler).toBeDefined();
-  const blockResult = toolCallHandler!({ name: "web_search", params: { query: "test" } }, { cwd });
+  const blockResult = toolCallHandler!({ toolName: "web_search", input: { query: "test" } }, { cwd });
   toolCallResults.push(blockResult);
   expect(blockResult).toEqual({
     block: true,
@@ -716,12 +719,10 @@ test("correct task call clears pending route and is not blocked", async () => {
   expect(command).toBeDefined();
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-clear-"));
   await command!.handler("plan 0001", { cwd, waitForIdle: async () => {} });
-
-  expect(toolCallHandler).toBeDefined();
-  const passResult = toolCallHandler!({ name: "task", params: { agent: "specwright-planner" }, input: { agent: "specwright-planner" } }, { cwd });
+  const passResult = toolCallHandler!({ toolName: "task", input: { agent: "specwright-planner" } }, { cwd });
   expect(passResult).toBeUndefined();
 
-  const afterResult = toolCallHandler!({ name: "web_search", params: {} }, { cwd });
+  const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
   expect(afterResult).toBeUndefined();
 });
 
@@ -750,7 +751,7 @@ test("turn_end clears pending route so subsequent wrong calls pass", async () =>
 
   const toolCallHandler = handlers.get("tool_call");
   expect(toolCallHandler).toBeDefined();
-  const afterResult = toolCallHandler!({ name: "web_search", params: {} }, { cwd });
+  const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
   expect(afterResult).toBeUndefined();
 });
 
@@ -779,7 +780,7 @@ test("session_start clears pending route so subsequent wrong calls pass", async 
 
   const toolCallHandler = handlers.get("tool_call");
   expect(toolCallHandler).toBeDefined();
-  const afterResult = toolCallHandler!({ name: "read_file", params: {} }, { cwd });
+  const afterResult = toolCallHandler!({ toolName: "read_file", input: {} }, { cwd });
   expect(afterResult).toBeUndefined();
 });
 
@@ -806,9 +807,8 @@ test("superseding lifecycle command replaces pending route", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-supersede-"));
   await command!.handler("research 0001", { cwd, waitForIdle: async () => {} });
   await command!.handler("plan 0001", { cwd, waitForIdle: async () => {} });
-
   expect(toolCallHandler).toBeDefined();
-  const blockResult = toolCallHandler!({ name: "task", params: { agent: "specwright-researcher" }, input: { agent: "specwright-researcher" } }, { cwd });
+  const blockResult = toolCallHandler!({ toolName: "task", input: { agent: "specwright-researcher" } }, { cwd });
   expect(blockResult).toEqual({
     block: true,
     reason: "Expected the model to delegate plan to `specwright-planner` via the `task` tool, but received tool `task` instead.",
@@ -838,9 +838,8 @@ test("non-lifecycle command clears pending route", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-non-lifecycle-"));
   await command!.handler("research 0001", { cwd, waitForIdle: async () => {} });
   await command!.handler("status", { cwd, waitForIdle: async () => {} });
-
   expect(toolCallHandler).toBeDefined();
-  const afterResult = toolCallHandler!({ name: "web_search", params: {} }, { cwd });
+  const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
   expect(afterResult).toBeUndefined();
 });
 
@@ -866,9 +865,8 @@ test("unrelated commands do not set lifecycle routes", async () => {
   expect(command).toBeDefined();
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-route-unrelated-"));
   await command!.handler("status", { cwd, waitForIdle: async () => {} });
-
   expect(toolCallHandler).toBeDefined();
-  const afterResult = toolCallHandler!({ name: "web_search", params: {} }, { cwd });
+  const afterResult = toolCallHandler!({ toolName: "web_search", input: {} }, { cwd });
   expect(afterResult).toBeUndefined();
 });
 test("status refresh caches result for unchanged artifacts", async () => {
