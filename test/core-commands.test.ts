@@ -1656,6 +1656,12 @@ test("complete command accepts valid complete modes", async () => {
   await expectGit(cwd, ["add", "--all"]);
   await expectGit(cwd, ["commit", "-m", "specwright setup"]);
 
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+  await writeFile(join(changeDir, "verify.md"), "# Verify\n\n## Observed output\n\n`bun test` passed.\n", "utf8");
+  await writeFile(join(changeDir, "handoff.md"), "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n", "utf8");
+  await stageFiles(cwd, [join(changeDir, "verify.md"), join(changeDir, "handoff.md")]);
+  await commitStaged(cwd, "add verify and handoff");
+
   for (const mode of ["none", "push", "pr", "merge"] as const) {
     const result = await runSpecwrightCommand(ctx, ["complete", "--mode", mode]);
     expect(result.ok).toBe(true);
@@ -1673,6 +1679,12 @@ test("complete command defaults to none when mode is omitted", async () => {
   expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
   await expectGit(cwd, ["add", "--all"]);
   await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+  await writeFile(join(changeDir, "verify.md"), "# Verify\n\n## Observed output\n\n`bun test` passed.\n", "utf8");
+  await writeFile(join(changeDir, "handoff.md"), "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n", "utf8");
+  await stageFiles(cwd, [join(changeDir, "verify.md"), join(changeDir, "handoff.md")]);
+  await commitStaged(cwd, "add verify and handoff");
 
   const result = await runSpecwrightCommand(ctx, ["complete"]);
   expect(result.ok).toBe(true);
@@ -1711,6 +1723,12 @@ test("complete command accepts optional change positional", async () => {
   expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
   await expectGit(cwd, ["add", "--all"]);
   await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+  await writeFile(join(changeDir, "verify.md"), "# Verify\n\n## Observed output\n\n`bun test` passed.\n", "utf8");
+  await writeFile(join(changeDir, "handoff.md"), "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n", "utf8");
+  await stageFiles(cwd, [join(changeDir, "verify.md"), join(changeDir, "handoff.md")]);
+  await commitStaged(cwd, "add verify and handoff");
 
   const result = await runSpecwrightCommand(ctx, ["complete", "0001-inventory-crafting", "--mode", "merge"]);
   expect(result.ok).toBe(true);
@@ -1890,4 +1908,231 @@ test("mergeNoFastForward creates a no-fast-forward merge commit", async () => {
   await mergeNoFastForward(cwd, "feature");
   const log = (await expectGit(cwd, ["log", "-1", "--pretty=%s"])).stdout.trim();
   expect(log).toContain("Merge branch 'feature'");
+});
+
+test("complete fails when validation fails", async () => {
+  const cwd = await initGitRepo("specwright-complete-validation-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-validation-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  // Overwrite intent.md with only headings so validation fails (SW001).
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+  await writeFile(join(changeDir, "intent.md"), "# Intent\n\n## Goal\n\n", "utf8");
+  // Write verify.md and handoff.md so we reach the validation guard.
+  await writeFile(join(changeDir, "verify.md"), "# Verify\n\n## Observed output\n\n`bun test` passed.\n", "utf8");
+  await writeFile(join(changeDir, "handoff.md"), "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n", "utf8");
+  await stageFiles(cwd, [join(changeDir, "intent.md"), join(changeDir, "verify.md"), join(changeDir, "handoff.md")]);
+  await commitStaged(cwd, "setup for validation failure test");
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toBe("Complete requires passing validation. Run specwright verify to see issues.");
+});
+
+test("complete fails when tasks are not all done", async () => {
+  const cwd = await initGitRepo("specwright-complete-tasks-undone-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-tasks-undone-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+
+  // Advance step to execute so tasks are required.
+  const statePath = join(cwd, ".specwright", "state.json");
+  const state = JSON.parse(await readFile(statePath, "utf8")) as {
+    currentChange: string;
+    changes: Record<string, { step: string; tasks: Record<string, { status: string }> }>;
+  };
+  const changeId = state.currentChange;
+  state.changes[changeId].step = "execute";
+  const taskId = "T001";
+  state.changes[changeId].tasks[taskId] = { id: taskId, title: "Implement feature", status: "pending", updatedAt: new Date().toISOString() };
+  await writeFile(statePath, JSON.stringify(state), "utf8");
+
+  // Write tasks.md with an unchecked task.
+  await writeFile(
+    join(changeDir, "tasks.md"),
+    "# Tasks\n\n## Tasks\n\n- [ ] T001: Implement feature\n\n### Acceptance\n\nFeature works.\n\n### Verification\n\nRun tests.\n",
+    "utf8",
+  );
+
+  // Write verify.md with observed output to pass SW008.
+  await writeFile(
+    join(changeDir, "verify.md"),
+    "# Verify\n\n## Observed output\n\n`bun test` passed.\n",
+    "utf8",
+  );
+
+  // Write handoff.md.
+  await writeFile(
+    join(changeDir, "handoff.md"),
+    "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n",
+    "utf8",
+  );
+
+  // Commit all artifacts so worktree is clean.
+  await stageFiles(cwd, [join(changeDir, "tasks.md"), join(changeDir, "verify.md"), join(changeDir, "handoff.md"), statePath]);
+  await commitStaged(cwd, "setup for tasks undone test");
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("Complete requires all tasks to be done");
+});
+
+test("complete fails when verify.md is missing", async () => {
+  const cwd = await initGitRepo("specwright-complete-no-verify-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-no-verify-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+
+  // Write handoff.md so we reach the verify.md check.
+  await writeFile(
+    join(changeDir, "handoff.md"),
+    "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n",
+    "utf8",
+  );
+  await stageFiles(cwd, [join(changeDir, "handoff.md")]);
+  await commitStaged(cwd, "setup for missing verify test");
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toBe("Complete requires a non-empty verify.md with observed verification evidence.");
+});
+
+test("complete fails when handoff.md is missing", async () => {
+  const cwd = await initGitRepo("specwright-complete-no-handoff-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-no-handoff-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+
+  // Write verify.md with observed output so we reach the handoff.md check.
+  await writeFile(
+    join(changeDir, "verify.md"),
+    "# Verify\n\n## Observed output\n\n`bun test` passed.\n",
+    "utf8",
+  );
+  await stageFiles(cwd, [join(changeDir, "verify.md")]);
+  await commitStaged(cwd, "setup for missing handoff test");
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toBe("Complete requires a non-empty handoff.md.");
+});
+
+test("complete passes all guards with valid artifacts and no tasks", async () => {
+  const cwd = await initGitRepo("specwright-complete-all-guards-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-all-guards-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+
+  // Write verify.md with observed output.
+  await writeFile(
+    join(changeDir, "verify.md"),
+    "# Verify\n\n## Observed output\n\n`bun test` passed.\n",
+    "utf8",
+  );
+
+  // Write handoff.md.
+  await writeFile(
+    join(changeDir, "handoff.md"),
+    "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n",
+    "utf8",
+  );
+
+  // Commit artifacts so worktree is clean.
+  await stageFiles(cwd, [join(changeDir, "verify.md"), join(changeDir, "handoff.md")]);
+  await commitStaged(cwd, "add verify and handoff for all guards test");
+
+  for (const mode of ["none", "push", "pr", "merge"] as const) {
+    const result = await runSpecwrightCommand(ctx, ["complete", "--mode", mode]);
+    expect(result.ok).toBe(true);
+    expect(result.summary).toContain(`Complete mode: ${mode}`);
+  }
+});
+
+test("complete passes all guards with all tasks done", async () => {
+  const cwd = await initGitRepo("specwright-complete-tasks-done-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-tasks-done-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+
+  // Advance step to execute and add a done task.
+  const statePath = join(cwd, ".specwright", "state.json");
+  const state = JSON.parse(await readFile(statePath, "utf8")) as {
+    currentChange: string;
+    changes: Record<string, { step: string; tasks: Record<string, { status: string }> }>;
+  };
+  const changeId = state.currentChange;
+  state.changes[changeId].step = "execute";
+  const taskId = "T001";
+  state.changes[changeId].tasks[taskId] = { id: taskId, title: "Implement feature", status: "done", updatedAt: new Date().toISOString() };
+  await writeFile(statePath, JSON.stringify(state), "utf8");
+
+  // Write tasks.md with a checked task that has acceptance and verification blocks.
+  await writeFile(
+    join(changeDir, "tasks.md"),
+    "# Tasks\n\n## Tasks\n\n- [x] T001: Implement feature\n\n### Acceptance\n\nFeature works.\n\n### Verification\n\nRun tests.\n",
+    "utf8",
+  );
+
+  // Write verify.md with observed output (required when all tasks are done).
+  await writeFile(
+    join(changeDir, "verify.md"),
+    "# Verify\n\n## Observed output\n\n`bun test` passed.\n",
+    "utf8",
+  );
+
+  // Write handoff.md.
+  await writeFile(
+    join(changeDir, "handoff.md"),
+    "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n",
+    "utf8",
+  );
+
+  // Commit all artifacts so worktree is clean.
+  await stageFiles(cwd, [join(changeDir, "tasks.md"), join(changeDir, "verify.md"), join(changeDir, "handoff.md"), statePath]);
+  await commitStaged(cwd, "setup for all tasks done test");
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toContain("Complete mode: none");
 });

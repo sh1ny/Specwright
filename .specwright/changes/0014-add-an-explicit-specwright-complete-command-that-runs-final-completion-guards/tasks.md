@@ -24,7 +24,7 @@
   - Acceptance: Each failing preflight exits before push, PR creation, branch switch, merge, state mutation, or artifact writes.
   - Verification: Run targeted failure tests with `bun test test/core-commands.test.ts -t "complete"`.
 
-- [ ] T004: Add lifecycle artifact and evidence guards
+- [x] T004: Add lifecycle artifact and evidence guards
   - Files: `src/core/commands.ts`, `src/core/validators.ts`, `test/core-commands.test.ts`
   - Action: Reuse `validateChange`, require existing all-checked tasks, require non-empty `verify.md` and `handoff.md`, and fail when observed verification evidence is missing.
   - Acceptance: Incomplete/missing tasks, validation failure, missing final artifacts, or missing observed evidence fail before every mode side effect.

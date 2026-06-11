@@ -30,7 +30,7 @@ import {
   upsertChange,
 } from "./state";
 import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, writePullRequestBodyFile } from "./git";
-import { renderValidationReport, validateChange, validateSpecwrightConfig } from "./validators";
+import { renderValidationReport, validateChange, validateSpecwrightConfig, hasNonHeadingContent } from "./validators";
 import type {
   ChangeKind,
   ChangeState,
@@ -1140,7 +1140,7 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
 
   const branch = await currentBranch(ctx.cwd);
 
-  const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+  let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
 
   const expectedBranch = branchNameForChange(change);
   if (branch !== expectedBranch) {
@@ -1155,6 +1155,48 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
 
   if (!await isWorktreeClean(ctx.cwd)) {
     return fail("Complete requires a clean worktree. Commit or stash local changes first.");
+  }
+  // Lifecycle artifact and evidence guards.
+  const synced = await syncChangeTasksForCommand(ctx, change);
+  change = synced;
+  const validationReport = await validateChange(ctx.cwd, change);
+  if (!validationReport.ok) {
+    return fail("Complete requires passing validation. Run specwright verify to see issues.");
+  }
+
+  const { total, done } = taskProgress(change);
+  if (total > 0 && done !== total) {
+    return fail(`Complete requires all tasks to be done (${done}/${total} done).`);
+  }
+
+  const changeDir_ = changeDir(ctx.cwd, change.id, change.slug);
+  const verifyPath = join(changeDir_, "verify.md");
+  const handoffPath = join(changeDir_, "handoff.md");
+  let verifyContent: string | undefined;
+  let handoffContent: string | undefined;
+  try {
+    verifyContent = await readFile(verifyPath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      // missing
+    } else {
+      throw error;
+    }
+  }
+  try {
+    handoffContent = await readFile(handoffPath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      // missing
+    } else {
+      throw error;
+    }
+  }
+  if (!verifyContent || !hasNonHeadingContent(verifyContent)) {
+    return fail("Complete requires a non-empty verify.md with observed verification evidence.");
+  }
+  if (!handoffContent || !hasNonHeadingContent(handoffContent)) {
+    return fail("Complete requires a non-empty handoff.md.");
   }
 
   // All guards passed — mode side effects follow in later tasks.

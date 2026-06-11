@@ -97,7 +97,7 @@ async function readArtifact(cwd: string, change: ChangeState, file: string): Pro
   }
 }
 
-function hasNonHeadingContent(markdown: string): boolean {
+export function hasNonHeadingContent(markdown: string): boolean {
   return markdown.split(/\r?\n/).some((line) => {
     const trimmed = line.trim();
     return trimmed.length > 0
