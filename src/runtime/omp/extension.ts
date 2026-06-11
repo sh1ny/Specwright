@@ -91,6 +91,10 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
       if (!hasPhase && !hasTask) {
         return toolResult({ ok: false, summary: "Specify exactly one of phase or task.", filesCreated: [], filesUpdated: [], exitCode: 1 });
       }
+      const summary = typeof params.summary === "string" ? params.summary : "";
+      if (summary.trim() === "") {
+        return toolResult({ ok: false, summary: "A non-empty summary must be supplied.", filesCreated: [], filesUpdated: [], exitCode: 1 });
+      }
       const change = typeof params.change === "string" ? params.change : "";
       const files = Array.isArray(params.files) ? params.files.filter((f): f is string => typeof f === "string") : [];
       if (files.length === 0) {
@@ -102,7 +106,7 @@ export default function specwrightOmpExtension(pi: ExtensionApiLike): void {
       } else {
         argv.push("--task", params.task as string);
       }
-      argv.push("--files", files.join(","));
+      argv.push("--summary", summary, "--files", files.join(","));
       const result = await runSpecwrightCommand(
         { cwd: ctx.cwd ?? process.cwd(), runtime: "omp", now: () => new Date() },
         argv,
@@ -194,6 +198,7 @@ function toolSchemas(pi: ExtensionApiLike) {
           change: { type: "string" },
           phase: { type: "string" },
           task: { type: "string" },
+          summary: { type: "string" },
           files: { type: "array", items: { type: "string" } },
         },
       },
@@ -210,6 +215,7 @@ function toolSchemas(pi: ExtensionApiLike) {
       change: optionalString("Change ID"),
       phase: optionalString("Checkpoint phase, e.g. verify"),
       task: optionalString("Task ID, e.g. T005"),
+      summary: z.string().describe("Concrete checkpoint summary"),
       files: z.array(z.string()).describe("Files to include in the checkpoint").optional(),
     }),
   };

@@ -57,6 +57,7 @@ interface ParsedArgs {
   task?: string;
   phase?: string;
   files?: string[];
+  summary?: string;
   unknown?: string;
 }
 
@@ -169,6 +170,13 @@ function parseArgs(argv: string[]): ParsedArgs {
         parsed.unknown = arg;
       } else {
         parsed.files = value.split(",").map((file) => file.trim()).filter((file) => file.length > 0);
+      }
+    } else if (arg === "--summary") {
+      const value = rest[++index];
+      if (value === undefined || value.startsWith("--")) {
+        parsed.unknown = arg;
+      } else {
+        parsed.summary = value;
       }
     } else if (arg?.startsWith("--")) {
       parsed.unknown = arg;
@@ -833,10 +841,12 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
   if (!args.files || args.files.length === 0) {
     return fail("At least one file must be supplied with --files.");
   }
+  if (!args.summary || args.summary.trim() === "") {
+    return fail("A non-empty --summary is required.");
+  }
   if (!await isGitWorktree(ctx.cwd)) {
     return fail("Checkpoint commits require a git worktree.");
   }
-
   for (const file of args.files) {
     if (!await exists(resolve(ctx.cwd, file))) {
       return fail(`Checkpoint file not found: ${file}`);
@@ -868,9 +878,24 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
   }
 
   const unit = args.task ?? args.phase ?? "";
-  const message = `specwright: checkpoint ${change.id}-${change.slug} ${unit}`;
+  const summary = args.summary.trim();
+  const subject = `[${change.id}-${unit}] ${summary}`;
+  const bodyLines = [
+    `Change: ${change.id}-${change.slug}`,
+    `Unit: ${args.task ? "task" : "phase"} ${unit}`,
+    `Summary: ${summary}`,
+  ];
+  const taskState = args.task ? change.tasks[args.task] : undefined;
+  if (taskState) {
+    bodyLines.push(`Task title: ${taskState.title}`);
+  }
+  if (args.phase) {
+    bodyLines.push(`Phase: ${args.phase}`);
+  }
+  bodyLines.push("Files:", ...args.files.map(file => `- ${file}`));
+  const body = bodyLines.join("\n");
   await stageFiles(ctx.cwd, filesToStage);
-  await commitStaged(ctx.cwd, message);
+  await commitStaged(ctx.cwd, subject, body);
   return ok(`Created checkpoint commit for ${unit}.`);
 }
 
@@ -1156,7 +1181,6 @@ export async function runSpecwrightCommand(ctx: CommandContext, argv: string[]):
     return fail(error instanceof Error ? error.message : String(error));
   }
 }
-
 export function renderHelp(): string {
-  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
+  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
 }

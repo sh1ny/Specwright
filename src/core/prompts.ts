@@ -47,7 +47,7 @@ export function renderCheckpointClause(input: {
   const selector = input.unit.kind === "task" ? `--task ${input.unit.id}` : `--phase ${input.unit.id}`;
   const files = input.files.length > 0 ? input.files.join(",") : "<comma-separated-files-touched-for-this-unit>";
   return `Checkpoint:
-- After this unit's verification passes, run \`specwright checkpoint ${changeLabel} ${selector} --files ${files}\`.
+- After this unit's verification passes, run \`specwright checkpoint ${changeLabel} ${selector} --summary '<concrete summary>' --files ${files}\`.
 - Include every file changed for this unit and no unrelated files.
 - Update task checkboxes/status only after verification passes.`;
 }
