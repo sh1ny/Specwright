@@ -523,6 +523,54 @@ test("checkpoint command rejects invalid selectors and file lists", async () => 
   expect(staged.stdout.trim()).toBe("");
 });
 
+test("checkpoint rejects missing --summary", async () => {
+  const cwd = await initGitRepo("specwright-checkpoint-no-summary-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", "tracked.txt"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("--summary");
+});
+
+test("checkpoint rejects blank --summary", async () => {
+  const cwd = await initGitRepo("specwright-checkpoint-blank-summary-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--summary", "   ", "--files", "tracked.txt"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("--summary");
+});
+
+test("checkpoint accepts quoted summary with spaces", async () => {
+  const cwd = await initGitRepo("specwright-checkpoint-quoted-summary-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"), "- [ ] T001: Build inventory\n  - Files: `tracked.txt`\n", "utf8");
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--summary", "Implement checkpoint summary support", "--files", "tracked.txt"]);
+  expect(result.ok).toBe(true);
+});
+
+test("commit alias also requires --summary", async () => {
+  const cwd = await initGitRepo("specwright-commit-no-summary-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["commit", "0001-inventory-crafting", "--task", "T001", "--files", "tracked.txt"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("--summary");
+});
+
 test("checkpoint and commit aliases stage scoped files with deterministic messages", async () => {
   const cwd = await initGitRepo("specwright-checkpoint-");
   const ctx = testContext(cwd);
@@ -533,7 +581,7 @@ test("checkpoint and commit aliases stage scoped files with deterministic messag
   await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
   await writeFile(join(cwd, "unrelated.txt"), "unrelated\n", "utf8");
 
-  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", "tracked.txt"]);
+  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--summary", "Build inventory", "--files", "tracked.txt"]);
   expect(checkpoint.ok).toBe(true);
   let subject = await expectGit(cwd, ["log", "-1", "--pretty=%s"]);
   expect(subject.stdout.trim()).toBe("specwright: checkpoint 0001-inventory-crafting T001");
@@ -542,7 +590,7 @@ test("checkpoint and commit aliases stage scoped files with deterministic messag
   expect(status.stdout).not.toContain("tracked.txt");
 
   await writeFile(join(cwd, "phase.txt"), "phase\n", "utf8");
-  const commit = await runSpecwrightCommand(ctx, ["commit", "0001-inventory-crafting", "--phase", "plan", "--files", "phase.txt"]);
+  const commit = await runSpecwrightCommand(ctx, ["commit", "0001-inventory-crafting", "--phase", "plan", "--summary", "Plan the work", "--files", "phase.txt"]);
   expect(commit.ok).toBe(true);
   subject = await expectGit(cwd, ["log", "-1", "--pretty=%s"]);
   expect(subject.stdout.trim()).toBe("specwright: checkpoint 0001-inventory-crafting plan");
@@ -560,7 +608,7 @@ test("phase checkpoint does not sync task metadata but stages state.json when ta
   await writeFile(join(cwd, planPath), "# Plan\n\nUse evidence.\n", "utf8");
   await writeFile(join(cwd, tasksPath), "- [ ] T001: Build inventory\n  - Files: `tracked.txt`\n", "utf8");
   const stateBefore = await readFile(join(cwd, ".specwright/state.json"), "utf8");
-  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--phase", "plan", "--files", `${planPath},${tasksPath}`]);
+  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--phase", "plan", "--summary", "Plan the work", "--files", `${planPath},${tasksPath}`]);
   expect(checkpoint.ok).toBe(true);
   const stateAfter = await readFile(join(cwd, ".specwright/state.json"), "utf8");
   expect(stateAfter).toBe(stateBefore);
@@ -577,7 +625,7 @@ test("task checkpoint stages derived state when task sync changes cache", async 
   await writeFile(join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"), "- [ ] T001: Build inventory\n  - Files: `tracked.txt`\n", "utf8");
   await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
 
-  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", "tracked.txt"]);
+  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--summary", "Build inventory", "--files", "tracked.txt"]);
   expect(checkpoint.ok).toBe(true);
 
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
@@ -594,12 +642,12 @@ test("task checkpoint commits tasks.md when only non-cached task metadata change
   await writeFile(join(cwd, tasksPath), "- [ ] T001: Build inventory\n  - Files: `tracked.txt`\n", "utf8");
   await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
   // First checkpoint — syncs task into state
-  const checkpoint1 = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", "tracked.txt"]);
+  const checkpoint1 = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--summary", "Build inventory", "--files", "tracked.txt"]);
   expect(checkpoint1.ok).toBe(true);
   // Edit metadata only (Files bullet), not checkbox or title. Files metadata is not cached in state.
   await writeFile(join(cwd, tasksPath), "- [ ] T001: Build inventory\n  - Files: `other.txt`\n", "utf8");
   // Second checkpoint commits the changed tasks.md; unchanged tracked.txt and unchanged state.json are not part of the git diff.
-  const checkpoint2 = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", `${tasksPath},tracked.txt`]);
+  const checkpoint2 = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--summary", "Build inventory", "--files", `${tasksPath},tracked.txt`]);
   expect(checkpoint2.ok).toBe(true);
   const committed = await expectGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
   expect(committed.stdout.trim().split(/\r?\n/).filter(Boolean).sort()).toEqual([tasksPath].sort());
@@ -617,7 +665,7 @@ test("task checkpoint fails when sync detects duplicate task IDs", async () => {
   );
   await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
   const stateBefore = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
-  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", `${tasksPath},tracked.txt`]);
+  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--summary", "Build inventory", "--files", `${tasksPath},tracked.txt`]);
   expect(checkpoint.ok).toBe(false);
   expect(checkpoint.summary).toContain("Duplicate");
   const stateAfter = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
@@ -636,7 +684,7 @@ test("task checkpoint fails when sync detects malformed task lines", async () =>
   );
   await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
   const stateBefore = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
-  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--files", `${tasksPath},tracked.txt`]);
+  const checkpoint = await runSpecwrightCommand(ctx, ["checkpoint", "0001-inventory-crafting", "--task", "T001", "--summary", "Build inventory", "--files", `${tasksPath},tracked.txt`]);
   expect(checkpoint.ok).toBe(false);
   expect(checkpoint.summary).toContain("Malformed");
   const stateAfter = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8"));
