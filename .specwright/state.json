@@ -621,50 +621,50 @@
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "verifying",
-      "step": "verify",
+      "status": "executing",
+      "step": "execute",
       "createdAt": "2026-06-11T20:10:27.254Z",
-      "updatedAt": "2026-06-11T20:47:32.388Z",
+      "updatedAt": "2026-06-11T20:53:44.553Z",
       "tasks": {
         "T001": {
           "id": "T001",
           "title": "Add complete command parsing",
-          "status": "pending",
-          "updatedAt": "2026-06-11T20:47:32.386Z"
+          "status": "done",
+          "updatedAt": "2026-06-11T20:53:44.553Z"
         },
         "T002": {
           "id": "T002",
           "title": "Add completion git helpers",
           "status": "pending",
-          "updatedAt": "2026-06-11T20:47:32.386Z"
+          "updatedAt": "2026-06-11T20:53:44.553Z"
         },
         "T003": {
           "id": "T003",
           "title": "Add git and change preflight guards",
           "status": "pending",
-          "updatedAt": "2026-06-11T20:47:32.386Z"
+          "updatedAt": "2026-06-11T20:53:44.553Z"
         },
         "T004": {
           "id": "T004",
           "title": "Add lifecycle artifact and evidence guards",
           "status": "pending",
-          "updatedAt": "2026-06-11T20:47:32.386Z"
+          "updatedAt": "2026-06-11T20:53:44.553Z"
         },
         "T005": {
           "id": "T005",
           "title": "Implement complete mode actions",
           "status": "pending",
-          "updatedAt": "2026-06-11T20:47:32.386Z"
+          "updatedAt": "2026-06-11T20:53:44.553Z"
         },
         "T006": {
           "id": "T006",
           "title": "Document complete and protect publish behavior",
           "status": "pending",
-          "updatedAt": "2026-06-11T20:47:32.386Z"
+          "updatedAt": "2026-06-11T20:53:44.553Z"
         }
       }
     }
   },
-  "updatedAt": "2026-06-11T20:47:32.388Z",
+  "updatedAt": "2026-06-11T20:53:44.553Z",
   "currentChange": "0014"
 }

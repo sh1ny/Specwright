@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { runSpecwrightCommand } from "../src/core/commands";
+import { runSpecwrightCommand, renderHelp } from "../src/core/commands";
 import {
   branchNameForChange,
   commitStaged,
@@ -1641,4 +1641,62 @@ test("CLI runtime verify uses neutral spawn strategy", async () => {
   expect(result.ok).toBe(true);
   expect(result.prompt).not.toContain("OMP's `task` tool");
   expect(result.prompt).toContain("delegate to `specwright-verifier`");
+});
+test("complete command accepts valid complete modes", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-complete-mode-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  for (const mode of ["none", "push", "pr", "merge"] as const) {
+    const result = await runSpecwrightCommand(ctx, ["complete", "--mode", mode]);
+    expect(result.ok).toBe(true);
+    expect(result.summary).toContain(`Complete mode: ${mode}`);
+  }
+});
+
+test("complete command defaults to none when mode is omitted", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-complete-default-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toContain("Complete mode: none");
+});
+
+test("complete command rejects invalid modes", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-complete-invalid-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["complete", "--mode", "fast"]);
+  expect(result.ok).toBe(false);
+  expect(result.exitCode).toBe(1);
+  expect(result.summary).toBe("Unknown option: --mode");
+});
+
+test("complete command accepts optional change positional", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-complete-change-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["complete", "0001-test-change", "--mode", "merge"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toContain("Complete mode: merge");
+});
+
+test("help text lists complete usage", async () => {
+  const help = renderHelp();
+  expect(help).toContain("specwright complete [<change>] [--mode none|push|pr|merge]");
+});
+
+test("publish --mode merge still fails", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-publish-merge-fail-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["publish", "--mode", "merge"]);
+  expect(result.ok).toBe(false);
+  expect(result.exitCode).toBe(1);
+  expect(result.summary).toBe("Unknown option: --mode");
 });
