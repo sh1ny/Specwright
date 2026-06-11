@@ -33,7 +33,8 @@
 1. Ran `specwright research` and `specwright research --print-prompt` for change 0014.
 2. Delegated to `specwright-researcher` as required by the lifecycle prompt; it failed with `JSON error injected into SSE stream`.
 3. Retried the same read-only assignment with the default `task` agent; it failed while yielding after reading local artifacts, `localdocs/MERGE-PROPOSAL.md`, and the relevant source/test seams.
-4. Completed bounded inline local research using the same required local evidence. No web research was needed.
+4. Re-ran `specwright-researcher` after prompt steering reaffirmed lifecycle delegation; it again failed while yielding after reading and analyzing the same local evidence.
+5. Completed bounded inline local research using the same required local evidence. No web research was needed.
 
 ## Decisions supported
 
