@@ -563,8 +563,21 @@
           "updatedAt": "2026-06-10T17:18:59.276Z"
         }
       }
+    },
+    "0013": {
+      "id": "0013",
+      "slug": "improve-checkpoint-commit-messages-so-git-history-shows-change-task-and",
+      "title": "improve checkpoint commit messages so git history shows change task and",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-11T07:42:21.731Z",
+      "updatedAt": "2026-06-11T07:42:21.731Z",
+      "tasks": {}
     }
   },
-  "updatedAt": "2026-06-10T17:31:16.264Z",
-  "currentChange": "0012"
+  "updatedAt": "2026-06-11T07:42:21.731Z",
+  "currentChange": "0013"
 }
