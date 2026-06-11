@@ -574,47 +574,47 @@
       "status": "executing",
       "step": "execute",
       "createdAt": "2026-06-11T07:42:21.731Z",
-      "updatedAt": "2026-06-11T08:36:33.741Z",
+      "updatedAt": "2026-06-11T08:46:45.786Z",
       "tasks": {
         "T001": {
           "id": "T001",
           "title": "Require checkpoint summaries at the CLI boundary",
           "status": "done",
-          "updatedAt": "2026-06-11T08:36:33.741Z"
+          "updatedAt": "2026-06-11T08:46:45.786Z"
         },
         "T002": {
           "id": "T002",
           "title": "Add optional commit body support",
-          "status": "pending",
-          "updatedAt": "2026-06-11T08:36:33.741Z"
+          "status": "done",
+          "updatedAt": "2026-06-11T08:46:45.786Z"
         },
         "T003": {
           "id": "T003",
           "title": "Build checkpoint subject and metadata body",
           "status": "pending",
-          "updatedAt": "2026-06-11T08:36:33.741Z"
+          "updatedAt": "2026-06-11T08:46:45.786Z"
         },
         "T004": {
           "id": "T004",
           "title": "Preserve commit alias parity",
           "status": "pending",
-          "updatedAt": "2026-06-11T08:36:33.741Z"
+          "updatedAt": "2026-06-11T08:46:45.786Z"
         },
         "T005": {
           "id": "T005",
           "title": "Update lifecycle checkpoint prompts",
           "status": "pending",
-          "updatedAt": "2026-06-11T08:36:33.741Z"
+          "updatedAt": "2026-06-11T08:46:45.786Z"
         },
         "T006": {
           "id": "T006",
           "title": "Verify the complete checkpoint cutover",
           "status": "pending",
-          "updatedAt": "2026-06-11T08:36:33.741Z"
+          "updatedAt": "2026-06-11T08:46:45.786Z"
         }
       }
     }
   },
-  "updatedAt": "2026-06-11T08:36:33.741Z",
+  "updatedAt": "2026-06-11T08:46:45.786Z",
   "currentChange": "0013"
 }

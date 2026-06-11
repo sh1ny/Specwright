@@ -121,11 +121,15 @@ export async function stageFiles(cwd: string, files: readonly string[]): Promise
   return result;
 }
 
-export async function commitStaged(cwd: string, message: string): Promise<ProcessRunResult> {
+export async function commitStaged(cwd: string, message: string, body?: string): Promise<ProcessRunResult> {
   if (message.trim() === "") {
     throw new Error("Commit message is required.");
   }
-  const result = await runGit(cwd, ["commit", "-m", message]);
+  const args = ["commit", "-m", message];
+  if (body && body.trim() !== "") {
+    args.push("-m", body);
+  }
+  const result = await runGit(cwd, args);
   throwIfFailed(result, "git commit");
   return result;
 }
