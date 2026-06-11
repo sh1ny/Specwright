@@ -4,7 +4,7 @@
 
 ## Wave 1 — Command surface and git primitives
 
-- [ ] T001: Add complete command parsing
+- [x] T001: Add complete command parsing
   - Files: `src/core/types.ts`, `src/core/commands.ts`, `test/core-commands.test.ts`
   - Action: Add complete-specific mode types/constants, parse `complete [<change>] [--mode none|push|pr|merge]`, default omitted mode to `none`, add dispatch/help, and keep publish parsing unchanged.
   - Acceptance: `complete` accepts only complete modes; invalid modes fail clearly; `publish --mode merge` still fails; help lists complete usage.
