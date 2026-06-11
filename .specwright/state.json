@@ -621,13 +621,13 @@
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "discussing",
-      "step": "discuss",
+      "status": "researching",
+      "step": "research",
       "createdAt": "2026-06-11T20:10:27.254Z",
-      "updatedAt": "2026-06-11T20:11:10.323Z",
+      "updatedAt": "2026-06-11T20:19:44.325Z",
       "tasks": {}
     }
   },
-  "updatedAt": "2026-06-11T20:11:10.323Z",
+  "updatedAt": "2026-06-11T20:19:44.325Z",
   "currentChange": "0014"
 }
