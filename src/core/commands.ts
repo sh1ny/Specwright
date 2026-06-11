@@ -29,7 +29,7 @@ import {
   updateCachedChange,
   upsertChange,
 } from "./state";
-import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, writePullRequestBodyFile } from "./git";
+import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, writePullRequestBodyFile } from "./git";
 import { renderValidationReport, validateChange, validateSpecwrightConfig } from "./validators";
 import type {
   ChangeKind,
@@ -1127,7 +1127,37 @@ async function commandPublish(ctx: CommandContext, args: ParsedArgs): Promise<Co
   return ok(`Created pull request for ${branch} targeting ${baseBranch}.`, { filesCreated: [bodyFile] });
 }
 async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
+  if (args.positionals.length > 1) {
+    return fail("Usage: specwright complete [<change>] [--mode none|push|pr|merge]");
+  }
+
   const mode = args.completeMode ?? "none";
+
+  // Git preflight guards — all checked before any side effect.
+  if (!await isGitWorktree(ctx.cwd)) {
+    return fail("Complete requires a git worktree.");
+  }
+
+  const branch = await currentBranch(ctx.cwd);
+
+  const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+
+  const expectedBranch = branchNameForChange(change);
+  if (branch !== expectedBranch) {
+    return fail(`Current branch "${branch}" does not match change branch "${expectedBranch}".`);
+  }
+
+  const config = await loadConfig(ctx.cwd);
+  const baseBranch = await resolveBaseBranch(ctx.cwd, config);
+  if (branch === baseBranch) {
+    return fail(`Already on base branch "${branch}".`);
+  }
+
+  if (!await isWorktreeClean(ctx.cwd)) {
+    return fail("Complete requires a clean worktree. Commit or stash local changes first.");
+  }
+
+  // All guards passed — mode side effects follow in later tasks.
   return ok(`Complete mode: ${mode}`);
 }
 

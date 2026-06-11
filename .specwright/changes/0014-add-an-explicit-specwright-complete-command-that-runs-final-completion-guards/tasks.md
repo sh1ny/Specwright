@@ -18,7 +18,7 @@
 
 ## Wave 2 — Fail-closed final guards
 
-- [ ] T003: Add git and change preflight guards
+- [x] T003: Add git and change preflight guards
   - Files: `src/core/commands.ts`, `src/core/git.ts`, `test/core-commands.test.ts`
   - Action: Before mode side effects, require git worktree, non-detached current branch, resolved change, branch/change match, not-on-base branch, clean worktree, and resolvable base.
   - Acceptance: Each failing preflight exits before push, PR creation, branch switch, merge, state mutation, or artifact writes.

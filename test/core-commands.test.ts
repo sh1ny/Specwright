@@ -1646,9 +1646,15 @@ test("CLI runtime verify uses neutral spawn strategy", async () => {
   expect(result.prompt).toContain("delegate to `specwright-verifier`");
 });
 test("complete command accepts valid complete modes", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-complete-mode-"));
+  const cwd = await initGitRepo("specwright-complete-mode-");
   const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-mode-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
 
   for (const mode of ["none", "push", "pr", "merge"] as const) {
     const result = await runSpecwrightCommand(ctx, ["complete", "--mode", mode]);
@@ -1658,9 +1664,15 @@ test("complete command accepts valid complete modes", async () => {
 });
 
 test("complete command defaults to none when mode is omitted", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-complete-default-"));
+  const cwd = await initGitRepo("specwright-complete-default-");
   const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-default-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
 
   const result = await runSpecwrightCommand(ctx, ["complete"]);
   expect(result.ok).toBe(true);
@@ -1678,12 +1690,29 @@ test("complete command rejects invalid modes", async () => {
   expect(result.summary).toBe("Unknown option: --mode");
 });
 
-test("complete command accepts optional change positional", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-complete-change-"));
+test("complete command rejects invalid modes", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-complete-invalid-"));
   const ctx = testContext(cwd);
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
 
-  const result = await runSpecwrightCommand(ctx, ["complete", "0001-test-change", "--mode", "merge"]);
+  const result = await runSpecwrightCommand(ctx, ["complete", "--mode", "fast"]);
+  expect(result.ok).toBe(false);
+  expect(result.exitCode).toBe(1);
+  expect(result.summary).toBe("Unknown option: --mode");
+});
+
+test("complete command accepts optional change positional", async () => {
+  const cwd = await initGitRepo("specwright-complete-change-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-change-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  const result = await runSpecwrightCommand(ctx, ["complete", "0001-inventory-crafting", "--mode", "merge"]);
   expect(result.ok).toBe(true);
   expect(result.summary).toContain("Complete mode: merge");
 });
@@ -1702,6 +1731,109 @@ test("publish --mode merge still fails", async () => {
   expect(result.ok).toBe(false);
   expect(result.exitCode).toBe(1);
   expect(result.summary).toBe("Unknown option: --mode");
+});
+
+test("complete fails when not in a git worktree", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-complete-no-git-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toBe("Complete requires a git worktree.");
+});
+
+test("complete fails for detached HEAD", async () => {
+  const cwd = await initGitRepo("specwright-complete-detached-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-detached-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  await writeFile(join(cwd, "file.txt"), "content\n", "utf8");
+  await stageFiles(cwd, ["file.txt"]);
+  await commitStaged(cwd, "initial");
+  await expectGit(cwd, ["checkout", "--detach", "HEAD"]);
+
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+});
+
+test("complete fails when no current change exists", async () => {
+  const cwd = await initGitRepo("specwright-complete-no-change-");
+  const ctx = testContext(cwd);
+  await expectGit(cwd, ["remote", "add", "origin", await mkdtemp(join(tmpdir(), "specwright-complete-no-change-remote-"))]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("No current Specwright change");
+});
+
+test("complete fails when branch does not match change", async () => {
+  const cwd = await initGitRepo("specwright-complete-branch-mismatch-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-branch-mismatch-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["checkout", "-b", "wrong-branch"]);
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("does not match change branch");
+});
+
+test("complete fails when on the base branch", async () => {
+  const cwd = await initGitRepo("specwright-complete-on-base-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-on-base-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  // Make an initial commit so that main is a real branch we can switch back to.
+  await writeFile(join(cwd, "README.md"), "# project\n", "utf8");
+  await stageFiles(cwd, ["README.md"]);
+  await commitStaged(cwd, "initial");
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  // Persist state to main so findCurrentChange resolves there.
+  const statePath = join(cwd, ".specwright", "state.json");
+  const stateData = await readFile(statePath, "utf8");
+  await expectGit(cwd, ["checkout", "main"]);
+  await mkdir(join(cwd, ".specwright"), { recursive: true });
+  await writeFile(statePath, stateData, "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("does not match change branch");
+});
+test("complete fails when worktree is dirty", async () => {
+  const cwd = await initGitRepo("specwright-complete-dirty-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-dirty-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await writeFile(join(cwd, "untracked.txt"), "dirty\n", "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toBe("Complete requires a clean worktree. Commit or stash local changes first.");
+});
+
+test("complete guards run before push, pr, or merge side effects", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-complete-guards-first-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  for (const mode of ["push", "pr", "merge"] as const) {
+    const result = await runSpecwrightCommand(ctx, ["complete", "--mode", mode]);
+    expect(result.ok).toBe(false);
+    expect(result.summary).toBe("Complete requires a git worktree.");
+  }
 });
 
 test("isWorktreeClean returns true for clean worktree", async () => {
