@@ -878,9 +878,22 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
   }
 
   const unit = args.task ?? args.phase ?? "";
-  const message = `specwright: checkpoint ${change.id}-${change.slug} ${unit}`;
+  const subject = `[${change.id}-${unit}] ${args.summary}`;
+  const bodyLines = [
+    `change: ${change.id}-${change.slug}`,
+    `unit: ${args.task ? "task" : "phase"}/${unit}`,
+    `summary: ${args.summary}`,
+  ];
+  if (args.task && change.tasks[args.task]) {
+    bodyLines.push(`task-title: ${change.tasks[args.task].title}`);
+  }
+  if (args.phase) {
+    bodyLines.push(`phase: ${args.phase}`);
+  }
+  bodyLines.push(`files: ${args.files.join(", ")}`);
+  const body = bodyLines.join("\n");
   await stageFiles(ctx.cwd, filesToStage);
-  await commitStaged(ctx.cwd, message);
+  await commitStaged(ctx.cwd, subject, body);
   return ok(`Created checkpoint commit for ${unit}.`);
 }
 
