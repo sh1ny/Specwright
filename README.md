@@ -66,6 +66,56 @@ bun run specwright verify
 bun run specwright handoff
 ```
 
+## Publishing and completing a change
+
+### Publish
+
+`specwright publish` pushes the current feature branch to the remote. It does **not** merge.
+
+```bash
+bun run specwright publish
+bun run specwright publish --mode none
+bun run specwright publish --mode push
+bun run specwright publish --mode pr
+```
+
+Publish modes:
+- `none` — no remote work (default when configured as `none`).
+- `push` — push the current feature branch to the configured remote.
+- `pr` — push and open a pull request targeting the configured base branch.
+
+Publish is remote-only. It never switches branches, pulls, or merges.
+
+### Complete
+
+`specwright complete` runs final completion guards and then performs the selected mode action.
+
+```bash
+bun run specwright complete
+bun run specwright complete 0001
+bun run specwright complete --mode none
+bun run specwright complete --mode push
+bun run specwright complete --mode pr
+bun run specwright complete --mode merge
+```
+
+Complete modes:
+- `none` — run guards only, set change status to done (default).
+- `push` — run guards, then push the current feature branch to the remote.
+- `pr` — run guards, push, then open a pull request.
+- `merge` — run guards, switch to the base branch, and merge the feature branch with `--no-ff`.
+
+Complete runs all guards **before** any side effect. It fails before push, PR creation, or merge when:
+- Not in a git worktree or on a detached HEAD.
+- On the base branch.
+- Worktree is dirty.
+- Validation fails or tasks are incomplete.
+- `verify.md` or `handoff.md` is missing or empty.
+- Branch name does not match the change.
+- Merge conflicts occur.
+
+Complete does **not** delete branches by default and does **not** pull/update the base branch automatically.
+
 Most lifecycle commands can also print the prompt instead of advancing work directly:
 
 ```bash

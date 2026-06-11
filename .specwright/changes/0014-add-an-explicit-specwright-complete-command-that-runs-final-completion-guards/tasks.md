@@ -40,7 +40,7 @@
 
 ## Wave 4 — Documentation and regression checks
 
-- [ ] T006: Document complete and protect publish behavior
+- [x] T006: Document complete and protect publish behavior
   - Files: `README.md`, `src/core/commands.ts`, `test/core-commands.test.ts`
   - Action: Document complete usage, default mode, guard expectations, mode side effects, and that publish remains remote-only; add regression coverage where needed.
   - Acceptance: README/help agree on syntax and default; docs state no default branch deletion and no automatic base pull; publish behavior remains none/push/pr only.
