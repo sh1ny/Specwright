@@ -567,14 +567,14 @@
     "0013": {
       "id": "0013",
       "slug": "improve-checkpoint-commit-messages-so-git-history-shows-change-task-and",
-      "title": "improve checkpoint commit messages so git history shows change task and",
+      "title": "improve checkpoint commit messages so git history shows change task and concrete summary",
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "done",
-      "step": "handoff",
+      "status": "verifying",
+      "step": "verify",
       "createdAt": "2026-06-11T07:42:21.731Z",
-      "updatedAt": "2026-06-11T14:30:39.743Z",
+      "updatedAt": "2026-06-11T14:58:28.506Z",
       "tasks": {
         "T001": {
           "id": "T001",
@@ -615,6 +615,6 @@
       }
     }
   },
-  "updatedAt": "2026-06-11T14:30:39.743Z",
+  "updatedAt": "2026-06-11T14:58:28.506Z",
   "currentChange": "0013"
 }

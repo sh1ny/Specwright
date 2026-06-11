@@ -522,11 +522,11 @@ test("checkpoint command rejects invalid selectors and file lists", async () => 
   await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
 
   for (const argv of [
-    ["checkpoint", "--files", "tracked.txt"],
-    ["checkpoint", "--phase", "plan", "--task", "T001", "--files", "tracked.txt"],
-    ["checkpoint", "--phase", "not-a-phase", "--files", "tracked.txt"],
-    ["checkpoint", "--phase", "plan", "--files", ""],
-    ["checkpoint", "--phase", "plan", "--files", "tracked.txt,missing.txt"],
+    ["checkpoint", "--summary", "Test validation", "--files", "tracked.txt"],
+    ["checkpoint", "--phase", "plan", "--task", "T001", "--summary", "Test validation", "--files", "tracked.txt"],
+    ["checkpoint", "--phase", "not-a-phase", "--summary", "Test validation", "--files", "tracked.txt"],
+    ["checkpoint", "--phase", "plan", "--summary", "Test validation", "--files", ""],
+    ["checkpoint", "--phase", "plan", "--summary", "Test validation", "--files", "tracked.txt,missing.txt"],
   ]) {
     const result = await runSpecwrightCommand(ctx, argv);
     expect(result.ok).toBe(false);
@@ -623,9 +623,9 @@ test("commit alias produces identical subject and body as checkpoint for the sam
   expect(commitSubject).toBe(checkpointSubject);
   expect(commitSubject).toBe("[0001-T001] Implement checkpoint summary support");
   expect(commitBody).toBe(checkpointBody);
-  expect(commitBody).toContain("unit: task/T001");
-  expect(commitBody).toContain("summary: Implement checkpoint summary support");
-  expect(commitBody).toContain("task-title: Build inventory");
+  expect(commitBody).toContain("Unit: task T001");
+  expect(commitBody).toContain("Summary: Implement checkpoint summary support");
+  expect(commitBody).toContain("Task title: Build inventory");
 });
 
 
@@ -644,11 +644,11 @@ test("checkpoint and commit aliases stage scoped files with deterministic messag
   let subject = await expectGit(cwd, ["log", "-1", "--pretty=%s"]);
   expect(subject.stdout.trim()).toBe("[0001-T001] Build inventory");
   let body = await expectGit(cwd, ["log", "-1", "--pretty=%b"]);
-  expect(body.stdout).toContain("change: 0001-inventory-crafting");
-  expect(body.stdout).toContain("unit: task/T001");
-  expect(body.stdout).toContain("summary: Build inventory");
-  expect(body.stdout).toContain("task-title: Build inventory");
-  expect(body.stdout).toContain("files: tracked.txt");
+  expect(body.stdout).toContain("Change: 0001-inventory-crafting");
+  expect(body.stdout).toContain("Unit: task T001");
+  expect(body.stdout).toContain("Summary: Build inventory");
+  expect(body.stdout).toContain("Task title: Build inventory");
+  expect(body.stdout).toContain("Files:\n- tracked.txt");
   let status = await expectGit(cwd, ["status", "--short"]);
   expect(status.stdout).toContain("?? unrelated.txt");
   expect(status.stdout).not.toContain("tracked.txt");
@@ -659,11 +659,11 @@ test("checkpoint and commit aliases stage scoped files with deterministic messag
   subject = await expectGit(cwd, ["log", "-1", "--pretty=%s"]);
   expect(subject.stdout.trim()).toBe("[0001-plan] Plan the work");
   body = await expectGit(cwd, ["log", "-1", "--pretty=%b"]);
-  expect(body.stdout).toContain("change: 0001-inventory-crafting");
-  expect(body.stdout).toContain("unit: phase/plan");
-  expect(body.stdout).toContain("summary: Plan the work");
-  expect(body.stdout).toContain("phase: plan");
-  expect(body.stdout).toContain("files: phase.txt");
+  expect(body.stdout).toContain("Change: 0001-inventory-crafting");
+  expect(body.stdout).toContain("Unit: phase plan");
+  expect(body.stdout).toContain("Summary: Plan the work");
+  expect(body.stdout).toContain("Phase: plan");
+  expect(body.stdout).toContain("Files:\n- phase.txt");
   status = await expectGit(cwd, ["status", "--short"]);
   expect(status.stdout).not.toContain("phase.txt");
 });

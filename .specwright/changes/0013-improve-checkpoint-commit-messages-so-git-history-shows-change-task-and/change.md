@@ -3,7 +3,7 @@
 <!-- Specwright artifact: preserve human-owned sections and update only the relevant headings. -->
 
 - ID: 0013
-- Title: improve checkpoint commit messages so git history shows change task and
+- Title: improve checkpoint commit messages so git history shows change task and concrete summary
 - Kind: feature
 - Mode: lite
 - Pack: core

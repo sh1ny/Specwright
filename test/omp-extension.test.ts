@@ -633,6 +633,7 @@ test("OMP extension registers structured tools", () => {
   expect(checkpointProperties.properties).toHaveProperty("change");
   expect(checkpointProperties.properties).toHaveProperty("phase");
   expect(checkpointProperties.properties).toHaveProperty("task");
+  expect(checkpointProperties.properties).toHaveProperty("summary");
   expect(checkpointProperties.properties).toHaveProperty("files");
   const validateDef = tools.get("specwright_validate")!;
   expect(validateDef.name).toBe("specwright_validate");
@@ -789,11 +790,35 @@ test("specwright_checkpoint tool rejects empty files array", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-empty-files-"));
   const checkpointTool = tools.get("specwright_checkpoint");
   expect(checkpointTool).toBeDefined();
-  const result = (await checkpointTool!.execute("tool-call", { change: "", phase: "verify", files: [] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
+  const result = (await checkpointTool!.execute("tool-call", { change: "", phase: "verify", summary: "Verify artifacts", files: [] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
   expect(result.ok).toBe(false);
   expect(result.summary).toBe("At least one file must be supplied.");
   expect(result.exitCode).toBe(1);
 });
+test("specwright_checkpoint tool rejects blank summary", async () => {
+  const tools = new Map<string, Pick<ToolDefinition, "execute">>();
+  const pi: ExtensionApiLike = {
+    setLabel() {},
+    on() {},
+    registerCommand() {},
+    sendUserMessage() {},
+    registerTool(definition) {
+      tools.set(definition.name, { execute: definition.execute });
+    },
+    getActiveTools() { return []; },
+    setActiveTools() {},
+  };
+
+  specwrightOmpExtension(pi);
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-checkpoint-no-summary-"));
+  const checkpointTool = tools.get("specwright_checkpoint");
+  expect(checkpointTool).toBeDefined();
+  const result = (await checkpointTool!.execute("tool-call", { change: "", phase: "verify", summary: " ", files: ["tasks.md"] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
+  expect(result.ok).toBe(false);
+  expect(result.summary).toBe("A non-empty summary must be supplied.");
+  expect(result.exitCode).toBe(1);
+});
+
 
 test("specwright_checkpoint tool forwards valid params to command", async () => {
   const tools = new Map<string, Pick<ToolDefinition, "execute">>();
@@ -828,7 +853,7 @@ test("specwright_checkpoint tool forwards valid params to command", async () => 
   try {
     const checkpointTool = tools.get("specwright_checkpoint");
     expect(checkpointTool).toBeDefined();
-    const result = (await checkpointTool!.execute("tool-call", { change: "", phase: "verify", files: ["tasks.md"] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
+    const result = (await checkpointTool!.execute("tool-call", { change: "", phase: "verify", summary: "Verify artifacts", files: ["tasks.md"] }, undefined, undefined, { cwd })).details as Record<string, unknown>;
     expect(result.ok).toBe(false);
     expect(result.summary).not.toBe("Specify exactly one of phase or task.");
     expect(result.summary).not.toBe("At least one file must be supplied.");
@@ -838,7 +863,7 @@ test("specwright_checkpoint tool forwards valid params to command", async () => 
       throw new Error("Expected checkpoint command invocation");
     }
     const [, argv] = call;
-    expect(argv).toEqual(["checkpoint", "", "--phase", "verify", "--files", "tasks.md"]);
+    expect(argv).toEqual(["checkpoint", "", "--phase", "verify", "--summary", "Verify artifacts", "--files", "tasks.md"]);
   } finally {
     runSpy.mockRestore();
   }

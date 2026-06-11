@@ -61,7 +61,7 @@ Both `checkpoint` and `commit` route to `commandCheckpoint`, so changing `comman
 
 **File:** `test/core-commands.test.ts`
 
-No checkpoint-specific assertions were found in the existing core command tests. The implementation phase needs focused tests for:
+Existing checkpoint coverage asserted the old deterministic subjects and scoped staging behavior, but it did not cover the new `--summary` requirement or structured commit body behavior. The implementation phase needs focused tests for:
 - missing `--summary` validation,
 - subject format `[<change-id>-<unit-id>] <summary>`,
 - body metadata for phase checkpoints,
