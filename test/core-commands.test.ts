@@ -584,6 +584,51 @@ test("commit alias also requires --summary", async () => {
   expect(result.summary).toContain("--summary");
 });
 
+test("commit alias produces identical subject and body as checkpoint for the same task", async () => {
+  const cwd = await initGitRepo("specwright-commit-alias-parity-");
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-inventory-crafting/tasks.md"),
+    "- [ ] T001: Build inventory\n  - Files: `tracked.txt`\n",
+    "utf8",
+  );
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+
+  const summary = "Implement checkpoint summary support";
+  const checkpoint = await runSpecwrightCommand(ctx, [
+    "checkpoint", "0001-inventory-crafting", "--task", "T001",
+    "--summary", summary, "--files", "tracked.txt",
+  ]);
+  expect(checkpoint.ok).toBe(true);
+
+  const checkpointSubject = (await expectGit(cwd, ["log", "-1", "--pretty=%s"])).stdout.trim();
+  const checkpointBody = (await expectGit(cwd, ["log", "-1", "--pretty=%b"])).stdout;
+
+  // Reset to untracked state for a fair second run
+  await runGit(cwd, ["reset", "HEAD~1"]);
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+
+  const commit = await runSpecwrightCommand(ctx, [
+    "commit", "0001-inventory-crafting", "--task", "T001",
+    "--summary", summary, "--files", "tracked.txt",
+  ]);
+  expect(commit.ok).toBe(true);
+
+  const commitSubject = (await expectGit(cwd, ["log", "-1", "--pretty=%s"])).stdout.trim();
+  const commitBody = (await expectGit(cwd, ["log", "-1", "--pretty=%b"])).stdout;
+
+  expect(commitSubject).toBe(checkpointSubject);
+  expect(commitSubject).toBe("[0001-T001] Implement checkpoint summary support");
+  expect(commitBody).toBe(checkpointBody);
+  expect(commitBody).toContain("unit: task/T001");
+  expect(commitBody).toContain("summary: Implement checkpoint summary support");
+  expect(commitBody).toContain("task-title: Build inventory");
+});
+
+
 test("checkpoint and commit aliases stage scoped files with deterministic messages", async () => {
   const cwd = await initGitRepo("specwright-checkpoint-");
   const ctx = testContext(cwd);
