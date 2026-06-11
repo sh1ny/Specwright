@@ -10,20 +10,24 @@ No issues.
 
 ## Observed output
 
-### T006 — Focused test run (2026-06-11)
+### Focused task checks (2026-06-11)
+
+#### `bun test test/core-commands.test.ts`
 
 ```
-$ bun test test/core-commands.test.ts 2>&1
 Test Results:
    PASS: 74 passed
+```
 
-$ bun test test/core-prompts.test.ts 2>&1
+#### `bun test test/core-prompts.test.ts`
+
+```
 Test Results:
    PASS: 14 passed
 ```
 
-### Summary
+## Summary
 
-- `test/core-commands.test.ts`: 74 tests passed — covers T001 (summary validation), T002 (commit body support), T003 (checkpoint subject/body metadata), T004 (alias parity), help text, and state-sync preservation.
-- `test/core-prompts.test.ts`: 14 tests passed — covers T005 (lifecycle checkpoint prompt rendering with `--summary` and shell-quoting).
-- No project-wide build, lint, format, or unrelated test commands were run.
+- `test/core-commands.test.ts`: 74 tests passed; covers checkpoint summary validation, optional commit body support, checkpoint subject/body metadata, alias parity, git-helper behavior, help text, and state-sync preservation.
+- `test/core-prompts.test.ts`: 14 tests passed; covers lifecycle checkpoint prompt rendering with `--summary`.
+- No project-wide build, lint, format, or unrelated test command was run.
