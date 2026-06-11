@@ -142,6 +142,25 @@ export async function currentBranch(cwd: string): Promise<string> {
   }
   return branch;
 }
+export async function isWorktreeClean(cwd: string): Promise<boolean> {
+  const result = await runGit(cwd, ["status", "--porcelain"]);
+  if (result.exitCode !== 0) {
+    throw new Error("git status failed");
+  }
+  return result.stdout.trim() === "";
+}
+
+export async function switchToExistingBranch(cwd: string, branch: string): Promise<ProcessRunResult> {
+  const result = await runGit(cwd, ["switch", branch]);
+  throwIfFailed(result, "git switch");
+  return result;
+}
+
+export async function mergeNoFastForward(cwd: string, branch: string): Promise<ProcessRunResult> {
+  const result = await runGit(cwd, ["merge", "--no-ff", "--no-edit", branch]);
+  throwIfFailed(result, "git merge");
+  return result;
+}
 
 
 export async function pushBranch(cwd: string, remote: string, branch: string): Promise<ProcessRunResult> {

@@ -9,10 +9,13 @@ import {
   generatePullRequestBody,
   gitWorktreeRoot,
   isGitWorktree,
+  isWorktreeClean,
+  mergeNoFastForward,
   resolveBaseBranch,
   runGh,
   runGit,
   stageFiles,
+  switchToExistingBranch,
   writePullRequestBodyFile,
 } from "../src/core/git";
 import { syncChangeTasksFromFileIfPresent, syncChangeTasksFromMarkdown, upsertChange } from "../src/core/state";
@@ -1699,4 +1702,60 @@ test("publish --mode merge still fails", async () => {
   expect(result.ok).toBe(false);
   expect(result.exitCode).toBe(1);
   expect(result.summary).toBe("Unknown option: --mode");
+});
+
+test("isWorktreeClean returns true for clean worktree", async () => {
+  const cwd = await initGitRepo("specwright-clean-");
+  await writeFile(join(cwd, "tracked.txt"), "content\n", "utf8");
+  await stageFiles(cwd, ["tracked.txt"]);
+  await commitStaged(cwd, "initial");
+
+  expect(await isWorktreeClean(cwd)).toBe(true);
+});
+
+test("isWorktreeClean returns false for dirty worktree", async () => {
+  const cwd = await initGitRepo("specwright-dirty-");
+  await writeFile(join(cwd, "tracked.txt"), "content\n", "utf8");
+  await stageFiles(cwd, ["tracked.txt"]);
+  await commitStaged(cwd, "initial");
+  await writeFile(join(cwd, "tracked.txt"), "modified\n", "utf8");
+
+  expect(await isWorktreeClean(cwd)).toBe(false);
+});
+
+test("switchToExistingBranch switches to an existing branch", async () => {
+  const cwd = await initGitRepo("specwright-switch-existing-");
+  await writeFile(join(cwd, "on-main.txt"), "main\n", "utf8");
+  await stageFiles(cwd, ["on-main.txt"]);
+  await commitStaged(cwd, "on main");
+  await expectGit(cwd, ["checkout", "-b", "feature"]);
+  await expectGit(cwd, ["checkout", "main"]);
+
+  await switchToExistingBranch(cwd, "feature");
+  const branch = (await expectGit(cwd, ["branch", "--show-current"])).stdout.trim();
+  expect(branch).toBe("feature");
+});
+
+test("switchToExistingBranch fails for missing branch", async () => {
+  const cwd = await initGitRepo("specwright-switch-missing-");
+
+  await expect(async () => {
+    await switchToExistingBranch(cwd, "nonexistent");
+  }).rejects.toThrow("git switch failed");
+});
+
+test("mergeNoFastForward creates a no-fast-forward merge commit", async () => {
+  const cwd = await initGitRepo("specwright-merge-noff-");
+  await writeFile(join(cwd, "on-main.txt"), "main\n", "utf8");
+  await stageFiles(cwd, ["on-main.txt"]);
+  await commitStaged(cwd, "on main");
+  await expectGit(cwd, ["checkout", "-b", "feature"]);
+  await writeFile(join(cwd, "on-feature.txt"), "feature\n", "utf8");
+  await stageFiles(cwd, ["on-feature.txt"]);
+  await commitStaged(cwd, "on feature");
+  await expectGit(cwd, ["checkout", "main"]);
+
+  await mergeNoFastForward(cwd, "feature");
+  const log = (await expectGit(cwd, ["log", "-1", "--pretty=%s"])).stdout.trim();
+  expect(log).toContain("Merge branch 'feature'");
 });

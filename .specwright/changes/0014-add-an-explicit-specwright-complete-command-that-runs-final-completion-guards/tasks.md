@@ -10,7 +10,7 @@
   - Acceptance: `complete` accepts only complete modes; invalid modes fail clearly; `publish --mode merge` still fails; help lists complete usage.
   - Verification: Run targeted parser/help tests with `bun test test/core-commands.test.ts -t "complete"` and publish mode regression with `bun test test/core-commands.test.ts -t "publish"`.
 
-- [ ] T002: Add completion git helpers
+- [x] T002: Add completion git helpers
   - Files: `src/core/git.ts`, `test/core-commands.test.ts`
   - Action: Add helpers for clean-worktree detection, switching to an existing local branch, and `git merge --no-ff --no-edit <branch>` using argv arrays.
   - Acceptance: Helpers do not create branches, pull, delete branches, or shell-concatenate commands; detached/missing branch/dirty cases surface failures.
