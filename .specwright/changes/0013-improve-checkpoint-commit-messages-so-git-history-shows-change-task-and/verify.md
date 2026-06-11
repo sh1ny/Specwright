@@ -10,22 +10,20 @@ No issues.
 
 ## Observed output
 
-### `bun test test/core-commands.test.ts`
+### T006 — Focused test run (2026-06-11)
 
 ```
- 74 pass
- 0 fail
- 650 expect() calls
-Ran 74 tests across 1 file. [1248.00ms]
+$ bun test test/core-commands.test.ts 2>&1
+Test Results:
+   PASS: 74 passed
+
+$ bun test test/core-prompts.test.ts 2>&1
+Test Results:
+   PASS: 14 passed
 ```
 
-### `bun test test/core-prompts.test.ts`
+### Summary
 
-```
- 14 pass
- 0 fail
- 289 expect() calls
-Ran 14 tests across 1 file. [159.00ms]
-```
-
-All 88 focused tests pass across both files. No failures, no regressions in parser, message construction, alias parity, git-helper, help text, or prompt rendering.
+- `test/core-commands.test.ts`: 74 tests passed — covers T001 (summary validation), T002 (commit body support), T003 (checkpoint subject/body metadata), T004 (alias parity), help text, and state-sync preservation.
+- `test/core-prompts.test.ts`: 14 tests passed — covers T005 (lifecycle checkpoint prompt rendering with `--summary` and shell-quoting).
+- No project-wide build, lint, format, or unrelated test commands were run.
