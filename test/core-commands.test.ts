@@ -1645,10 +1645,10 @@ test("CLI runtime verify uses neutral spawn strategy", async () => {
   expect(result.prompt).not.toContain("OMP's `task` tool");
   expect(result.prompt).toContain("delegate to `specwright-verifier`");
 });
-test("complete command accepts valid complete modes", async () => {
-  const cwd = await initGitRepo("specwright-complete-mode-");
+test("complete none has no side effects and sets status to done", async () => {
+  const cwd = await initGitRepo("specwright-complete-none-");
   const ctx = testContext(cwd);
-  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-mode-remote-"));
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-none-remote-"));
   await expectGit(remote, ["init", "--bare"]);
   await expectGit(cwd, ["remote", "add", "origin", remote]);
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
@@ -1662,11 +1662,100 @@ test("complete command accepts valid complete modes", async () => {
   await stageFiles(cwd, [join(changeDir, "verify.md"), join(changeDir, "handoff.md")]);
   await commitStaged(cwd, "add verify and handoff");
 
-  for (const mode of ["none", "push", "pr", "merge"] as const) {
-    const result = await runSpecwrightCommand(ctx, ["complete", "--mode", mode]);
-    expect(result.ok).toBe(true);
-    expect(result.summary).toContain(`Complete mode: ${mode}`);
-  }
+  const result = await runSpecwrightCommand(ctx, ["complete", "--mode", "none"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toContain("Complete mode: none");
+
+  // Verify status was set to done in state.
+  const statePath = join(cwd, ".specwright", "state.json");
+  const state = JSON.parse(await readFile(statePath, "utf8")) as {
+    changes: Record<string, { status: string; step: string }>;
+  };
+  const changeId = Object.keys(state.changes)[0];
+  expect(state.changes[changeId].status).toBe("done");
+  expect(state.changes[changeId].step).toBe("handoff");
+
+  // Verify no push occurred.
+  const branch = "feature/0001-inventory-crafting";
+  const remoteRef = await runGit(remote, ["show-ref", "--verify", `refs/heads/${branch}`]);
+  expect(remoteRef.exitCode).not.toBe(0);
+});
+
+test("complete push pushes current branch to remote", async () => {
+  const cwd = await initGitRepo("specwright-complete-push-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-push-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+  await writeFile(join(changeDir, "verify.md"), "# Verify\n\n## Observed output\n\n`bun test` passed.\n", "utf8");
+  await writeFile(join(changeDir, "handoff.md"), "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n", "utf8");
+  await stageFiles(cwd, [join(changeDir, "verify.md"), join(changeDir, "handoff.md")]);
+  await commitStaged(cwd, "add verify and handoff");
+
+  const branch = (await expectGit(cwd, ["branch", "--show-current"])).stdout.trim();
+  const result = await runSpecwrightCommand(ctx, ["complete", "--mode", "push"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toContain(`Pushed ${branch} to origin`);
+  await expectGit(remote, ["show-ref", "--verify", `refs/heads/${branch}`]);
+
+  const statePath = join(cwd, ".specwright", "state.json");
+  const state = JSON.parse(await readFile(statePath, "utf8")) as {
+    changes: Record<string, { status: string; step: string }>;
+  };
+  const changeId = Object.keys(state.changes)[0];
+  expect(state.changes[changeId].status).toBe("done");
+  expect(state.changes[changeId].step).toBe("handoff");
+});
+
+test("complete merge switches to base and creates no-fast-forward merge commit", async () => {
+  const cwd = await initGitRepo("specwright-complete-merge-");
+  const ctx = testContext(cwd);
+  const remote = await mkdtemp(join(tmpdir(), "specwright-complete-merge-remote-"));
+  await expectGit(remote, ["init", "--bare"]);
+  await expectGit(cwd, ["remote", "add", "origin", remote]);
+  // Make main a real branch with a commit so we can switch back to it.
+  await writeFile(join(cwd, "README.md"), "# project\n", "utf8");
+  await stageFiles(cwd, ["README.md"]);
+  await commitStaged(cwd, "initial");
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  await expectGit(cwd, ["add", "--all"]);
+  await expectGit(cwd, ["commit", "-m", "specwright setup"]);
+
+  const changeDir = join(cwd, ".specwright", "changes", "0001-inventory-crafting");
+  await writeFile(join(changeDir, "verify.md"), "# Verify\n\n## Observed output\n\n`bun test` passed.\n", "utf8");
+  await writeFile(join(changeDir, "handoff.md"), "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n", "utf8");
+  await stageFiles(cwd, [join(changeDir, "verify.md"), join(changeDir, "handoff.md")]);
+  await commitStaged(cwd, "add verify and handoff");
+
+  const branch = (await expectGit(cwd, ["branch", "--show-current"])).stdout.trim();
+  const result = await runSpecwrightCommand(ctx, ["complete", "--mode", "merge"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toContain(`Merged ${branch} into main with --no-ff`);
+
+  const currentBranch = (await expectGit(cwd, ["branch", "--show-current"])).stdout.trim();
+  expect(currentBranch).toBe("main");
+
+  const log = (await expectGit(cwd, ["log", "-1", "--pretty=%s"])).stdout.trim();
+  expect(log).toContain(`Merge branch '${branch}'`);
+
+  const statePath = join(cwd, ".specwright", "state.json");
+  const state = JSON.parse(await readFile(statePath, "utf8")) as {
+    changes: Record<string, { status: string; step: string }>;
+  };
+  const changeId = Object.keys(state.changes)[0];
+  expect(state.changes[changeId].status).toBe("done");
+  expect(state.changes[changeId].step).toBe("handoff");
+
+  // Verify no branch deletion.
+  const localBranches = (await expectGit(cwd, ["branch", "--list", branch])).stdout.trim();
+  expect(localBranches).toContain(branch);
 });
 
 test("complete command defaults to none when mode is omitted", async () => {
@@ -1719,6 +1808,10 @@ test("complete command accepts optional change positional", async () => {
   const remote = await mkdtemp(join(tmpdir(), "specwright-complete-change-remote-"));
   await expectGit(remote, ["init", "--bare"]);
   await expectGit(cwd, ["remote", "add", "origin", remote]);
+  // Make main a real branch with a commit so we can switch back to it.
+  await writeFile(join(cwd, "README.md"), "# project\n", "utf8");
+  await stageFiles(cwd, ["README.md"]);
+  await commitStaged(cwd, "initial");
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
   expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
   await expectGit(cwd, ["add", "--all"]);
@@ -1732,7 +1825,7 @@ test("complete command accepts optional change positional", async () => {
 
   const result = await runSpecwrightCommand(ctx, ["complete", "0001-inventory-crafting", "--mode", "merge"]);
   expect(result.ok).toBe(true);
-  expect(result.summary).toContain("Complete mode: merge");
+  expect(result.summary).toContain("Merged");
 });
 
 test("help text lists complete usage", async () => {
@@ -2075,11 +2168,9 @@ test("complete passes all guards with valid artifacts and no tasks", async () =>
   await stageFiles(cwd, [join(changeDir, "verify.md"), join(changeDir, "handoff.md")]);
   await commitStaged(cwd, "add verify and handoff for all guards test");
 
-  for (const mode of ["none", "push", "pr", "merge"] as const) {
-    const result = await runSpecwrightCommand(ctx, ["complete", "--mode", mode]);
-    expect(result.ok).toBe(true);
-    expect(result.summary).toContain(`Complete mode: ${mode}`);
-  }
+  const result = await runSpecwrightCommand(ctx, ["complete", "--mode", "none"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toContain("Complete mode: none");
 });
 
 test("complete passes all guards with all tasks done", async () => {

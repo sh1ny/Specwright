@@ -32,7 +32,7 @@
 
 ## Wave 3 — Completion mode side effects
 
-- [ ] T005: Implement complete mode actions
+- [x] T005: Implement complete mode actions
   - Files: `src/core/commands.ts`, `src/core/git.ts`, `test/core-commands.test.ts`
   - Action: Implement `none`, `push`, `pr`, and `merge` after guards: no-op success, existing branch push, push plus existing PR creation path, and switch-to-base plus no-fast-forward merge.
   - Acceptance: `none` has no side effects; `push` pushes once; `pr` pushes then opens PR with existing body behavior; `merge` creates a no-fast-forward merge commit on base; merge conflicts fail visibly and leave conflict state; no branch deletion occurs.

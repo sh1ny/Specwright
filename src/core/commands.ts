@@ -29,7 +29,7 @@ import {
   updateCachedChange,
   upsertChange,
 } from "./state";
-import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, writePullRequestBodyFile } from "./git";
+import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, switchToExistingBranch, mergeNoFastForward, writePullRequestBodyFile } from "./git";
 import { renderValidationReport, validateChange, validateSpecwrightConfig, hasNonHeadingContent } from "./validators";
 import type {
   ChangeKind,
@@ -1198,9 +1198,38 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
   if (!handoffContent || !hasNonHeadingContent(handoffContent)) {
     return fail("Complete requires a non-empty handoff.md.");
   }
+  const remote = config.workflow.remote;
 
-  // All guards passed — mode side effects follow in later tasks.
-  return ok(`Complete mode: ${mode}`);
+  if (mode === "none") {
+    await updateChangeStep(ctx.cwd, change, "done", "handoff", ctx.now());
+    return ok("Complete mode: none. Change status set to done.");
+  }
+
+  if (mode === "push" || mode === "pr") {
+    await pushBranch(ctx.cwd, remote, branch);
+  }
+
+  if (mode === "pr") {
+    const bodyFile = await writePullRequestBodyFile(ctx.cwd, change);
+    const title = `${change.id}-${change.slug}: ${change.title}`;
+    await createPullRequest(ctx.cwd, title, bodyFile, baseBranch, branch);
+    await updateChangeStep(ctx.cwd, change, "done", "handoff", ctx.now());
+    return ok(`Created pull request for ${branch} targeting ${baseBranch}.`, { filesCreated: [bodyFile] });
+  }
+
+  if (mode === "merge") {
+    await switchToExistingBranch(ctx.cwd, baseBranch);
+    try {
+      await mergeNoFastForward(ctx.cwd, branch);
+    } catch (error) {
+      return fail(`Merge failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await updateChangeStep(ctx.cwd, change, "done", "handoff", ctx.now());
+    return ok(`Merged ${branch} into ${baseBranch} with --no-ff.`);
+  }
+
+  await updateChangeStep(ctx.cwd, change, "done", "handoff", ctx.now());
+  return ok(`Pushed ${branch} to ${remote}.`);
 }
 
 async function commandPack(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
