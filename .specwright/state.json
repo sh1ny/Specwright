@@ -613,8 +613,21 @@
           "updatedAt": "2026-06-11T09:09:43.483Z"
         }
       }
+    },
+    "0014": {
+      "id": "0014",
+      "slug": "add-an-explicit-specwright-complete-command-that-runs-final-completion-guards",
+      "title": "Add an explicit specwright complete command that runs final completion guards",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-11T20:10:27.254Z",
+      "updatedAt": "2026-06-11T20:10:27.254Z",
+      "tasks": {}
     }
   },
-  "updatedAt": "2026-06-11T19:23:20.763Z",
-  "currentChange": "0013"
+  "updatedAt": "2026-06-11T20:10:27.254Z",
+  "currentChange": "0014"
 }
