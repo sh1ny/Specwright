@@ -18,13 +18,13 @@
 
 ## Wave 2 — Checkpoint message behavior
 
-- [ ] T003: Build checkpoint subject and metadata body
+- [x] T003: Build checkpoint subject and metadata body
   - Files: `src/core/commands.ts`, `test/core-commands.test.ts`
   - Action: Replace the old checkpoint message with `[<change-id>-<unit-id>] <summary>` and construct the structured body containing change slug, unit kind/id, summary, task title for task checkpoints when available, phase for phase checkpoints, and scoped files.
   - Acceptance: Task checkpoints produce subjects like `[0013-T001] Implement checkpoint summary support`; phase checkpoints use the phase name as the unit id; bodies contain the required metadata; staging and `.specwright/state.json` sync behavior is unchanged.
   - Verification: Run focused checkpoint tests for task metadata, phase metadata, scoped files, and state-sync preservation.
 
-- [ ] T004: Preserve commit alias parity
+- [x] T004: Preserve commit alias parity
   - Files: `src/core/commands.ts`, `test/core-commands.test.ts`
   - Action: Ensure `specwright commit` continues routing through the same `commandCheckpoint` path and therefore requires `--summary` and emits the same subject/body format as `specwright checkpoint`.
   - Acceptance: The alias has no separate message logic and no divergent validation path.
@@ -32,7 +32,7 @@
 
 ## Wave 3 — Generated guidance
 
-- [ ] T005: Update lifecycle checkpoint prompts
+- [x] T005: Update lifecycle checkpoint prompts
   - Files: `src/core/prompts.ts`, `test/core-prompts.test.ts`
   - Action: Update `renderCheckpointClause` so generated lifecycle instructions include `--summary "<concrete summary>"` and shell-quote summaries containing spaces.
   - Acceptance: Generated prompt text no longer shows checkpoint commands without `--summary`; examples are copy-paste safe for multi-word summaries.
@@ -40,7 +40,7 @@
 
 ## Wave 4 — Final focused verification
 
-- [ ] T006: Verify the complete checkpoint cutover
+- [x] T006: Verify the complete checkpoint cutover
   - Files: `src/core/commands.ts`, `src/core/git.ts`, `src/core/prompts.ts`, `test/core-commands.test.ts`, `test/core-prompts.test.ts`
   - Action: Run the targeted test files affected by the change and inspect failures for parser, message, alias, git-helper, help, or prompt drift.
   - Acceptance: All new and updated focused tests pass; no project-wide build, lint, format, or test command is used for this change.
