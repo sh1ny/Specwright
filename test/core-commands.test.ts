@@ -501,6 +501,19 @@ test("git runner stages explicit files and commits only staged content", async (
   expect(status.stdout).not.toContain("tracked.txt");
 });
 
+test("commitStaged adds a body with a second message paragraph", async () => {
+  const cwd = await initGitRepo("specwright-git-commit-body-");
+  await writeFile(join(cwd, "tracked.txt"), "tracked\n", "utf8");
+
+  await stageFiles(cwd, ["tracked.txt"]);
+  await commitStaged(cwd, "Specwright checkpoint", "Change: 0013\nTask: T002");
+
+  const subject = await expectGit(cwd, ["log", "-1", "--pretty=%s"]);
+  expect(subject.stdout.trim()).toBe("Specwright checkpoint");
+  const body = await expectGit(cwd, ["log", "-1", "--pretty=%b"]);
+  expect(body.stdout.trim()).toBe("Change: 0013\nTask: T002");
+});
+
 test("checkpoint command rejects invalid selectors and file lists", async () => {
   const cwd = await initGitRepo("specwright-checkpoint-invalid-");
   const ctx = testContext(cwd);

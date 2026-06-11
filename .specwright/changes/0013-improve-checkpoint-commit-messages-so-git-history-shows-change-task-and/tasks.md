@@ -4,13 +4,13 @@
 
 ## Wave 1 — Independent plumbing
 
-- [ ] T001: Require checkpoint summaries at the CLI boundary
+- [x] T001: Require checkpoint summaries at the CLI boundary
   - Files: `src/core/commands.ts`, `test/core-commands.test.ts`
   - Action: Add `summary?: string` to parsed args, parse `--summary <value>`, validate a non-empty trimmed summary in `commandCheckpoint`, and update checkpoint/commit help usage and examples with quoted summaries.
   - Acceptance: `checkpoint` and `commit` reject missing or blank `--summary`; existing `--phase`/`--task`, `--files`, and alias routing behavior remains unchanged.
   - Verification: Run focused core command tests covering missing summary, blank summary, and quoted summaries with spaces.
 
-- [ ] T002: Add optional commit body support
+- [x] T002: Add optional commit body support
   - Files: `src/core/git.ts`, all current `commitStaged` call sites found by scoped reference search
   - Action: Extend `commitStaged` to accept an optional body and pass a second `-m` argument only when the body is non-empty; migrate callers without compatibility shims.
   - Acceptance: Existing callers that pass only a subject keep the same git argument shape; checkpoint code can pass subject plus structured body.
