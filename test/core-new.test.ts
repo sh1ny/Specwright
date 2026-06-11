@@ -83,10 +83,12 @@ test("new in a git worktree creates a change branch and commits only scaffold fi
   expect(result.ok).toBe(true);
 
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
-  const slug = requireChange(state, "0001").slug;
+  const change = requireChange(state, "0001");
+  const slug = change.slug;
 
   const branch = await expectGit(cwd, ["branch", "--show-current"]);
-  expect(branch.stdout.trim()).toBe(`feature/0001-${slug}`);
+  // Branch names intentionally use branchNameForChange's 48-char truncation.
+  expect(branch.stdout.trim()).toBe(branchNameForChange(change));
 
   const subject = await expectGit(cwd, ["log", "-1", "--pretty=%s"]);
   expect(subject.stdout.trim()).toBe(`specwright: start 0001-${slug}`);
@@ -114,10 +116,12 @@ test("new in a git worktree creates a branch without committing when auto-commit
   expect(result.ok).toBe(true);
 
   const state = JSON.parse(await readFile(join(cwd, ".specwright/state.json"), "utf8")) as SpecwrightState;
-  const slug = requireChange(state, "0001").slug;
+  const change = requireChange(state, "0001");
+  const slug = change.slug;
 
   const branch = await expectGit(cwd, ["branch", "--show-current"]);
-  expect(branch.stdout.trim()).toBe(`feature/0001-${slug}`);
+  // Branch names intentionally use branchNameForChange's 48-char truncation.
+  expect(branch.stdout.trim()).toBe(branchNameForChange(change));
 
   const head = await runGit(cwd, ["rev-parse", "--verify", "HEAD"]);
   expect(head.exitCode).not.toBe(0);

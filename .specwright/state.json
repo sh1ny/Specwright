@@ -571,10 +571,10 @@
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "verifying",
-      "step": "verify",
+      "status": "done",
+      "step": "handoff",
       "createdAt": "2026-06-11T07:42:21.731Z",
-      "updatedAt": "2026-06-11T14:58:28.506Z",
+      "updatedAt": "2026-06-11T19:23:20.763Z",
       "tasks": {
         "T001": {
           "id": "T001",
@@ -615,6 +615,6 @@
       }
     }
   },
-  "updatedAt": "2026-06-11T14:58:28.506Z",
+  "updatedAt": "2026-06-11T19:23:20.763Z",
   "currentChange": "0013"
 }
