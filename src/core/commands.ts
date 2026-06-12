@@ -498,11 +498,49 @@ async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<Com
 
 async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   await ensureDir(projectDir(ctx.cwd));
-  const scanPath = join(projectDir(ctx.cwd), "scan.md");
-  await writeIfMissing(scanPath, "# Project Scan\n\n## Files inspected\n\n## Patterns found\n\n## Constraints\n\n## Open questions\n");
+  const project = projectDir(ctx.cwd);
+  const created: string[] = [];
+  const updated: string[] = [];
+
+  for (const { path, content } of [
+    { path: join(project, "scan.md"), content: "# Project Scan\n\n## Files inspected\n\n## Patterns found\n\n## Constraints\n\n## Open questions\n" },
+    { path: join(project, "tech-stack.md"), content: "# tech stack\n\n" },
+    { path: join(project, "architecture.md"), content: "# architecture\n\n" },
+    {
+      path: join(project, "codebase-map.md"),
+      content: `# Codebase Map\n\n## Entry points\n\n## Core modules\n\n## Runtime adapters\n\n## Data and state artifacts\n\n## Command surface\n\n## Test surface\n\n## Build and verification commands\n\n## Conventions\n\n## Known risks and gaps\n\n## Open questions\n`,
+    },
+  ]) {
+    const result = await writeIfMissing(path, content, args.force);
+    if (result === "created") {
+      created.push(path);
+    } else if (result === "updated") {
+      updated.push(path);
+    }
+  }
+
+  const indexPath = join(project, "codebase-index.json");
+  const indexExists = await exists(indexPath);
+  if (args.force || !indexExists) {
+    await writeJsonFile(indexPath, {
+      version: 1,
+      generatedAt: ctx.now().toISOString(),
+      entrypoints: [],
+      modules: [],
+      commands: [],
+      verification: [],
+      risks: [],
+    });
+    if (args.force && indexExists) {
+      updated.push(indexPath);
+    } else {
+      created.push(indexPath);
+    }
+  }
+
   const config = await loadConfig(ctx.cwd);
-  const prompt = `# Specwright Scan\n\n${renderContextBudget(config)}\n\nInspect the repository using find, search/OMP grep, read, and lsp when available. Update only these files:\n- .specwright/project/scan.md\n- .specwright/project/tech-stack.md\n- .specwright/project/architecture.md\n\nDo not load full packs or unrelated docs.\n\n${renderSubagentRetryClause()}`;
-  return ok("Prepared project scan prompt.", { prompt, filesCreated: [scanPath] });
+  const prompt = `# Specwright Scan\n\n${renderContextBudget(config)}\n\nInspect the repository using find, search/OMP grep, read, and lsp when available. Update only these files:\n- .specwright/project/scan.md\n- .specwright/project/tech-stack.md\n- .specwright/project/architecture.md\n- .specwright/project/codebase-map.md\n- .specwright/project/codebase-index.json\n\nDo not load full packs or unrelated docs.\n\n${renderSubagentRetryClause()}`;
+  return ok("Prepared project scan prompt.", { prompt, filesCreated: created, filesUpdated: updated });
 }
 
 async function expandRequestFileReference(cwd: string, token: string): Promise<string> {

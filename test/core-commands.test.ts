@@ -2465,3 +2465,100 @@ test("help text advertises scan --map, --refresh, --force, and --json", () => {
   const help = renderHelp();
   expect(help).toContain("specwright scan [--map] [--refresh] [--force] [--json] [--print-prompt]");
 });
+
+test("scan ensures all project intelligence artifacts", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-artifacts-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["scan"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toBe("Prepared project scan prompt.");
+
+  const project = join(cwd, ".specwright", "project");
+  const scanPath = join(project, "scan.md");
+  const mapPath = join(project, "codebase-map.md");
+  const indexPath = join(project, "codebase-index.json");
+
+  expect(result.filesCreated).toContain(scanPath);
+  expect(result.filesCreated).toContain(mapPath);
+  expect(result.filesCreated).toContain(indexPath);
+  expect(result.filesCreated.length).toBe(3);
+  expect(result.filesUpdated).toEqual([]);
+
+  const index = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(index.version).toBe(1);
+  expect(index.generatedAt).toBe(ctx.now().toISOString());
+  expect(Array.isArray(index.entrypoints)).toBe(true);
+  expect(Array.isArray(index.modules)).toBe(true);
+  expect(Array.isArray(index.commands)).toBe(true);
+  expect(Array.isArray(index.verification)).toBe(true);
+  expect(Array.isArray(index.risks)).toBe(true);
+});
+
+test("scan preserves existing map artifacts unless --force is used", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-preserve-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const project = join(cwd, ".specwright", "project");
+  const mapPath = join(project, "codebase-map.md");
+  const indexPath = join(project, "codebase-index.json");
+
+  await writeFile(mapPath, "# Preserved map\n\n", "utf8");
+  await writeFile(indexPath, JSON.stringify({ version: 1, generatedAt: "2020-01-01T00:00:00.000Z", entrypoints: [], modules: [], commands: [], verification: [], risks: [] }, null, 2), "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["scan"]);
+  expect(result.ok).toBe(true);
+  expect(result.filesCreated).toEqual([]);
+  expect(result.filesUpdated).toEqual([]);
+  expect(await readFile(mapPath, "utf8")).toBe("# Preserved map\n\n");
+  expect(JSON.parse(await readFile(indexPath, "utf8")).generatedAt).toBe("2020-01-01T00:00:00.000Z");
+});
+
+test("scan --force regenerates existing map artifacts", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-force-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const project = join(cwd, ".specwright", "project");
+  const mapPath = join(project, "codebase-map.md");
+  const indexPath = join(project, "codebase-index.json");
+
+  await writeFile(mapPath, "# Stale map\n\n", "utf8");
+  await writeFile(indexPath, JSON.stringify({ version: 1, generatedAt: "2020-01-01T00:00:00.000Z", entrypoints: [], modules: [], commands: [], verification: [], risks: [] }, null, 2), "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--force"]);
+  expect(result.ok).toBe(true);
+  expect(result.filesUpdated).toContain(mapPath);
+  expect(result.filesUpdated).toContain(indexPath);
+  expect(result.filesUpdated.length).toBe(5);
+  expect(await readFile(mapPath, "utf8")).toContain("# Codebase Map");
+  expect(JSON.parse(await readFile(indexPath, "utf8")).generatedAt).toBe(ctx.now().toISOString());
+});
+
+test("scan prompt references map artifacts", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-prompt-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["scan"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain(".specwright/project/codebase-map.md");
+  expect(result.prompt).toContain(".specwright/project/codebase-index.json");
+});
+
+test("scan --json returns accurate result shape", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-json-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toBe("Prepared project scan prompt.");
+  expect(result.filesCreated.length).toBe(3);
+  expect(result.filesUpdated).toEqual([]);
+  expect(result.prompt).toBeDefined();
+});
