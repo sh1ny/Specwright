@@ -1,5 +1,6 @@
 import type { ChangeState, PromptInput, SpecwrightConfig } from "../../core/types";
-import type { RoutedLifecycleStep } from "../../core/prompts";
+import type { RoutedLifecycleStep, ScanPromptInput } from "../../core/prompts";
+import { renderScanPrompt } from "../../core/prompts";
 
 const LIFECYCLE_AGENT_BY_STEP = {
   research: "researcher",
@@ -29,6 +30,21 @@ export function renderOmpLifecycleSpawnStrategy(input: {
 
 export function renderOmpSubagentRetryClause(): string {
   return "Subagent fallback:\n- Prefer lightweight/read-only scouts for mapping work.\n- If a scout/explore agent fails, cancels, returns null, or returns an unusable report, retry the same assignment once with OMP's bundled `task` agent using the same read-only/no-project-wide-command constraints.\n- Record the retry in evidence.md under \"Research attempts\".\n- Do not declare blocked until the retry also fails or the missing fact is not available through tools.";
+}
+export function renderOmpScanPrompt(input: ScanPromptInput): string {
+  return `${renderScanPrompt(input)}
+
+OMP map guidance:
+- When mapping larger repositories, prefer parallel read-only scouts via OMP's \`task\` tool.
+- Split scouts by subsystem:
+  - CLI and command kernel
+  - state, config, and validators
+  - runtime adapters
+  - packs, templates, and agents
+  - tests
+- Give each scout the bounded discovery and mapping contract from this prompt, scoped to its subsystem.
+- Merge scout findings into \`codebase-map.md\` and \`codebase-index.json\`; preserve confirmed facts and record uncertainty in Open questions.
+- If the \`task\` tool or scout agents are unavailable, fall back to sequential mapping with the same bounded constraints.`;
 }
 
 type OmpDiscussPromptInput = PromptInput & { change: NonNullable<PromptInput["change"]> };

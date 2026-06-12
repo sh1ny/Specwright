@@ -1,6 +1,29 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+export interface FileFingerprint {
+  mtime: number;
+  size: number;
+  checksum: string;
+}
+
+export async function computeFileFingerprint(path: string): Promise<FileFingerprint | undefined> {
+  try {
+    const stats = await stat(path);
+    if (!stats.isFile()) {
+      return undefined;
+    }
+    const content = await readFile(path);
+    const checksum = createHash("sha256").update(content).digest("hex");
+    return { mtime: stats.mtimeMs, size: stats.size, checksum };
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR" || error.code === "EISDIR")) {
+      return undefined;
+    }
+    throw error;
+  }
+}
 function safeReviver(_key: string, value: unknown): unknown {
   if (typeof value === "object" && value !== null) {
     if (Object.hasOwn(value, "__proto__") || Object.hasOwn(value, "constructor")) {

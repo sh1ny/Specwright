@@ -663,8 +663,94 @@
           "updatedAt": "2026-06-11T22:49:22.806Z"
         }
       }
+    },
+    "0015": {
+      "id": "0015",
+      "slug": "proposal-extend-specwright-scan-with-a-codebase-map-reader-internal",
+      "title": "# Proposal: Extend `specwright scan` with a Codebase Map ## Reader Internal",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "done",
+      "step": "handoff",
+      "createdAt": "2026-06-12T18:06:12.831Z",
+      "updatedAt": "2026-06-12T23:04:24.429Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Parse scan map flags",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Ensure map artifacts",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Compare refresh fingerprints",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Render core map prompts",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Add OMP map guidance",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Validate codebase index",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T007": {
+          "id": "T007",
+          "title": "Point lifecycle prompts at maps",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T008": {
+          "id": "T008",
+          "title": "Scope map writes and JSON summary",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T009": {
+          "id": "T009",
+          "title": "Harden index validation and fingerprints",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T010": {
+          "id": "T010",
+          "title": "Preserve refresh baseline until map update",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T011": {
+          "id": "T011",
+          "title": "Align scan prompt retry targets",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        },
+        "T012": {
+          "id": "T012",
+          "title": "Refresh change artifacts",
+          "status": "done",
+          "updatedAt": "2026-06-12T22:06:11.240Z"
+        }
+      }
     }
   },
-  "updatedAt": "2026-06-12T15:58:52.205Z",
-  "currentChange": "0014"
+  "updatedAt": "2026-06-12T23:04:24.429Z",
+  "currentChange": "0015"
 }

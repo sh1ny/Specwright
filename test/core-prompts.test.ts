@@ -3,11 +3,12 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultConfig } from "../src/core/state";
-import { renderLifecycleSpawnStrategy, type RoutedLifecycleStep } from "../src/core/prompts";
+import { renderLifecycleSpawnStrategy, renderScanPrompt, type RoutedLifecycleStep } from "../src/core/prompts";
 import {
   renderOmpLifecycleSpawnStrategy,
   renderOmpDiscussPrompt,
   renderOmpSubagentRetryClause,
+  renderOmpScanPrompt,
 } from "../src/runtime/omp/prompts";
 import { runSpecwrightCommand } from "../src/core/commands";
 
@@ -352,4 +353,98 @@ test("CLI runtime prompts remain neutral without OMP references through command"
   expect(discussResult.ok).toBe(true);
   expect(discussResult.prompt).not.toContain("Use Oh My Pi `ask`");
   expect(discussResult.prompt).not.toContain("You are the receiving OMP agent");
+});
+
+test("renderScanPrompt default mode lists all project intelligence files and bounded discovery", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const prompt = renderScanPrompt({ config, map: false, refresh: false });
+  expect(prompt).toContain("# Specwright Scan");
+  expect(prompt).toContain("Inspect the repository and update the project intelligence files:");
+  expect(prompt).toContain(".specwright/project/scan.md");
+  expect(prompt).toContain(".specwright/project/tech-stack.md");
+  expect(prompt).toContain(".specwright/project/architecture.md");
+  expect(prompt).toContain(".specwright/project/codebase-map.md");
+  expect(prompt).toContain(".specwright/project/codebase-index.json");
+  expect(prompt).toContain("Use file discovery (find)");
+  expect(prompt).toContain("Use search and LSP when available");
+  expect(prompt).toContain("Preserve existing confirmed facts");
+  expect(prompt).toContain("Record uncertainty, assumptions, and gaps in the Open questions section");
+  expect(prompt).not.toContain("OMP");
+  expect(prompt).not.toContain("scout");
+  expect(prompt).not.toContain("Refresh contract");
+  expect(prompt).toContain("Mapping contract:\n- Preserve existing confirmed facts");
+  expect(prompt).not.toContain("Mapping contract:,- Preserve");
+  expect(prompt).toContain("Record the retry in .specwright/project/scan.md under Open questions");
+  expect(prompt).toContain("fingerprints");
+  expect(prompt).toContain("{ \"mtime\": number, \"size\": number, \"checksum\": string }");
+});
+
+test("renderScanPrompt map mode focuses only on map artifacts", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const prompt = renderScanPrompt({ config, map: true, refresh: false });
+  expect(prompt).toContain("Focus only on codebase mapping for this run");
+  expect(prompt).toContain(".specwright/project/codebase-map.md");
+  expect(prompt).toContain(".specwright/project/codebase-index.json");
+  expect(prompt).toContain("Record the retry in .specwright/project/codebase-map.md under Open questions");
+  expect(prompt).not.toContain(".specwright/project/scan.md");
+  expect(prompt).not.toContain(".specwright/project/tech-stack.md");
+  expect(prompt).not.toContain(".specwright/project/architecture.md");
+});
+
+test("renderScanPrompt refresh mode includes patch-stale contract and section", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const refreshSection = "\n\n## Stale files\n\n- src/core/x.ts (changed)";
+  const prompt = renderScanPrompt({ config, map: false, refresh: true, refreshSection });
+  expect(prompt).toContain("Refresh the project intelligence files by patching stale sections");
+  expect(prompt).toContain("Refresh contract:");
+  expect(prompt).toContain("Compare current files against the recorded fingerprints");
+  expect(prompt).toContain("Update only sections that are stale, incorrect, or missing");
+  expect(prompt).toContain("## Stale files");
+  expect(prompt).toContain("src/core/x.ts (changed)");
+});
+
+test("renderScanPrompt map+refresh mode focuses map artifacts and refresh contract", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const prompt = renderScanPrompt({ config, map: true, refresh: true });
+  expect(prompt).toContain("Refresh the codebase map by patching stale sections");
+  expect(prompt).toContain("Focus only on these map artifacts");
+  expect(prompt).toContain(".specwright/project/codebase-map.md");
+  expect(prompt).toContain("Record the retry in .specwright/project/codebase-map.md under Open questions");
+  expect(prompt).not.toContain(".specwright/project/scan.md");
+  expect(prompt).toContain("Refresh contract:");
+});
+
+test("renderScanPrompt is runtime-neutral and avoids OMP-specific scout wording", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const prompt = renderScanPrompt({ config, map: false, refresh: false });
+  expect(prompt).not.toContain("OMP");
+  expect(prompt).not.toContain("Oh My Pi");
+  expect(prompt).not.toContain("task tool");
+  expect(prompt).not.toContain("evidence.md");
+  expect(prompt).toContain(".specwright/project/scan.md");
+  expect(prompt).toContain("Subagent fallback");
+  expect(prompt).toContain("retry the same assignment once");
+});
+
+test("renderOmpScanPrompt includes parallel scout guidance for mapping subsystems", () => {
+  const config = defaultConfig("omp-scan-prompt-test");
+  const prompt = renderOmpScanPrompt({ config, map: true, refresh: false });
+  expect(prompt).toContain("# Specwright Scan");
+  expect(prompt).toContain("OMP map guidance");
+  expect(prompt).toContain("parallel read-only scouts");
+  expect(prompt).toContain("OMP's `task` tool");
+  expect(prompt).toContain("CLI and command kernel");
+  expect(prompt).toContain("runtime adapters");
+  expect(prompt).toContain("packs, templates, and agents");
+  expect(prompt).toContain("fall back to sequential mapping");
+});
+
+test("renderOmpScanPrompt preserves refresh section and contract in refresh mode", () => {
+  const config = defaultConfig("omp-scan-refresh-test");
+  const refreshSection = "\n\n## Stale files\n\n- src/core/x.ts (changed)";
+  const prompt = renderOmpScanPrompt({ config, map: false, refresh: true, refreshSection });
+  expect(prompt).toContain("Refresh contract:");
+  expect(prompt).toContain("## Stale files");
+  expect(prompt).toContain("src/core/x.ts (changed)");
+  expect(prompt).toContain("OMP map guidance");
 });

@@ -1777,3 +1777,34 @@ test("concurrent passive OMP events for the same cwd share one validate path", a
     validateSpy.mockRestore();
   }
 });
+test("OMP runtime scan prompt includes parallel scout map guidance", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-omp-scan-"));
+  const ctx = { cwd, runtime: "omp" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--map"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toBeDefined();
+  expect(result.prompt).toContain("OMP map guidance");
+  expect(result.prompt).toContain("parallel read-only scouts");
+  expect(result.prompt).toContain("OMP's `task` tool");
+  expect(result.prompt).toContain("runtime adapters");
+  expect(result.prompt).toContain("fall back to sequential mapping");
+  expect(result.prompt).toContain(".specwright/project/codebase-map.md under Open questions");
+  expect(result.prompt).not.toContain(".specwright/project/scan.md");
+});
+
+test("CLI runtime scan prompt stays neutral without OMP map guidance", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-cli-scan-"));
+  const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--map"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toBeDefined();
+  expect(result.prompt).not.toContain("OMP map guidance");
+  expect(result.prompt).not.toContain("parallel read-only scouts");
+  expect(result.prompt).not.toContain("OMP's `task` tool");
+  expect(result.prompt).toContain(".specwright/project/codebase-map.md under Open questions");
+  expect(result.prompt).not.toContain(".specwright/project/scan.md");
+});

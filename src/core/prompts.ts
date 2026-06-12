@@ -32,6 +32,15 @@ export function renderSubagentRetryClause(): string {
   return "Subagent fallback:\n- Prefer lightweight/read-only scouts for mapping work.\n- If a scout/explore agent fails, cancels, returns null, or returns an unusable report, retry the same assignment once with the default task agent using the same read-only/no-project-wide-command constraints.\n- Record the retry in evidence.md under \"Research attempts\".\n- Do not declare blocked until the retry also fails or the missing fact is not available through tools.";
 }
 
+export function renderScanRetryClause(input: { retryArtifact: ".specwright/project/scan.md" | ".specwright/project/codebase-map.md" }): string {
+  return [
+    "Subagent fallback:",
+    "- If delegated read-only mapping work fails, cancels, returns null, or returns an unusable report, retry the same assignment once with the default task agent using the same bounded/no-project-wide-command constraints.",
+    `- Record the retry in ${input.retryArtifact} under Open questions.`,
+    "- Do not declare blocked until the retry also fails or the missing fact is not available through tools.",
+  ].join("\n");
+}
+
 export function renderContextBudget(config: PromptInput["config"]): string {
   return `Context budget:\n- max_context_files: ${config.defaults.maxContextFiles}\n- max_output_words: ${config.defaults.maxOutputWords}\n- Do not load full packs or unrelated docs.\n- Summarize sources; cite paths and URLs.`;
 }
@@ -88,4 +97,57 @@ Discuss workflow:
 - After each completed gray area, write a short checkpoint to discussion.md capturing the question, settled answer, and source evidence.
 - Update intent.md, constraints.md, and decisions.md only after the relevant answers are settled; keep any frozen-after-approval block intact.
 - End with either \`Ready for research\` or the remaining load-bearing questions.`;
+}
+
+export interface ScanPromptInput {
+  config: PromptInput["config"];
+  map: boolean;
+  refresh: boolean;
+  refreshSection?: string;
+  validationSection?: string;
+}
+
+export function renderScanPrompt(input: ScanPromptInput): string {
+  const isMap = input.map;
+  const isRefresh = input.refresh;
+  const focus = isRefresh
+    ? isMap
+      ? "Refresh the codebase map by patching stale sections. Do not rewrite unaffected sections. Focus only on these map artifacts:"
+      : "Refresh the project intelligence files by patching stale sections. Do not rewrite unaffected sections. Update these files:"
+    : isMap
+      ? "Focus only on codebase mapping for this run. Update these map artifacts:"
+      : "Inspect the repository and update the project intelligence files:";
+  const mapArtifacts = ["- .specwright/project/codebase-map.md", "- .specwright/project/codebase-index.json"];
+  const allArtifacts = [
+    "- .specwright/project/scan.md",
+    "- .specwright/project/tech-stack.md",
+    "- .specwright/project/architecture.md",
+    "- .specwright/project/codebase-map.md",
+    "- .specwright/project/codebase-index.json",
+  ];
+  const artifacts = isMap ? mapArtifacts : allArtifacts;
+  const refreshContract = isRefresh
+    ? [
+        "",
+        "Refresh contract:",
+        "- Compare current files against the recorded fingerprints and the previous map.",
+        "- Update only sections that are stale, incorrect, or missing.",
+        "- Preserve confirmed facts that still match the code.",
+      ].join("\n")
+    : "";
+  const discoveryInstructions = [
+    "Discovery instructions:",
+    "- Use file discovery (find) to identify top-level structure.",
+    "- Use search and LSP when available to locate entrypoints, exported commands, runtime adapters, config defaults, validators, and tests.",
+    "- Read only relevant sections; do not load full packs or unrelated documentation.",
+  ].join("\n");
+  const mappingContract = [
+    "Mapping contract:",
+    "- Preserve existing confirmed facts in the map artifacts unless current code contradicts them.",
+    "- Record uncertainty, assumptions, and gaps in the Open questions section, not as fact.",
+    "- Update codebase-index.json with version 1, the current ISO-8601 generatedAt, and accurate arrays for entrypoints, modules, commands, verification, and risks.",
+    "- Keep codebase-index.json fingerprints as an object keyed by safe relative tracked paths; each value is { \"mtime\": number, \"size\": number, \"checksum\": string }.",
+  ];
+  const retryArtifact = isMap ? ".specwright/project/codebase-map.md" : ".specwright/project/scan.md";
+  return `# Specwright Scan\n\n${renderContextBudget(input.config)}\n\n${focus}\n${artifacts.join("\n")}${refreshContract}\n\n${discoveryInstructions}\n\n${mappingContract.join("\n")}\n\n${renderScanRetryClause({ retryArtifact })}${input.refreshSection ?? ""}${input.validationSection ?? ""}`;
 }

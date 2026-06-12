@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adapterNeedsRegeneration, installOmpAdapter } from "../runtime/omp/install";
-import { writeJsonFile } from "./json";
+import { computeFileFingerprint, readJsonFile, writeJsonFile, type FileFingerprint } from "./json";
 import {
   changeDir,
   changesDir,
@@ -13,8 +13,8 @@ import {
   specwrightDir,
   statePath,
 } from "./paths";
-import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderLifecycleSpawnStrategy, renderSubagentRetryClause } from "./prompts";
-import { renderOmpDiscussPrompt, renderOmpLifecycleSpawnStrategy, renderOmpSubagentRetryClause } from "../runtime/omp/prompts";
+import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderLifecycleSpawnStrategy, renderScanPrompt, renderSubagentRetryClause } from "./prompts";
+import { renderOmpDiscussPrompt, renderOmpLifecycleSpawnStrategy, renderOmpScanPrompt, renderOmpSubagentRetryClause } from "../runtime/omp/prompts";
 import { slugify, nextChangeId } from "./slug";
 import {
   defaultConfig,
@@ -30,7 +30,7 @@ import {
   upsertChange,
 } from "./state";
 import { branchNameForChange, commitStaged, createPullRequest, currentBranch, hasGitIdentity, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, switchToExistingBranch, mergeNoFastForward, writePullRequestBodyFile } from "./git";
-import { renderValidationReport, validateChange, validateSpecwrightConfig, hasNonHeadingContent, hasObservedOutput } from "./validators";
+import { renderValidationReport, validateChange, validateCodebaseIndex, validateSpecwrightConfig, hasNonHeadingContent, hasObservedOutput, isSafeRelativePath } from "./validators";
 import type {
   ChangeKind,
   ChangeState,
@@ -51,6 +51,8 @@ interface ParsedArgs {
   json: boolean;
   force: boolean;
   printPrompt: boolean;
+  map: boolean;
+  refresh: boolean;
   mode?: SpecwrightMode;
   publishMode?: WorkflowPublishMode;
   completeMode?: WorkflowCompleteMode;
@@ -110,9 +112,8 @@ function fail(summary: string, updates: Partial<CommandResult> = {}): CommandRes
     ...(updates.statusText ? { statusText: updates.statusText } : {}),
   };
 }
-
 function parseArgs(argv: string[]): ParsedArgs {
-  const parsed: ParsedArgs = { positionals: [], json: false, force: false, printPrompt: false };
+  const parsed: ParsedArgs = { positionals: [], json: false, force: false, printPrompt: false, map: false, refresh: false };
   const [command, ...rest] = argv;
   if (command !== undefined) {
     parsed.command = command;
@@ -133,6 +134,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       parsed.force = true;
     } else if (arg === "--print-prompt") {
       parsed.printPrompt = true;
+    } else if (arg === "--map") {
+      parsed.map = true;
+    } else if (arg === "--refresh") {
+      parsed.refresh = true;
     } else if (arg === "--mode") {
       const value = rest[++index];
       if (parsed.command === "publish") {
@@ -399,12 +404,109 @@ async function ensureDir(path: string): Promise<void> {
 }
 
 async function writeIfMissing(path: string, content: string, force = false): Promise<"created" | "updated" | "preserved"> {
-  if (!force && await exists(path)) {
+  const existed = await exists(path);
+  if (!force && existed) {
     return "preserved";
   }
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content, "utf8");
-  return force && await exists(path) ? "updated" : "created";
+  return existed ? "updated" : "created";
+}
+async function mapPointerSection(cwd: string): Promise<string> {
+  const project = projectDir(cwd);
+  const mapPath = join(project, "codebase-map.md");
+  const indexPath = join(project, "codebase-index.json");
+  const mapExists = await exists(mapPath);
+  const indexExists = await exists(indexPath);
+  if (!mapExists && !indexExists) return "";
+  const lines = ["", "Optional project context:"];
+  if (mapExists) lines.push("- .specwright/project/codebase-map.md");
+  if (indexExists) lines.push("- .specwright/project/codebase-index.json");
+  return lines.join("\n");
+}
+
+
+interface CodebaseIndex {
+  version: number;
+  generatedAt?: string;
+  entrypoints?: Array<{ path: string }>;
+  modules?: Array<{ path: string; tests?: string[] }>;
+  commands?: unknown[];
+  verification?: unknown[];
+  risks?: unknown[];
+  fingerprints?: Record<string, FileFingerprint>;
+}
+
+function trackedPaths(index: CodebaseIndex): Set<string> {
+  const paths = new Set<string>();
+  const addPath = (value: unknown): void => {
+    if (typeof value === "string" && isSafeRelativePath(value)) {
+      paths.add(value);
+    }
+  };
+  if (Array.isArray(index.entrypoints)) {
+    for (const entry of index.entrypoints) {
+      if (entry !== null && typeof entry === "object") {
+        addPath((entry as Record<string, unknown>).path);
+      }
+    }
+  }
+  if (Array.isArray(index.modules)) {
+    for (const mod of index.modules) {
+      if (mod === null || typeof mod !== "object") {
+        continue;
+      }
+      const record = mod as Record<string, unknown>;
+      addPath(record.path);
+      if (Array.isArray(record.tests)) {
+        for (const testPath of record.tests) {
+          addPath(testPath);
+        }
+      }
+    }
+  }
+  return paths;
+}
+
+function isFileFingerprint(value: unknown): value is FileFingerprint {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Number.isFinite((value as Record<string, unknown>).mtime)
+    && Number.isFinite((value as Record<string, unknown>).size)
+    && typeof (value as Record<string, unknown>).checksum === "string";
+}
+
+async function compareRefreshFingerprints(
+  cwd: string,
+  index: CodebaseIndex,
+): Promise<{ stale: string[]; current: Record<string, FileFingerprint> }> {
+  const paths = trackedPaths(index);
+  const stored = index.fingerprints ?? {};
+  const current: Record<string, FileFingerprint> = {};
+  const stale: string[] = [];
+  for (const rel of Array.from(paths).sort((a, b) => a.localeCompare(b))) {
+    const absolute = resolve(cwd, rel);
+    const computed = await computeFileFingerprint(absolute);
+    const previous = stored[rel];
+    if (computed === undefined) {
+      current[rel] = { mtime: 0, size: 0, checksum: "" };
+      if (previous !== undefined) {
+        stale.push(`${rel} (missing)`);
+      }
+    } else {
+      current[rel] = computed;
+      if (
+        !isFileFingerprint(previous) ||
+        previous.mtime !== computed.mtime ||
+        previous.size !== computed.size ||
+        previous.checksum !== computed.checksum
+      ) {
+        stale.push(`${rel} (changed)`);
+      }
+    }
+  }
+  return { stale, current };
 }
 
 function packageRoot(): string {
@@ -493,13 +595,96 @@ async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<Com
   });
 }
 
-async function commandScan(ctx: CommandContext): Promise<CommandResult> {
+async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   await ensureDir(projectDir(ctx.cwd));
-  const scanPath = join(projectDir(ctx.cwd), "scan.md");
-  await writeIfMissing(scanPath, "# Project Scan\n\n## Files inspected\n\n## Patterns found\n\n## Constraints\n\n## Open questions\n");
+  const project = projectDir(ctx.cwd);
+  const created: string[] = [];
+  const updated: string[] = [];
+
+  const scanArtifacts = [
+    { path: join(project, "scan.md"), content: "# Project Scan\n\n## Files inspected\n\n## Patterns found\n\n## Constraints\n\n## Open questions\n" },
+    { path: join(project, "tech-stack.md"), content: "# tech stack\n\n" },
+    { path: join(project, "architecture.md"), content: "# architecture\n\n" },
+  ];
+  const mapArtifacts = [
+    {
+      path: join(project, "codebase-map.md"),
+      content: `# Codebase Map\n\n## Entry points\n\n## Core modules\n\n## Runtime adapters\n\n## Data and state artifacts\n\n## Command surface\n\n## Test surface\n\n## Build and verification commands\n\n## Conventions\n\n## Known risks and gaps\n\n## Open questions\n`,
+    },
+  ];
+  const artifactsToEnsure = args.map ? mapArtifacts : [...scanArtifacts, ...mapArtifacts];
+  for (const { path, content } of artifactsToEnsure) {
+    const result = await writeIfMissing(path, content, args.force);
+    if (result === "created") {
+      created.push(path);
+    } else if (result === "updated") {
+      updated.push(path);
+    }
+  }
+
+  const indexPath = join(project, "codebase-index.json");
+  const defaultIndex: CodebaseIndex = {
+    version: 1,
+    generatedAt: ctx.now().toISOString(),
+    entrypoints: [],
+    modules: [],
+    commands: [],
+    verification: [],
+    risks: [],
+    fingerprints: {},
+  };
+  const indexExists = await exists(indexPath);
+  if (args.force || !indexExists) {
+    await writeJsonFile(indexPath, defaultIndex);
+    if (args.force && indexExists) {
+      updated.push(indexPath);
+    } else {
+      created.push(indexPath);
+    }
+  }
+
+  const index = (await readJsonFile<CodebaseIndex>(indexPath)) ?? defaultIndex;
+
   const config = await loadConfig(ctx.cwd);
-  const prompt = `# Specwright Scan\n\n${renderContextBudget(config)}\n\nInspect the repository using find, search/OMP grep, read, and lsp when available. Update only these files:\n- .specwright/project/scan.md\n- .specwright/project/tech-stack.md\n- .specwright/project/architecture.md\n\nDo not load full packs or unrelated docs.\n\n${renderSubagentRetryClause()}`;
-  return ok("Prepared project scan prompt.", { prompt, filesCreated: [scanPath] });
+  const validationReport = await validateCodebaseIndex(ctx.cwd, index);
+
+  let refreshSection = "";
+  let refreshResult: { skipped: boolean; staleFiles: string[]; currentFingerprints: Record<string, FileFingerprint> } | undefined;
+  if (args.refresh && !validationReport.ok) {
+    refreshSection = "\n\n## Refresh status\n\nRefresh fingerprint comparison skipped because codebase-index.json has validation errors. Fix the Codebase index validation issues, then rerun `specwright scan --refresh`.";
+    refreshResult = { skipped: true, staleFiles: [], currentFingerprints: {} };
+  } else if (args.refresh) {
+    const { stale, current } = await compareRefreshFingerprints(ctx.cwd, index);
+    refreshResult = { skipped: false, staleFiles: stale, currentFingerprints: current };
+    if (stale.length === 0) {
+      refreshSection = "\n\n## Refresh status\n\nNo tracked files are stale; all recorded fingerprints match the current working tree.";
+    } else {
+      refreshSection = `\n\n## Stale files\n\nThe following tracked files changed or are missing since the last refresh:\n${stale.map((line) => `- ${line}`).join("\n")}\n\n## Current fingerprints\n\nAfter updating the stale map sections, update .specwright/project/codebase-index.json fingerprints to this exact JSON object:\n\n\`\`\`json\n${JSON.stringify(current, null, 2)}\n\`\`\``;
+    }
+  }
+
+  const validationSection = validationReport.issues.length > 0
+    ? "\n\n## Codebase index validation\n\n" + validationReport.issues.map((issue) => `- ${issue.level.toUpperCase()} ${issue.code}: ${issue.message}`).join("\n")
+    : "";
+
+  const prompt = ctx.runtime === "omp"
+    ? renderOmpScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection })
+    : renderScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection });
+  const humanSummary = "Prepared project scan prompt.";
+  const scanSummary = args.json
+    ? JSON.stringify({
+        summary: humanSummary,
+        map: args.map,
+        refresh: args.refresh,
+        filesCreated: created,
+        filesUpdated: updated,
+        validation: validationReport,
+        ...(args.refresh ? { refreshResult } : {}),
+        prompt,
+      }, null, 2)
+    : humanSummary;
+  return ok(scanSummary, { prompt, filesCreated: created, filesUpdated: updated });
+
 }
 
 async function expandRequestFileReference(cwd: string, token: string): Promise<string> {
@@ -744,6 +929,7 @@ async function commandResearch(ctx: CommandContext, args: ParsedArgs): Promise<C
   const lifecycleStrategy = ctx.runtime === "omp"
     ? renderOmpLifecycleSpawnStrategy({ step: "research", config })
     : renderLifecycleSpawnStrategy({ step: "research", config });
+  const mapPointer = await mapPointerSection(ctx.cwd);
   const subagentRetry = ctx.runtime === "omp"
     ? renderOmpSubagentRetryClause()
     : renderSubagentRetryClause();
@@ -761,7 +947,7 @@ Read first:
 - .specwright/changes/${change.id}-${change.slug}/research.md
 - .specwright/changes/${change.id}-${change.slug}/sources.md
 - .specwright/changes/${change.id}-${change.slug}/evidence.md
-- .specwright/changes/${change.id}-${change.slug}/options.md
+- .specwright/changes/${change.id}-${change.slug}/options.md${mapPointer}
 
 Research rules:
 - Start with local repository evidence: find, OMP grep/search, read, and lsp when available.
@@ -793,6 +979,7 @@ async function commandPlan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   const lifecycleStrategy = ctx.runtime === "omp"
     ? renderOmpLifecycleSpawnStrategy({ step: "plan", config })
     : renderLifecycleSpawnStrategy({ step: "plan", config });
+  const mapPointer = await mapPointerSection(ctx.cwd);
   const prompt = `# Specwright Plan: ${updated.id}-${updated.slug}
 
 ${renderContextBudget(config)}
@@ -805,8 +992,7 @@ Read first:
 - .specwright/changes/${updated.id}-${updated.slug}/research.md
 - .specwright/changes/${updated.id}-${updated.slug}/evidence.md
 - .specwright/changes/${updated.id}-${updated.slug}/plan.md
-- .specwright/changes/${updated.id}-${updated.slug}/tasks.md
-
+- .specwright/changes/${updated.id}-${updated.slug}/tasks.md${mapPointer}
 Produce a decision-complete plan.md and a CLI-parseable tasks.md.
 
 tasks.md contract required by the Specwright CLI:
@@ -975,7 +1161,8 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const lifecycleStrategy = ctx.runtime === "omp"
     ? renderOmpLifecycleSpawnStrategy({ step: "execute", config })
     : renderLifecycleSpawnStrategy({ step: "execute", config });
-  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\n${lifecycleStrategy}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
+  const mapPointer = await mapPointerSection(ctx.cwd);
+  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\n${lifecycleStrategy}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md${mapPointer}\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
   return ok(`Prepared execute prompt for ${task.id}.`, { prompt });
 }
 
@@ -1043,7 +1230,8 @@ async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const tasks = artifacts[2] ?? "";
   const verify = artifacts[3] ?? "";
   const taskLines = tasks.split(/\r?\n/).filter((line) => args.task ? line.includes(args.task) : /^\s*- \[ ] T\d{3}:/.test(line)).join("\n");
-  const handoff = `# Agent Handoff: ${change.id}\n\n## Goal\n\n${intent}\n\n## Read first\n\n- .specwright/changes/${change.id}-${change.slug}/intent.md\n- .specwright/changes/${change.id}-${change.slug}/evidence.md\n- .specwright/changes/${change.id}-${change.slug}/tasks.md\n- .specwright/changes/${change.id}-${change.slug}/verify.md\n\n## Current state\n\nstatus=${change.status}; step=${change.step}\n\n## Constraints\n\nSee intent.md and evidence.md.\n\n## Acceptance\n\n${verify}\n\n## Next task\n\n${taskLines || "No incomplete tasks."}\n\n## Evidence\n\n${evidence}\n`;
+  const mapPointer = !args.task ? await mapPointerSection(ctx.cwd) : "";
+  const handoff = `# Agent Handoff: ${change.id}\n\n## Goal\n\n${intent}\n\n## Read first\n\n- .specwright/changes/${change.id}-${change.slug}/intent.md\n- .specwright/changes/${change.id}-${change.slug}/evidence.md\n- .specwright/changes/${change.id}-${change.slug}/tasks.md\n- .specwright/changes/${change.id}-${change.slug}/verify.md${mapPointer}\n\n## Current state\n\nstatus=${change.status}; step=${change.step}\n\n## Constraints\n\nSee intent.md and evidence.md.\n\n## Acceptance\n\n${verify}\n\n## Next task\n\n${taskLines || "No incomplete tasks."}\n\n## Evidence\n\n${evidence}\n`;
   const handoffPath = join(dir, "handoff.md");
   await writeFile(handoffPath, handoff, "utf8");
   const report = await validateChange(ctx.cwd, change);
@@ -1194,17 +1382,21 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
     return fail("Complete requires a clean worktree. Commit or stash local changes first.");
   }
 
-  // Lifecycle artifact and evidence guards.
-  const syncResult = await syncChangeTasksFromFileIfPresent(ctx.cwd, change, ctx.now());
-  if (syncResult.issues.length > 0) {
-    const messages = syncResult.issues.map((issue) => issue.message).join("; ");
-    return fail(`Complete cannot reconcile tasks.md: ${messages}.`);
-  }
-  change = syncResult.change;
-
-  const validationReport = await validateChange(ctx.cwd, change);
-  if (!validationReport.ok) {
-    return fail("Complete requires passing validation. Run specwright verify to see issues.");
+  // Lifecycle artifact and evidence guards. Sync tasks in memory only; complete
+  // must not dirty state.json before every guard has passed.
+  const tasksPath = join(changeDir(ctx.cwd, change.id, change.slug), "tasks.md");
+  try {
+    const tasksMarkdown = await readFile(tasksPath, "utf8");
+    const syncResult = syncChangeTasksFromMarkdown(change, tasksMarkdown, ctx.now());
+    if (syncResult.issues.length > 0) {
+      const messages = syncResult.issues.map((issue) => issue.message).join("; ");
+      return fail(`Complete cannot reconcile tasks.md: ${messages}.`);
+    }
+    change = syncResult.change;
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
   }
 
   const { total, done } = taskProgress(change);
@@ -1243,6 +1435,11 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
   }
   if (!handoffContent || !hasNonHeadingContent(handoffContent)) {
     return fail("Complete requires a non-empty handoff.md.");
+  }
+
+  const validationReport = await validateChange(ctx.cwd, change);
+  if (!validationReport.ok) {
+    return fail("Complete requires passing validation. Run specwright verify to see issues.");
   }
   const remote = config.workflow.remote;
 
@@ -1321,12 +1518,11 @@ export async function runSpecwrightCommand(ctx: CommandContext, argv: string[]):
   if (args.unknown) {
     return fail(`Unknown option: ${args.unknown}`);
   }
-
   try {
     switch (args.command) {
       case "init": return await commandInit(ctx, args);
       case "status": return await commandStatus(ctx, args);
-      case "scan": return await commandScan(ctx);
+      case "scan": return await commandScan(ctx, args);
       case "new": return await commandNew(ctx, args);
       case "discuss": return await commandDiscuss(ctx, args);
       case "research": return await commandResearch(ctx, args);
@@ -1348,5 +1544,5 @@ export async function runSpecwrightCommand(ctx: CommandContext, argv: string[]):
   }
 }
 export function renderHelp(): string {
-  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright complete [<change>] [--mode none|push|pr|merge]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
+  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--map] [--refresh] [--force] [--json] [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright complete [<change>] [--mode none|push|pr|merge]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
 }

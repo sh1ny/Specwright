@@ -1,10 +1,10 @@
 import { test, expect } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSpecwrightCommand } from "../src/core/commands";
 import { defaultConfig, findCurrentChange, upsertChange } from "../src/core/state";
-import { hasObservedOutput, validateChange, validateSpecwrightConfig } from "../src/core/validators";
+import { hasObservedOutput, validateChange, validateCodebaseIndex, validateSpecwrightConfig } from "../src/core/validators";
 
 test("validators reject duplicate task IDs", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-validators-"));
@@ -150,4 +150,183 @@ test("hasObservedOutput requires content under the observed output heading", () 
   expect(hasObservedOutput("# Verification\n\n## Observed output\n\n")).toBe(false);
   expect(hasObservedOutput("# Verification\n\n## Observed output\n\n```\n$ bun test\nPASS\n```\n")).toBe(true);
   expect(hasObservedOutput("# Verification\n\nObserved command output: bun test passed.\n")).toBe(true);
+});
+
+test("validateCodebaseIndex accepts a valid version-1 index", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-valid-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(join(cwd, "src", "entry.ts"), "export default 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "module.ts"), "export const m = 1;\n", "utf8");
+  await writeFile(join(cwd, "test", "module.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    entrypoints: [{ path: "src/entry.ts", kind: "cli" }],
+    modules: [{ path: "src/module.ts", kind: "core", tests: ["test/module.test.ts"] }],
+    commands: [{ name: "scan" }],
+    verification: [{ command: "bun test" }],
+    risks: [{ area: "runtime" }],
+  });
+
+  expect(report.ok).toBe(true);
+  expect(report.issues).toEqual([]);
+  await rm(cwd, { recursive: true, force: true });
+});
+
+test("validateCodebaseIndex reports invalid version and shape errors", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-shape-"));
+  const report = await validateCodebaseIndex(cwd, {
+    version: 2,
+    modules: "not-an-array",
+  });
+
+  expect(report.ok).toBe(false);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW101" }));
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW103", message: expect.stringContaining("modules") }));
+  await rm(cwd, { recursive: true, force: true });
+});
+
+test("validateCodebaseIndex reports unsafe and absolute paths", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-paths-"));
+  await mkdir(join(cwd, "safe"), { recursive: true });
+  await writeFile(join(cwd, "safe", "test.ts"), "", "utf8");
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [],
+    modules: [{ path: "/absolute/module.ts", tests: ["../escape.test.ts", "safe/test.ts"] }, { path: "C:\\Users\\me\\secret.ts" }, { path: "C:/Users/me/secret.ts" }],
+    commands: [],
+    verification: [],
+    risks: [],
+  });
+
+  expect(report.ok).toBe(false);
+  const messages = report.issues.map((issue) => issue.message);
+  expect(messages).toContainEqual(expect.stringContaining("/absolute/module.ts"));
+  expect(messages).toContainEqual(expect.stringContaining("../escape.test.ts"));
+  expect(messages).toContainEqual(expect.stringContaining("C:\\Users\\me\\secret.ts"));
+  expect(messages).toContainEqual(expect.stringContaining("C:/Users/me/secret.ts"));
+  expect(messages).not.toContainEqual(expect.stringContaining("safe/test.ts"));
+  await rm(cwd, { recursive: true, force: true });
+});
+
+test("validateCodebaseIndex reports missing required fields", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-fields-"));
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [{}],
+    modules: [{ path: "src/module.ts" }],
+    commands: [{}],
+    verification: [{}],
+    risks: [{}],
+  });
+
+  expect(report.ok).toBe(false);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW104", message: expect.stringContaining("entrypoints[0]") }));
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW104", message: expect.stringContaining("commands[0]") }));
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW104", message: expect.stringContaining("verification[0]") }));
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW104", message: expect.stringContaining("risks[0]") }));
+  await rm(cwd, { recursive: true, force: true });
+});
+
+test("validateCodebaseIndex warns when listed paths do not exist", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-missing-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "exists.ts"), "", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [{ path: "src/missing.ts" }],
+    modules: [{ path: "src/exists.ts", tests: ["test/missing.test.ts"] }],
+    commands: [],
+    verification: [],
+    risks: [],
+  });
+
+  expect(report.ok).toBe(true);
+  const warnings = report.issues.filter((issue) => issue.level === "warning");
+  expect(warnings).toContainEqual(expect.objectContaining({ code: "SW106", message: expect.stringContaining("src/missing.ts") }));
+  expect(warnings).toContainEqual(expect.objectContaining({ code: "SW106", message: expect.stringContaining("test/missing.test.ts") }));
+  await rm(cwd, { recursive: true, force: true });
+});
+
+test("validateCodebaseIndex warns when listed path is a directory", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-directory-"));
+  await mkdir(join(cwd, "src", "dir"), { recursive: true });
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [],
+    modules: [{ path: "src/dir" }],
+    commands: [],
+    verification: [],
+    risks: [],
+  });
+
+  expect(report.ok).toBe(true);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "warning", code: "SW106", message: expect.stringContaining("non-file path: src/dir") }));
+  await rm(cwd, { recursive: true, force: true });
+});
+
+test("validateCodebaseIndex treats ENOTDIR as a missing indexed path", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-enotdir-"));
+  await writeFile(join(cwd, "src"), "", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [{ path: "src/missing.ts" }],
+    modules: [],
+    commands: [],
+    verification: [],
+    risks: [],
+  });
+
+  expect(report.ok).toBe(true);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "warning", code: "SW106", message: expect.stringContaining("src/missing.ts") }));
+  await rm(cwd, { recursive: true, force: true });
+});
+
+test("validateCodebaseIndex rejects control-character paths without statting them", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-control-path-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "module.ts"), "", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [{ path: "src/\u0000secret.ts" }],
+    modules: [{ path: "src/module.ts", tests: ["test/\u0000module.test.ts"] }],
+    commands: [],
+    verification: [],
+    risks: [],
+  });
+
+  expect(report.ok).toBe(false);
+  expect(report.issues.filter((issue) => issue.level === "error" && issue.code === "SW105").length).toBeGreaterThanOrEqual(2);
+  await rm(cwd, { recursive: true, force: true });
+});
+
+test("validateCodebaseIndex rejects malformed fingerprints", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-fingerprints-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "module.ts"), "", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [],
+    modules: [{ path: "src/module.ts" }],
+    commands: [],
+    verification: [],
+    risks: [],
+    fingerprints: {
+      "src/module.ts": null,
+      "../escape.ts": { mtime: 1, size: 1, checksum: "x" },
+      "src/bad.ts": { mtime: "now", size: 1, checksum: "x" },
+    },
+  });
+
+  expect(report.ok).toBe(false);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW109" }));
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW105", message: expect.stringContaining("../escape.ts") }));
+  await rm(cwd, { recursive: true, force: true });
 });
