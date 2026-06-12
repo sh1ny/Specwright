@@ -53,8 +53,9 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
-function isSafeRelativePath(value: string): boolean {
+export function isSafeRelativePath(value: string): boolean {
   if (value === "") return false;
+  if (/[\x00-\x1f\x7f]/.test(value)) return false;
   if (value.startsWith("/") || value.startsWith("\\")) return false;
   for (const segment of value.split(/[/\\]/)) {
     if (segment === "..") return false;
@@ -174,7 +175,7 @@ export async function validateCodebaseIndex(
     try {
       await stat(join(cwd, path));
     } catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      if (error && typeof error === "object" && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
         issues.push({ level: "warning", code: "SW106", message: `${context} references missing file: ${path}.` });
       } else {
         throw error;

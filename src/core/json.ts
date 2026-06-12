@@ -15,7 +15,7 @@ export async function computeFileFingerprint(path: string): Promise<FileFingerpr
     const checksum = createHash("sha256").update(content).digest("hex");
     return { mtime: stats.mtimeMs, size: stats.size, checksum };
   } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+    if (error && typeof error === "object" && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
       return undefined;
     }
     throw error;

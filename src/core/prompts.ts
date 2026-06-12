@@ -32,6 +32,15 @@ export function renderSubagentRetryClause(): string {
   return "Subagent fallback:\n- Prefer lightweight/read-only scouts for mapping work.\n- If a scout/explore agent fails, cancels, returns null, or returns an unusable report, retry the same assignment once with the default task agent using the same read-only/no-project-wide-command constraints.\n- Record the retry in evidence.md under \"Research attempts\".\n- Do not declare blocked until the retry also fails or the missing fact is not available through tools.";
 }
 
+export function renderScanRetryClause(): string {
+  return [
+    "Subagent fallback:",
+    "- If delegated read-only mapping work fails, cancels, returns null, or returns an unusable report, retry the same assignment once with the default task agent using the same bounded/no-project-wide-command constraints.",
+    "- Record the retry in .specwright/project/scan.md under Open questions.",
+    "- Do not declare blocked until the retry also fails or the missing fact is not available through tools.",
+  ].join("\n");
+}
+
 export function renderContextBudget(config: PromptInput["config"]): string {
   return `Context budget:\n- max_context_files: ${config.defaults.maxContextFiles}\n- max_output_words: ${config.defaults.maxOutputWords}\n- Do not load full packs or unrelated docs.\n- Summarize sources; cite paths and URLs.`;
 }
@@ -138,5 +147,5 @@ export function renderScanPrompt(input: ScanPromptInput): string {
     "- Record uncertainty, assumptions, and gaps in the Open questions section, not as fact.",
     "- Update codebase-index.json with version 1, the current ISO-8601 generatedAt, and accurate arrays for entrypoints, modules, commands, verification, and risks.",
   ];
-  return `# Specwright Scan\n\n${renderContextBudget(input.config)}\n\n${focus}\n${artifacts.join("\n")}${refreshContract}\n\n${discoveryInstructions}\n\n${mappingContract}\n\n${renderSubagentRetryClause()}${input.refreshSection ?? ""}${input.validationSection ?? ""}`;
+  return `# Specwright Scan\n\n${renderContextBudget(input.config)}\n\n${focus}\n${artifacts.join("\n")}${refreshContract}\n\n${discoveryInstructions}\n\n${mappingContract.join("\n")}\n\n${renderScanRetryClause()}${input.refreshSection ?? ""}${input.validationSection ?? ""}`;
 }

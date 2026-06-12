@@ -2670,6 +2670,41 @@ test("scan --refresh reports deterministic stale warnings for changed and missin
   expect(refreshed.fingerprints["src/core/new.ts"]).toBeDefined();
 });
 
+test("scan --refresh skips unsafe index paths before fingerprinting", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-unsafe-"));
+  const ctx = testContext(cwd);
+  await writeFile(join(cwd, "..", "escape.ts"), "export const escape = true;\n", "utf8");
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  await writeFile(
+    indexPath,
+    JSON.stringify(
+      {
+        version: 1,
+        entrypoints: [{ path: "../escape.ts" }],
+        modules: [],
+        commands: [],
+        verification: [],
+        risks: [],
+        fingerprints: {},
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("## Codebase index validation");
+  expect(result.prompt).toContain("not a safe relative path");
+
+  const refreshed = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(refreshed.fingerprints["../escape.ts"]).toBeUndefined();
+});
+
 test("scan --map prompt focuses only on map artifacts", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-map-prompt-"));
   const ctx = testContext(cwd);

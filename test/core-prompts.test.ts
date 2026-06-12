@@ -372,6 +372,8 @@ test("renderScanPrompt default mode lists all project intelligence files and bou
   expect(prompt).not.toContain("OMP");
   expect(prompt).not.toContain("scout");
   expect(prompt).not.toContain("Refresh contract");
+  expect(prompt).toContain("Mapping contract:\n- Preserve existing confirmed facts");
+  expect(prompt).not.toContain("Mapping contract:,- Preserve");
 });
 
 test("renderScanPrompt map mode focuses only on map artifacts", () => {
@@ -413,6 +415,8 @@ test("renderScanPrompt is runtime-neutral and avoids OMP-specific scout wording"
   expect(prompt).not.toContain("OMP");
   expect(prompt).not.toContain("Oh My Pi");
   expect(prompt).not.toContain("task tool");
+  expect(prompt).not.toContain("evidence.md");
+  expect(prompt).toContain(".specwright/project/scan.md");
   expect(prompt).toContain("Subagent fallback");
   expect(prompt).toContain("retry the same assignment once");
 });

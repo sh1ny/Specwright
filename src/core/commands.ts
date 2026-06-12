@@ -30,7 +30,7 @@ import {
   upsertChange,
 } from "./state";
 import { branchNameForChange, commitStaged, createPullRequest, currentBranch, hasGitIdentity, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, switchToExistingBranch, mergeNoFastForward, writePullRequestBodyFile } from "./git";
-import { renderValidationReport, validateChange, validateCodebaseIndex, validateSpecwrightConfig, hasNonHeadingContent, hasObservedOutput } from "./validators";
+import { renderValidationReport, validateChange, validateCodebaseIndex, validateSpecwrightConfig, hasNonHeadingContent, hasObservedOutput, isSafeRelativePath } from "./validators";
 import type {
   ChangeKind,
   ChangeState,
@@ -438,13 +438,18 @@ interface CodebaseIndex {
 
 async function trackedPaths(index: CodebaseIndex): Promise<Set<string>> {
   const paths = new Set<string>();
+  const addPath = (value: unknown): void => {
+    if (typeof value === "string" && isSafeRelativePath(value)) {
+      paths.add(value);
+    }
+  };
   for (const entry of index.entrypoints ?? []) {
-    if (entry.path) paths.add(entry.path);
+    addPath(entry.path);
   }
   for (const mod of index.modules ?? []) {
-    if (mod.path) paths.add(mod.path);
+    addPath(mod.path);
     for (const testPath of mod.tests ?? []) {
-      if (testPath) paths.add(testPath);
+      addPath(testPath);
     }
   }
   return paths;
@@ -564,7 +569,9 @@ async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<Com
     }, null, 2));
   }
   const taskSuffix = progress.total > 0 ? ` · tasks=${progress.done}/${progress.total}` : "";
-  return ok(`Specwright · ${config.project.name} · current=${currentChange ?? "none"} · changes=${Object.keys(state.changes).length}${taskSuffix}`);
+  return ok(`Specwright · ${config.project.name} · current=${currentChange ?? "none"} · changes=${Object.keys(state.changes).length}${taskSuffix}`, {
+    statusText: `Specwright · ${currentChange ?? "none"} · ${currentStatus ?? "idle"}${taskSuffix}`,
+  });
 }
 
 async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {

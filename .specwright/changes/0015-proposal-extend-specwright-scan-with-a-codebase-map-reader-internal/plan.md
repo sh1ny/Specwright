@@ -8,7 +8,7 @@ Extend `specwright scan` into a bounded project-intelligence bootstrap. The comm
 
 Add scan-only `--map`, `--refresh`, and existing `--json` behavior to the command surface. `--map` returns a focused map prompt, `--refresh` compares deterministic fingerprints before prompting, and `--json` serializes the prepared command result rather than dumping only the index. This uses existing `CommandResult` fields and parser/help seams cited in evidence (`src/core/types.ts:149-157`, `src/core/commands.ts:48-64`, `src/core/commands.ts:121-204`, `src/core/commands.ts:1350-1352`).
 
-Keep the map file-based and small: `codebase-map.md` is the human source for sections named in intent, and `codebase-index.json` is schema version 1 with `generatedAt`, `sources` fingerprints, `entrypoints`, `modules`, `commands`, `verification`, and `risks`. Store only relative paths and concise summaries. Explicitly exclude query commands, graph databases, Graphify, `.planning/intel`, mapper-agent orchestration, `.slim/codemap.json`, `codemap.md`, and `skill://codemap` as supported by evidence.
+Keep the map file-based and small: `codebase-map.md` is the human source for sections named in intent, and `codebase-index.json` is schema version 1 with `generatedAt`, `fingerprints` keyed by relative tracked path, `entrypoints`, `modules`, `commands`, `verification`, and `risks`. Store only relative paths and concise summaries. Explicitly exclude query commands, graph databases, Graphify, `.planning/intel`, mapper-agent orchestration, `.slim/codemap.json`, `codemap.md`, and `skill://codemap` as supported by evidence.
 
 ## Implementation plan
 

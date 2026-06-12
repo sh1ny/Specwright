@@ -246,3 +246,40 @@ test("validateCodebaseIndex warns when listed paths do not exist", async () => {
   expect(warnings).toContainEqual(expect.objectContaining({ code: "SW106", message: expect.stringContaining("test/missing.test.ts") }));
   await rm(cwd, { recursive: true, force: true });
 });
+
+test("validateCodebaseIndex treats ENOTDIR as a missing indexed path", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-enotdir-"));
+  await writeFile(join(cwd, "src"), "", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [{ path: "src/missing.ts" }],
+    modules: [],
+    commands: [],
+    verification: [],
+    risks: [],
+  });
+
+  expect(report.ok).toBe(true);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "warning", code: "SW106", message: expect.stringContaining("src/missing.ts") }));
+  await rm(cwd, { recursive: true, force: true });
+});
+
+test("validateCodebaseIndex rejects control-character paths without statting them", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-control-path-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "module.ts"), "", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [{ path: "src/\u0000secret.ts" }],
+    modules: [{ path: "src/module.ts", tests: ["test/\u0000module.test.ts"] }],
+    commands: [],
+    verification: [],
+    risks: [],
+  });
+
+  expect(report.ok).toBe(false);
+  expect(report.issues.filter((issue) => issue.level === "error" && issue.code === "SW105").length).toBeGreaterThanOrEqual(2);
+  await rm(cwd, { recursive: true, force: true });
+});
