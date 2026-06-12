@@ -230,3 +230,9 @@ Do not blindly add the full map to every prompt. The map exists to reduce contex
 3. Staleness detection based on file mtimes or checksums.
 4. Workstream-scoped maps once Specwright supports workstreams.
 5. Runtime-specific map sections for non-OMP adapters.
+
+### Discuss-settled intent
+
+- Extend `specwright scan` into a lightweight project-intelligence entrypoint that prepares both human-readable scan notes and a durable codebase map.
+- Keep the feature file-based and reviewable: project notes remain Markdown, machine-readable intelligence lives in `codebase-index.json`, and lifecycle prompts reference map artifacts by path instead of loading them wholesale.
+- Add scan-specific modes for focused mapping, deterministic refresh/staleness handling, and JSON command-result output without creating a graph database or embedding store.
