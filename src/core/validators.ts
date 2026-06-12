@@ -224,6 +224,7 @@ export async function validateCodebaseIndex(
         } else {
           for (let j = 0; j < record.tests.length; j++) {
             const testPath = record.tests[j];
+            if (typeof testPath !== "string") continue;
             const testContext = `${context}.tests[${j}]`;
             if (validatePath(testPath, testContext)) {
               testPaths.push(testPath);
