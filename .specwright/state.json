@@ -613,8 +613,58 @@
           "updatedAt": "2026-06-11T09:09:43.483Z"
         }
       }
+    },
+    "0014": {
+      "id": "0014",
+      "slug": "add-an-explicit-specwright-complete-command-that-runs-final-completion-guards",
+      "title": "Add an explicit specwright complete command that runs final completion guards",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "done",
+      "step": "handoff",
+      "createdAt": "2026-06-11T20:10:27.254Z",
+      "updatedAt": "2026-06-12T15:56:03.702Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Add complete command parsing",
+          "status": "done",
+          "updatedAt": "2026-06-11T22:49:22.806Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Add completion git helpers",
+          "status": "done",
+          "updatedAt": "2026-06-11T22:49:22.806Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Add git and change preflight guards",
+          "status": "done",
+          "updatedAt": "2026-06-11T22:49:22.806Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Add lifecycle artifact and evidence guards",
+          "status": "done",
+          "updatedAt": "2026-06-11T22:49:22.806Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Implement complete mode actions",
+          "status": "done",
+          "updatedAt": "2026-06-11T22:49:22.806Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Document complete and protect publish behavior",
+          "status": "done",
+          "updatedAt": "2026-06-11T22:49:22.806Z"
+        }
+      }
     }
   },
-  "updatedAt": "2026-06-11T19:23:20.763Z",
-  "currentChange": "0013"
+  "updatedAt": "2026-06-12T15:56:03.702Z",
+  "currentChange": "0014"
 }

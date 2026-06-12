@@ -29,8 +29,8 @@ import {
   updateCachedChange,
   upsertChange,
 } from "./state";
-import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, writePullRequestBodyFile } from "./git";
-import { renderValidationReport, validateChange, validateSpecwrightConfig } from "./validators";
+import { branchNameForChange, commitStaged, createPullRequest, currentBranch, hasGitIdentity, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, switchToExistingBranch, mergeNoFastForward, writePullRequestBodyFile } from "./git";
+import { renderValidationReport, validateChange, validateSpecwrightConfig, hasNonHeadingContent, hasObservedOutput } from "./validators";
 import type {
   ChangeKind,
   ChangeState,
@@ -41,6 +41,7 @@ import type {
   SpecwrightAgentName,
   SpecwrightMode,
   WorkflowPublishMode,
+  WorkflowCompleteMode,
   TaskState,
 } from "./types";
 
@@ -52,12 +53,13 @@ interface ParsedArgs {
   printPrompt: boolean;
   mode?: SpecwrightMode;
   publishMode?: WorkflowPublishMode;
+  completeMode?: WorkflowCompleteMode;
   pack?: string;
-  online?: OnlineResearchMode;
-  task?: string;
   phase?: string;
   files?: string[];
   summary?: string;
+  online?: OnlineResearchMode;
+  task?: string;
   unknown?: string;
 }
 
@@ -65,9 +67,10 @@ const CHANGE_KINDS = new Set<ChangeKind>(["feature", "bugfix", "refactor", "rese
 const MODES = new Set<SpecwrightMode>(["lite", "full"]);
 const ONLINE_MODES = new Set<OnlineResearchMode>(["never", "ask", "auto", "require"]);
 const PUBLISH_MODES = new Set<WorkflowPublishMode>(["none", "push", "pr"]);
+const COMPLETE_MODES = new Set<WorkflowCompleteMode>(["none", "push", "pr", "merge"]);
 const CHECKPOINT_PHASES = new Set(["discuss", "research", "plan", "tasks", "verify", "handoff"]);
-const MAX_REQUEST_FILE_BYTES = 64 * 1024;
 const REQUEST_FILE_GLOB_PATTERN = /[*?\[\]{}]/;
+const MAX_REQUEST_FILE_BYTES = 64 * 1024;
 const TEMPLATE_FILES = [
   "change.md",
   "discussion.md",
@@ -116,7 +119,14 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   for (let index = 0; index < rest.length; index += 1) {
-    const arg = rest[index];
+    let arg = rest[index];
+    if (arg?.startsWith("--") && arg.includes("=")) {
+      const equalIndex = arg.indexOf("=");
+      const key = arg.slice(0, equalIndex);
+      const value = arg.slice(equalIndex + 1);
+      arg = key;
+      rest.splice(index + 1, 0, value);
+    }
     if (arg === "--json") {
       parsed.json = true;
     } else if (arg === "--force") {
@@ -130,6 +140,12 @@ function parseArgs(argv: string[]): ParsedArgs {
           parsed.unknown = arg;
         } else {
           parsed.publishMode = value as WorkflowPublishMode;
+        }
+      } else if (parsed.command === "complete") {
+        if (value === undefined || value.startsWith("--") || !COMPLETE_MODES.has(value as WorkflowCompleteMode)) {
+          parsed.unknown = arg;
+        } else {
+          parsed.completeMode = value as WorkflowCompleteMode;
         }
       } else if (value === undefined || value.startsWith("--") || !MODES.has(value as SpecwrightMode)) {
         parsed.unknown = arg;
@@ -500,8 +516,14 @@ async function expandRequestFileReference(cwd: string, token: string): Promise<s
   if (REQUEST_FILE_GLOB_PATTERN.test(fileReference)) {
     throw new Error(`Glob patterns are not supported in @file references: ${token}. Pass one explicit file path.`);
   }
+  if (fileReference.includes("..") || fileReference.includes("//") || fileReference.startsWith("/") || fileReference.startsWith("\\")) {
+    throw new Error(`Invalid @file reference: ${token}. Path traversal and absolute paths are not allowed.`);
+  }
 
   const filePath = resolve(cwd, fileReference);
+  if (!filePath.startsWith(resolve(cwd))) {
+    throw new Error(`Invalid @file reference: ${token}. File must be inside the project directory.`);
+  }
   let fileStat;
   try {
     fileStat = await stat(filePath);
@@ -645,8 +667,12 @@ async function commandNew(ctx: CommandContext, args: ParsedArgs): Promise<Comman
 
   const updated = [statePath(ctx.cwd)];
   if (inGitWorktree && config.workflow.autoCommit) {
-    await stageFiles(ctx.cwd, [...created, statePath(ctx.cwd)]);
-    await commitStaged(ctx.cwd, `specwright: start ${id}-${slug}`);
+    if (!await hasGitIdentity(ctx.cwd)) {
+      return fail("Git user.name and user.email must be configured to auto-commit. Run git config user.name/email or disable workflow.autoCommit.");
+    }
+    const commitFiles = [...created, statePath(ctx.cwd)];
+    await stageFiles(ctx.cwd, commitFiles);
+    await commitStaged(ctx.cwd, `specwright: start ${id}-${slug}`, undefined, commitFiles);
   }
 
   const summary = `Created change ${id}-${slug} and set it current.`;
@@ -895,7 +921,7 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
   bodyLines.push("Files:", ...args.files.map(file => `- ${file}`));
   const body = bodyLines.join("\n");
   await stageFiles(ctx.cwd, filesToStage);
-  await commitStaged(ctx.cwd, subject, body);
+  await commitStaged(ctx.cwd, subject, body, filesToStage);
   return ok(`Created checkpoint commit for ${unit}.`);
 }
 
@@ -953,6 +979,14 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
   return ok(`Prepared execute prompt for ${task.id}.`, { prompt });
 }
 
+function preservedObservedOutput(markdown: string | undefined): string {
+  if (!markdown) return "";
+  const match = markdown.match(/(?:^|\n)## Observed output\s*\n([\s\S]*)$/i);
+  if (!match) return "";
+  const content = match[1] ?? "";
+  return content.length > 0 && !content.endsWith("\n") ? `${content}\n` : content;
+}
+
 async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
   // Compute sync result without persisting, so validation can detect drift
@@ -968,22 +1002,19 @@ async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<Com
       throw error;
     }
   }
-  // Validate against ORIGINAL cached state (before sync)
-  const report = await validateChange(ctx.cwd, change);
-  // Surface sync issues as SW009 errors in the validation report
-  if (syncResult && syncResult.issues.length > 0) {
-    for (const issue of syncResult.issues) {
-      report.issues.push({
-        level: "error",
-        code: "SW009",
-        message: `Unreconciled task drift: ${issue.message}`,
-        file: "tasks.md",
-      });
-    }
-    report.ok = false;
-  }
+  // Validate against ORIGINAL cached state (before sync). validateChange already
+  // surfaces unreconciled task drift as SW009 issues, so we do not duplicate them here.
   const verifyPath = join(changeDir(ctx.cwd, change.id, change.slug), "verify.md");
-  await writeFile(verifyPath, renderValidationReport(report), "utf8");
+  let existingVerify: string | undefined;
+  try {
+    existingVerify = await readFile(verifyPath, "utf8");
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
+  }
+  const report = await validateChange(ctx.cwd, change);
+  await writeFile(verifyPath, renderValidationReport(report, preservedObservedOutput(existingVerify)), "utf8");
   if (!report.ok) {
     const summary = args.json ? JSON.stringify(report, null, 2) : "Specwright validation failed.";
     return fail(summary, { filesUpdated: [verifyPath] });
@@ -1016,8 +1047,11 @@ async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const handoffPath = join(dir, "handoff.md");
   await writeFile(handoffPath, handoff, "utf8");
   const report = await validateChange(ctx.cwd, change);
+  if (!report.ok) {
+    return fail("Handoff generated but validation failed. Run specwright verify to see issues.", { filesUpdated: [handoffPath] });
+  }
   const allDone = Object.values(change.tasks).length > 0 && Object.values(change.tasks).every((task) => task.status === "done");
-  const status = allDone && report.ok ? "done" : change.status;
+  const status = allDone ? "done" : change.status;
   await updateCachedChange(ctx.cwd, { ...change, status, step: "handoff", updatedAt: ctx.now().toISOString() });
   return ok(`Generated handoff for ${change.id}.`, { filesUpdated: [handoffPath], prompt: handoff });
 }
@@ -1025,8 +1059,12 @@ async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<Co
 async function discoverPackManifests(cwd: string): Promise<string[]> {
   const config = await loadConfig(cwd);
   const manifests: string[] = [];
+  const projectRoot = resolve(cwd);
   for (const root of config.packs.roots) {
     const absoluteRoot = resolve(cwd, root);
+    if (!absoluteRoot.startsWith(projectRoot)) {
+      continue;
+    }
     try {
       for (const entry of await readdir(absoluteRoot, { withFileTypes: true })) {
         if (entry.isDirectory() && await exists(join(absoluteRoot, entry.name, "pack.json"))) {
@@ -1120,6 +1158,130 @@ async function commandPublish(ctx: CommandContext, args: ParsedArgs): Promise<Co
   await createPullRequest(ctx.cwd, title, bodyFile, baseBranch, branch);
   return ok(`Created pull request for ${branch} targeting ${baseBranch}.`, { filesCreated: [bodyFile] });
 }
+async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
+  if (args.positionals.length > 1) {
+    return fail("Usage: specwright complete [<change>] [--mode none|push|pr|merge]");
+  }
+
+  const mode = args.completeMode ?? "none";
+
+  // Git preflight guards — all checked before any side effect.
+  if (!await isGitWorktree(ctx.cwd)) {
+    return fail("Complete requires a git worktree.");
+  }
+
+  let branch: string;
+  try {
+    branch = await currentBranch(ctx.cwd);
+  } catch {
+    return fail("Complete requires a non-detached HEAD.");
+  }
+
+  let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
+
+  const expectedBranch = branchNameForChange(change);
+  if (branch !== expectedBranch) {
+    return fail(`Current branch "${branch}" does not match change branch "${expectedBranch}".`);
+  }
+
+  const config = await loadConfig(ctx.cwd);
+  const baseBranch = await resolveBaseBranch(ctx.cwd, config);
+  if (branch === baseBranch) {
+    return fail(`Already on base branch "${branch}".`);
+  }
+
+  if (!await isWorktreeClean(ctx.cwd)) {
+    return fail("Complete requires a clean worktree. Commit or stash local changes first.");
+  }
+
+  // Lifecycle artifact and evidence guards.
+  const syncResult = await syncChangeTasksFromFileIfPresent(ctx.cwd, change, ctx.now());
+  if (syncResult.issues.length > 0) {
+    const messages = syncResult.issues.map((issue) => issue.message).join("; ");
+    return fail(`Complete cannot reconcile tasks.md: ${messages}.`);
+  }
+  change = syncResult.change;
+
+  const validationReport = await validateChange(ctx.cwd, change);
+  if (!validationReport.ok) {
+    return fail("Complete requires passing validation. Run specwright verify to see issues.");
+  }
+
+  const { total, done } = taskProgress(change);
+  if (total === 0) {
+    return fail("Complete requires at least one task; add tasks to tasks.md first.");
+  }
+  if (done !== total) {
+    return fail(`Complete requires all tasks to be done (${done}/${total} done).`);
+  }
+
+  const changeDir_ = changeDir(ctx.cwd, change.id, change.slug);
+  const verifyPath = join(changeDir_, "verify.md");
+  const handoffPath = join(changeDir_, "handoff.md");
+  let verifyContent: string | undefined;
+  let handoffContent: string | undefined;
+  try {
+    verifyContent = await readFile(verifyPath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      // missing
+    } else {
+      throw error;
+    }
+  }
+  try {
+    handoffContent = await readFile(handoffPath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      // missing
+    } else {
+      throw error;
+    }
+  }
+  if (!verifyContent || !hasObservedOutput(verifyContent)) {
+    return fail("Complete requires verify.md to contain observed command/output evidence.");
+  }
+  if (!handoffContent || !hasNonHeadingContent(handoffContent)) {
+    return fail("Complete requires a non-empty handoff.md.");
+  }
+  const remote = config.workflow.remote;
+
+  if (mode === "none") {
+    await updateChangeStep(ctx.cwd, change, "done", "handoff", ctx.now());
+    return ok("Complete mode: none. Change status set to done.");
+  }
+
+  if (mode === "push" || mode === "pr") {
+    await pushBranch(ctx.cwd, remote, branch);
+  }
+
+  if (mode === "pr") {
+    const bodyFile = await writePullRequestBodyFile(ctx.cwd, change);
+    const title = `${change.id}-${change.slug}: ${change.title}`;
+    await createPullRequest(ctx.cwd, title, bodyFile, baseBranch, branch);
+    await updateChangeStep(ctx.cwd, change, "done", "handoff", ctx.now());
+    return ok(`Created pull request for ${branch} targeting ${baseBranch}.`, { filesCreated: [bodyFile] });
+  }
+
+  if (mode === "merge") {
+    await switchToExistingBranch(ctx.cwd, baseBranch);
+    try {
+      await mergeNoFastForward(ctx.cwd, branch);
+    } catch (error) {
+      try {
+        await switchToExistingBranch(ctx.cwd, branch);
+      } catch {
+        // Best-effort rollback failed; leave repo on baseBranch and report original error.
+      }
+      return fail(`Merge failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await updateChangeStep(ctx.cwd, change, "done", "handoff", ctx.now());
+    return ok(`Merged ${branch} into ${baseBranch} with --no-ff.`);
+  }
+
+  await updateChangeStep(ctx.cwd, change, "done", "handoff", ctx.now());
+  return ok(`Pushed ${branch} to ${remote}.`);
+}
 
 async function commandPack(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   const [action, value] = args.positionals;
@@ -1140,6 +1302,9 @@ async function commandPack(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   }
   if (action === "add") {
     if (!value) return fail("Usage: specwright pack add <id>");
+    if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+      return fail(`Invalid pack id: ${value}. Use only letters, numbers, hyphens, and underscores.`);
+    }
     const source = join(packageRoot(), "packs", value);
     if (!await exists(source)) return fail(`Pack not found locally: ${value}`);
     await cp(source, join(packsDir(ctx.cwd), value), { recursive: true, force: false, errorOnExist: false });
@@ -1175,6 +1340,7 @@ export async function runSpecwrightCommand(ctx: CommandContext, argv: string[]):
       case "pack": return await commandPack(ctx, args);
       case "config": return await commandConfig(ctx, args);
       case "publish": return await commandPublish(ctx, args);
+      case "complete": return await commandComplete(ctx, args);
       default: return fail(`Unknown command: ${args.command}`);
     }
   } catch (error) {
@@ -1182,5 +1348,5 @@ export async function runSpecwrightCommand(ctx: CommandContext, argv: string[]):
   }
 }
 export function renderHelp(): string {
-  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
+  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright complete [<change>] [--mode none|push|pr|merge]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
 }

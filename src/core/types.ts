@@ -7,6 +7,7 @@ export type LifecycleStep = (typeof LIFECYCLE_STEPS)[number];
 export type SpecwrightMode = "lite" | "full";
 export type OnlineResearchMode = "never" | "ask" | "auto" | "require";
 export type WorkflowPublishMode = "none" | "push" | "pr";
+export type WorkflowCompleteMode = "none" | "push" | "pr" | "merge";
 export const SPECWRIGHT_AGENT_NAMES = ["researcher", "planner", "executor", "verifier"] as const;
 export type SpecwrightAgentName = (typeof SPECWRIGHT_AGENT_NAMES)[number];
 

@@ -66,6 +66,59 @@ bun run specwright verify
 bun run specwright handoff
 ```
 
+## Publishing and completing a change
+
+### Publish
+
+`specwright publish` pushes the current feature branch to the remote. It does **not** merge.
+
+```bash
+bun run specwright publish
+bun run specwright publish --mode none
+bun run specwright publish --mode push
+bun run specwright publish --mode pr
+```
+
+Publish modes:
+- `none` — no remote work (default when configured as `none`).
+- `push` — push the current feature branch to the configured remote.
+- `pr` — push and open a pull request targeting the configured base branch.
+
+Publish is remote-only. It never switches branches, pulls, or merges.
+
+### Complete
+
+`specwright complete` runs final completion guards and then performs the selected mode action.
+
+```bash
+bun run specwright complete
+bun run specwright complete 0001
+bun run specwright complete --mode none
+bun run specwright complete --mode push
+bun run specwright complete --mode pr
+bun run specwright complete --mode merge
+```
+
+Complete modes:
+- `none` — run guards only, set change status to done (default).
+- `push` — run guards, then push the current feature branch to the remote.
+- `pr` — run guards, push, then open a pull request.
+- `merge` — run guards, switch to the base branch, and merge the feature branch with `--no-ff`.
+
+Complete runs all guards **before** any side effect. It fails before push, PR creation, or merge when:
+- Not in a git worktree or on a detached HEAD.
+- On the base branch.
+- Worktree is dirty.
+- Validation fails.
+- Tasks are missing or incomplete.
+- `verify.md` is missing or lacks observed command/output evidence.
+- `handoff.md` is missing or empty.
+- Branch name does not match the change.
+
+Merge conflicts are discovered during the merge itself, after switching to the base branch and starting the merge. They are not a pre-side-effect guard. If a merge fails, you may need to run `git merge --abort` and clean up manually.
+
+Complete does **not** delete branches by default and does **not** pull/update the base branch automatically.
+
 Most lifecycle commands can also print the prompt instead of advancing work directly:
 
 ```bash
@@ -77,13 +130,13 @@ bun run specwright plan --print-prompt
 Specwright can record workflow progress for a phase or task:
 
 ```bash
-bun run specwright checkpoint --task T001 --files src/example.ts,test/example.test.ts
+bun run specwright checkpoint --task T001 --summary "Add example feature" --files src/example.ts,test/example.test.ts
 ```
 
 To create a Git commit for selected files:
 
 ```bash
-bun run specwright commit --task T001 --files src/example.ts,test/example.test.ts
+bun run specwright commit --task T001 --summary "Add example feature" --files src/example.ts,test/example.test.ts
 ```
 
 Use explicit file lists. This keeps checkpoints narrow and makes review easier.

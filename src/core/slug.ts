@@ -16,5 +16,9 @@ export function nextChangeId(existingIds: Iterable<string>): string {
     }
   }
 
-  return String(maxId + 1).padStart(4, "0");
+  const next = maxId + 1;
+  if (next > 9999) {
+    throw new Error("Change ID overflow: maximum of 9999 changes reached.");
+  }
+  return String(next).padStart(4, "0");
 }

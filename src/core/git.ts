@@ -81,6 +81,12 @@ export async function isGitWorktree(cwd: string): Promise<boolean> {
   return result.exitCode === 0 && result.stdout.trim() === "true";
 }
 
+export async function hasGitIdentity(cwd: string): Promise<boolean> {
+  const name = await runGit(cwd, ["config", "user.name"]);
+  const email = await runGit(cwd, ["config", "user.email"]);
+  return name.exitCode === 0 && name.stdout.trim() !== "" && email.exitCode === 0 && email.stdout.trim() !== "";
+}
+
 export async function gitWorktreeRoot(cwd: string): Promise<string | undefined> {
   const result = await runGit(cwd, ["rev-parse", "--show-toplevel"]);
   if (result.exitCode !== 0) return undefined;
@@ -121,13 +127,16 @@ export async function stageFiles(cwd: string, files: readonly string[]): Promise
   return result;
 }
 
-export async function commitStaged(cwd: string, message: string, body?: string): Promise<ProcessRunResult> {
+export async function commitStaged(cwd: string, message: string, body?: string, files?: readonly string[]): Promise<ProcessRunResult> {
   if (message.trim() === "") {
     throw new Error("Commit message is required.");
   }
   const args = ["commit", "-m", message];
   if (body && body.trim() !== "") {
     args.push("-m", body);
+  }
+  if (files && files.length > 0) {
+    args.push("--", ...files);
   }
   const result = await runGit(cwd, args);
   throwIfFailed(result, "git commit");
@@ -141,6 +150,25 @@ export async function currentBranch(cwd: string): Promise<string> {
     throw new Error("Cannot publish from a detached HEAD.");
   }
   return branch;
+}
+export async function isWorktreeClean(cwd: string): Promise<boolean> {
+  const result = await runGit(cwd, ["status", "--porcelain"]);
+  if (result.exitCode !== 0) {
+    throw new Error("git status failed");
+  }
+  return result.stdout.trim() === "";
+}
+
+export async function switchToExistingBranch(cwd: string, branch: string): Promise<ProcessRunResult> {
+  const result = await runGit(cwd, ["switch", branch]);
+  throwIfFailed(result, "git switch");
+  return result;
+}
+
+export async function mergeNoFastForward(cwd: string, branch: string): Promise<ProcessRunResult> {
+  const result = await runGit(cwd, ["merge", "--no-ff", "--no-edit", branch]);
+  throwIfFailed(result, "git merge");
+  return result;
 }
 
 
