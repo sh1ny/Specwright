@@ -671,13 +671,56 @@
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "discussing",
-      "step": "discuss",
+      "status": "verifying",
+      "step": "verify",
       "createdAt": "2026-06-12T18:06:12.831Z",
-      "updatedAt": "2026-06-12T18:06:12.831Z",
-      "tasks": {}
+      "updatedAt": "2026-06-12T18:49:06.164Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Parse scan map flags",
+          "status": "pending",
+          "updatedAt": "2026-06-12T18:49:06.162Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Ensure map artifacts",
+          "status": "pending",
+          "updatedAt": "2026-06-12T18:49:06.162Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Compare refresh fingerprints",
+          "status": "pending",
+          "updatedAt": "2026-06-12T18:49:06.162Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Render core map prompts",
+          "status": "pending",
+          "updatedAt": "2026-06-12T18:49:06.162Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Add OMP map guidance",
+          "status": "pending",
+          "updatedAt": "2026-06-12T18:49:06.162Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Validate codebase index",
+          "status": "pending",
+          "updatedAt": "2026-06-12T18:49:06.162Z"
+        },
+        "T007": {
+          "id": "T007",
+          "title": "Point lifecycle prompts at maps",
+          "status": "pending",
+          "updatedAt": "2026-06-12T18:49:06.162Z"
+        }
+      }
     }
   },
-  "updatedAt": "2026-06-12T18:06:12.831Z",
+  "updatedAt": "2026-06-12T18:49:06.164Z",
   "currentChange": "0015"
 }
