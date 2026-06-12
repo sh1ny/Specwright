@@ -2669,3 +2669,46 @@ test("scan --refresh reports deterministic stale warnings for changed and missin
   expect(refreshed.fingerprints["test/stale.test.ts"]).toEqual({ mtime: 0, size: 0, checksum: "" });
   expect(refreshed.fingerprints["src/core/new.ts"]).toBeDefined();
 });
+
+test("scan --map prompt focuses only on map artifacts", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-map-prompt-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--map", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("Focus only on codebase mapping for this run");
+  expect(result.prompt).toContain(".specwright/project/codebase-map.md");
+  expect(result.prompt).toContain(".specwright/project/codebase-index.json");
+  expect(result.prompt).not.toContain(".specwright/project/scan.md");
+  expect(result.prompt).not.toContain(".specwright/project/tech-stack.md");
+  expect(result.prompt).not.toContain(".specwright/project/architecture.md");
+});
+
+test("scan prompt through CLI is runtime-neutral without OMP references", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-neutral-prompt-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).not.toContain("OMP");
+  expect(result.prompt).not.toContain("Oh My Pi");
+  expect(result.prompt).not.toContain("task tool");
+  expect(result.prompt).toContain("Use file discovery (find)");
+  expect(result.prompt).toContain("Use search and LSP when available");
+  expect(result.prompt).toContain("Preserve existing confirmed facts");
+  expect(result.prompt).toContain("Record uncertainty, assumptions, and gaps");
+});
+
+test("scan --refresh prompt includes refresh contract", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-contract-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("Refresh contract:");
+  expect(result.prompt).toContain("Compare current files against the recorded fingerprints");
+  expect(result.prompt).toContain("Update only sections that are stale, incorrect, or missing");
+});

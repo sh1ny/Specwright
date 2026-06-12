@@ -13,7 +13,7 @@ import {
   specwrightDir,
   statePath,
 } from "./paths";
-import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderLifecycleSpawnStrategy, renderSubagentRetryClause } from "./prompts";
+import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderLifecycleSpawnStrategy, renderScanPrompt, renderSubagentRetryClause } from "./prompts";
 import { renderOmpDiscussPrompt, renderOmpLifecycleSpawnStrategy, renderOmpSubagentRetryClause } from "../runtime/omp/prompts";
 import { slugify, nextChangeId } from "./slug";
 import {
@@ -622,7 +622,7 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
     }
   }
 
-  const prompt = `# Specwright Scan\n\n${renderContextBudget(config)}\n\nInspect the repository using find, search/OMP grep, read, and lsp when available. Update only these files:\n- .specwright/project/scan.md\n- .specwright/project/tech-stack.md\n- .specwright/project/architecture.md\n- .specwright/project/codebase-map.md\n- .specwright/project/codebase-index.json\n\nDo not load full packs or unrelated docs.${refreshSection}\n\n${renderSubagentRetryClause()}`;
+  const prompt = renderScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection });
   return ok("Prepared project scan prompt.", { prompt, filesCreated: created, filesUpdated: updated });
 }
 
