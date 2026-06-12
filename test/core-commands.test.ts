@@ -2712,3 +2712,68 @@ test("scan --refresh prompt includes refresh contract", async () => {
   expect(result.prompt).toContain("Compare current files against the recorded fingerprints");
   expect(result.prompt).toContain("Update only sections that are stale, incorrect, or missing");
 });
+
+test("scan surfaces validation issues for an invalid codebase-index.json", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-validation-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  await writeFile(
+    indexPath,
+    JSON.stringify(
+      {
+        version: 1,
+        generatedAt: ctx.now().toISOString(),
+        entrypoints: [{ path: "../escape.ts" }],
+        modules: [{ path: "src/missing.ts", tests: ["test/missing.test.ts"] }],
+        commands: [{}],
+        verification: [],
+        risks: [],
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("## Codebase index validation");
+  expect(result.prompt).toContain("not a safe relative path");
+  expect(result.prompt).toContain("missing required field");
+  expect(result.prompt).toContain("missing file");
+});
+
+test("scan --json surfaces validation issues without changing summary shape", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-validation-json-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  await writeFile(
+    indexPath,
+    JSON.stringify(
+      {
+        version: 2,
+        generatedAt: ctx.now().toISOString(),
+        entrypoints: [],
+        modules: [],
+        commands: [],
+        verification: [],
+        risks: [],
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toBe("Prepared project scan prompt.");
+  expect(result.prompt).toContain("## Codebase index validation");
+  expect(result.prompt).toContain("Expected version 1");
+});

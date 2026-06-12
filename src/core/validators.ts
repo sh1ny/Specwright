@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { changeDir } from "./paths";
 import { loadConfig, unreconciledTaskDriftIssues } from "./state";
@@ -96,6 +96,187 @@ export function validateSpecwrightConfig(config: SpecwrightConfig): void {
   }
   validateGitName(config.workflow.remote, "workflow.remote", GIT_REMOTE_PATTERN);
 }
+export interface CodebaseIndex {
+  version: number;
+  generatedAt?: string;
+  entrypoints?: Array<{ path: string; kind?: string; summary?: string }>;
+  modules?: Array<{ path: string; kind?: string; summary?: string; tests?: string[] }>;
+  commands?: Array<{ name: string; summary?: string }>;
+  verification?: Array<{ command: string; purpose?: string }>;
+  risks?: Array<{ area: string; summary?: string }>;
+  fingerprints?: Record<string, unknown>;
+}
+
+export async function validateCodebaseIndex(
+  cwd: string,
+  index: unknown,
+): Promise<ValidationReport> {
+  const issues: ValidationIssue[] = [];
+
+  if (index === null || typeof index !== "object") {
+    issues.push({ level: "error", code: "SW100", message: "codebase-index.json must be a JSON object." });
+    return { ok: false, issues };
+  }
+
+  const obj = index as Record<string, unknown>;
+
+  if (obj.version !== 1) {
+    issues.push({
+      level: "error",
+      code: "SW101",
+      message: `Expected version 1, got ${JSON.stringify(obj.version)}.`,
+    });
+  }
+
+  if (obj.generatedAt !== undefined && typeof obj.generatedAt !== "string") {
+    issues.push({
+      level: "warning",
+      code: "SW102",
+      message: "generatedAt must be a string when present.",
+    });
+  }
+
+  function requireArray(key: string): unknown[] | undefined {
+    const value = obj[key];
+    if (value === undefined) {
+      issues.push({ level: "error", code: "SW103", message: `Missing required array: ${key}.` });
+      return undefined;
+    }
+    if (!Array.isArray(value)) {
+      issues.push({ level: "error", code: "SW103", message: `${key} must be an array.` });
+      return undefined;
+    }
+    return value;
+  }
+
+  function requireString(obj: Record<string, unknown>, key: string, context: string): string | undefined {
+    const value = obj[key];
+    if (value === undefined) {
+      issues.push({ level: "error", code: "SW104", message: `${context} is missing required field: ${key}.` });
+      return undefined;
+    }
+    if (typeof value !== "string") {
+      issues.push({ level: "error", code: "SW104", message: `${context} field ${key} must be a string.` });
+      return undefined;
+    }
+    return value;
+  }
+
+  function validatePath(value: string, context: string): boolean {
+    if (!isSafeRelativePath(value)) {
+      issues.push({ level: "error", code: "SW105", message: `${context} path is not a safe relative path: ${value}.` });
+      return false;
+    }
+    return true;
+  }
+
+  async function warnIfMissing(path: string, context: string): Promise<void> {
+    try {
+      await stat(join(cwd, path));
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        issues.push({ level: "warning", code: "SW106", message: `${context} references missing file: ${path}.` });
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  const entrypoints = requireArray("entrypoints");
+  const modules = requireArray("modules");
+  const commands = requireArray("commands");
+  const verification = requireArray("verification");
+  const risks = requireArray("risks");
+
+  if (entrypoints !== undefined) {
+    for (let i = 0; i < entrypoints.length; i++) {
+      const entry = entrypoints[i];
+      const context = `entrypoints[${i}]`;
+      if (entry === null || typeof entry !== "object") {
+        issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
+        continue;
+      }
+      const record = entry as Record<string, unknown>;
+      const path = requireString(record, "path", context);
+      if (path !== undefined && validatePath(path, context)) {
+        await warnIfMissing(path, context);
+      }
+    }
+  }
+
+  const testPaths: string[] = [];
+  if (modules !== undefined) {
+    for (let i = 0; i < modules.length; i++) {
+      const mod = modules[i];
+      const context = `modules[${i}]`;
+      if (mod === null || typeof mod !== "object") {
+        issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
+        continue;
+      }
+      const record = mod as Record<string, unknown>;
+      const path = requireString(record, "path", context);
+      if (path !== undefined && validatePath(path, context)) {
+        await warnIfMissing(path, context);
+      }
+      if (record.tests !== undefined) {
+        if (!isStringArray(record.tests)) {
+          issues.push({ level: "error", code: "SW108", message: `${context} tests must be an array of strings.` });
+        } else {
+          for (let j = 0; j < record.tests.length; j++) {
+            const testPath = record.tests[j];
+            const testContext = `${context}.tests[${j}]`;
+            if (validatePath(testPath, testContext)) {
+              testPaths.push(testPath);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (commands !== undefined) {
+    for (let i = 0; i < commands.length; i++) {
+      const entry = commands[i];
+      const context = `commands[${i}]`;
+      if (entry === null || typeof entry !== "object") {
+        issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
+        continue;
+      }
+      requireString(entry as Record<string, unknown>, "name", context);
+    }
+  }
+
+  if (verification !== undefined) {
+    for (let i = 0; i < verification.length; i++) {
+      const entry = verification[i];
+      const context = `verification[${i}]`;
+      if (entry === null || typeof entry !== "object") {
+        issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
+        continue;
+      }
+      requireString(entry as Record<string, unknown>, "command", context);
+    }
+  }
+
+  if (risks !== undefined) {
+    for (let i = 0; i < risks.length; i++) {
+      const entry = risks[i];
+      const context = `risks[${i}]`;
+      if (entry === null || typeof entry !== "object") {
+        issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
+        continue;
+      }
+      requireString(entry as Record<string, unknown>, "area", context);
+    }
+  }
+
+  for (const testPath of testPaths) {
+    await warnIfMissing(testPath, `tests`);
+  }
+
+  return { ok: !issues.some((issue) => issue.level === "error"), issues };
+}
+
 
 async function readArtifact(cwd: string, change: ChangeState, file: string): Promise<string | undefined> {
   try {

@@ -30,7 +30,7 @@ import {
   upsertChange,
 } from "./state";
 import { branchNameForChange, commitStaged, createPullRequest, currentBranch, hasGitIdentity, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, switchToExistingBranch, mergeNoFastForward, writePullRequestBodyFile } from "./git";
-import { renderValidationReport, validateChange, validateSpecwrightConfig, hasNonHeadingContent, hasObservedOutput } from "./validators";
+import { renderValidationReport, validateChange, validateCodebaseIndex, validateSpecwrightConfig, hasNonHeadingContent, hasObservedOutput } from "./validators";
 import type {
   ChangeKind,
   ChangeState,
@@ -578,17 +578,18 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   }
 
   const indexPath = join(project, "codebase-index.json");
+  const defaultIndex: CodebaseIndex = {
+    version: 1,
+    generatedAt: ctx.now().toISOString(),
+    entrypoints: [],
+    modules: [],
+    commands: [],
+    verification: [],
+    risks: [],
+  };
   const indexExists = await exists(indexPath);
   if (args.force || !indexExists) {
-    await writeJsonFile(indexPath, {
-      version: 1,
-      generatedAt: ctx.now().toISOString(),
-      entrypoints: [],
-      modules: [],
-      commands: [],
-      verification: [],
-      risks: [],
-    });
+    await writeJsonFile(indexPath, defaultIndex);
     if (args.force && indexExists) {
       updated.push(indexPath);
     } else {
@@ -596,19 +597,12 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
     }
   }
 
+  let index = (await readJsonFile<CodebaseIndex>(indexPath)) ?? defaultIndex;
+
   const config = await loadConfig(ctx.cwd);
 
   let refreshSection = "";
   if (args.refresh) {
-    const index = (await readJsonFile<CodebaseIndex>(indexPath)) ?? {
-      version: 1,
-      generatedAt: ctx.now().toISOString(),
-      entrypoints: [],
-      modules: [],
-      commands: [],
-      verification: [],
-      risks: [],
-    };
     const { stale, current } = await compareRefreshFingerprints(ctx.cwd, index);
     index.fingerprints = current;
     await writeJsonFile(indexPath, index);
@@ -622,10 +616,16 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
     }
   }
 
+  const validationReport = await validateCodebaseIndex(ctx.cwd, index);
+  const validationSection = validationReport.issues.length > 0
+    ? "\n\n## Codebase index validation\n\n" + validationReport.issues.map((issue) => `- ${issue.level.toUpperCase()}: ${issue.message}`).join("\n")
+    : "";
+
   const prompt = ctx.runtime === "omp"
-    ? renderOmpScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection })
-    : renderScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection });
+    ? renderOmpScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection })
+    : renderScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection });
   return ok("Prepared project scan prompt.", { prompt, filesCreated: created, filesUpdated: updated });
+
 }
 
 async function expandRequestFileReference(cwd: string, token: string): Promise<string> {
