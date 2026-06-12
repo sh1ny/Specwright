@@ -95,6 +95,7 @@ export interface ScanPromptInput {
   map: boolean;
   refresh: boolean;
   refreshSection?: string;
+  validationSection?: string;
 }
 
 export function renderScanPrompt(input: ScanPromptInput): string {
@@ -136,6 +137,6 @@ export function renderScanPrompt(input: ScanPromptInput): string {
     "- Preserve existing confirmed facts in the map artifacts unless current code contradicts them.",
     "- Record uncertainty, assumptions, and gaps in the Open questions section, not as fact.",
     "- Update codebase-index.json with version 1, the current ISO-8601 generatedAt, and accurate arrays for entrypoints, modules, commands, verification, and risks.",
-  ].join("\n");
-  return `# Specwright Scan\n\n${renderContextBudget(input.config)}\n\n${focus}\n${artifacts.join("\n")}${refreshContract}\n\n${discoveryInstructions}\n\n${mappingContract}\n\n${renderSubagentRetryClause()}${input.refreshSection ?? ""}`;
+  ];
+  return `# Specwright Scan\n\n${renderContextBudget(input.config)}\n\n${focus}\n${artifacts.join("\n")}${refreshContract}\n\n${discoveryInstructions}\n\n${mappingContract}\n\n${renderSubagentRetryClause()}${input.refreshSection ?? ""}${input.validationSection ?? ""}`;
 }
