@@ -4,7 +4,7 @@
 
 ## Wave 1 — Scan surface and artifacts
 
-- [ ] T001: Parse scan map flags
+- [x] T001: Parse scan map flags
   - Files: `src/core/commands.ts`, `test/core-commands.test.ts`
   - Action: Add `map` and `refresh` parsed flags, reject neither as unknown for scan, and update scan help text for `--map`, `--refresh`, and JSON behavior.
   - Acceptance: `specwright scan --map`, `specwright scan --refresh`, and combinations with `--json`, `--force`, and `--print-prompt` parse deterministically.

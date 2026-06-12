@@ -51,6 +51,8 @@ interface ParsedArgs {
   json: boolean;
   force: boolean;
   printPrompt: boolean;
+  map: boolean;
+  refresh: boolean;
   mode?: SpecwrightMode;
   publishMode?: WorkflowPublishMode;
   completeMode?: WorkflowCompleteMode;
@@ -110,9 +112,8 @@ function fail(summary: string, updates: Partial<CommandResult> = {}): CommandRes
     ...(updates.statusText ? { statusText: updates.statusText } : {}),
   };
 }
-
 function parseArgs(argv: string[]): ParsedArgs {
-  const parsed: ParsedArgs = { positionals: [], json: false, force: false, printPrompt: false };
+  const parsed: ParsedArgs = { positionals: [], json: false, force: false, printPrompt: false, map: false, refresh: false };
   const [command, ...rest] = argv;
   if (command !== undefined) {
     parsed.command = command;
@@ -133,6 +134,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       parsed.force = true;
     } else if (arg === "--print-prompt") {
       parsed.printPrompt = true;
+    } else if (arg === "--map") {
+      parsed.map = true;
+    } else if (arg === "--refresh") {
+      parsed.refresh = true;
     } else if (arg === "--mode") {
       const value = rest[++index];
       if (parsed.command === "publish") {
@@ -488,12 +493,10 @@ async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<Com
     }, null, 2));
   }
   const taskSuffix = progress.total > 0 ? ` · tasks=${progress.done}/${progress.total}` : "";
-  return ok(`Specwright · ${config.project.name} · current=${currentChange ?? "none"} · changes=${Object.keys(state.changes).length}${taskSuffix}`, {
-    statusText: `Specwright · ${currentChange ?? "none"} · ${currentStatus ?? "idle"}${taskSuffix}`,
-  });
+  return ok(`Specwright · ${config.project.name} · current=${currentChange ?? "none"} · changes=${Object.keys(state.changes).length}${taskSuffix}`);
 }
 
-async function commandScan(ctx: CommandContext): Promise<CommandResult> {
+async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   await ensureDir(projectDir(ctx.cwd));
   const scanPath = join(projectDir(ctx.cwd), "scan.md");
   await writeIfMissing(scanPath, "# Project Scan\n\n## Files inspected\n\n## Patterns found\n\n## Constraints\n\n## Open questions\n");
@@ -1321,12 +1324,11 @@ export async function runSpecwrightCommand(ctx: CommandContext, argv: string[]):
   if (args.unknown) {
     return fail(`Unknown option: ${args.unknown}`);
   }
-
   try {
     switch (args.command) {
       case "init": return await commandInit(ctx, args);
       case "status": return await commandStatus(ctx, args);
-      case "scan": return await commandScan(ctx);
+      case "scan": return await commandScan(ctx, args);
       case "new": return await commandNew(ctx, args);
       case "discuss": return await commandDiscuss(ctx, args);
       case "research": return await commandResearch(ctx, args);
@@ -1348,5 +1350,5 @@ export async function runSpecwrightCommand(ctx: CommandContext, argv: string[]):
   }
 }
 export function renderHelp(): string {
-  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright complete [<change>] [--mode none|push|pr|merge]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
+  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--map] [--refresh] [--force] [--json] [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright complete [<change>] [--mode none|push|pr|merge]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
 }

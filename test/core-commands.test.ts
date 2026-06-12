@@ -2424,3 +2424,44 @@ test("parseArgs accepts --key=value option syntax", async () => {
   expect(publishResult.ok).toBe(true);
   expect(publishResult.summary).toContain("Publish mode is none");
 });
+
+test("scan accepts --map, --refresh, and combinations without treating them as unknown", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-flags-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const mapResult = await runSpecwrightCommand(ctx, ["scan", "--map"]);
+  expect(mapResult.ok).toBe(true);
+  expect(mapResult.summary).toBe("Prepared project scan prompt.");
+
+  const refreshResult = await runSpecwrightCommand(ctx, ["scan", "--refresh"]);
+  expect(refreshResult.ok).toBe(true);
+  expect(refreshResult.summary).toBe("Prepared project scan prompt.");
+
+  const combinedResult = await runSpecwrightCommand(ctx, [
+    "scan",
+    "--map",
+    "--refresh",
+    "--force",
+    "--json",
+    "--print-prompt",
+  ]);
+  expect(combinedResult.ok).toBe(true);
+  expect(combinedResult.summary).toBe("Prepared project scan prompt.");
+});
+
+test("scan still rejects unknown flags", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-unknown-flags-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const unknownResult = await runSpecwrightCommand(ctx, ["scan", "--stale"]);
+  expect(unknownResult.ok).toBe(false);
+  expect(unknownResult.exitCode).toBe(1);
+  expect(unknownResult.summary).toBe("Unknown option: --stale");
+});
+
+test("help text advertises scan --map, --refresh, --force, and --json", () => {
+  const help = renderHelp();
+  expect(help).toContain("specwright scan [--map] [--refresh] [--force] [--json] [--print-prompt]");
+});
