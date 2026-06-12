@@ -621,10 +621,10 @@
       "kind": "feature",
       "pack": "core",
       "mode": "lite",
-      "status": "executing",
-      "step": "execute",
+      "status": "verifying",
+      "step": "verify",
       "createdAt": "2026-06-11T20:10:27.254Z",
-      "updatedAt": "2026-06-11T22:49:22.806Z",
+      "updatedAt": "2026-06-12T09:29:15.979Z",
       "tasks": {
         "T001": {
           "id": "T001",
@@ -665,6 +665,6 @@
       }
     }
   },
-  "updatedAt": "2026-06-11T22:49:22.806Z",
+  "updatedAt": "2026-06-12T09:29:15.979Z",
   "currentChange": "0014"
 }
