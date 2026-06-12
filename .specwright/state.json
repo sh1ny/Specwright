@@ -663,8 +663,21 @@
           "updatedAt": "2026-06-11T22:49:22.806Z"
         }
       }
+    },
+    "0015": {
+      "id": "0015",
+      "slug": "proposal-extend-specwright-scan-with-a-codebase-map-reader-internal",
+      "title": "# Proposal: Extend `specwright scan` with a Codebase Map ## Reader Internal",
+      "kind": "feature",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-12T18:06:12.831Z",
+      "updatedAt": "2026-06-12T18:06:12.831Z",
+      "tasks": {}
     }
   },
-  "updatedAt": "2026-06-12T15:58:52.205Z",
-  "currentChange": "0014"
+  "updatedAt": "2026-06-12T18:06:12.831Z",
+  "currentChange": "0015"
 }
