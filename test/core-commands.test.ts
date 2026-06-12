@@ -2777,3 +2777,121 @@ test("scan --json surfaces validation issues without changing summary shape", as
   expect(result.prompt).toContain("## Codebase index validation");
   expect(result.prompt).toContain("Expected version 1");
 });
+test("research prompt includes map pointer when map artifacts exist", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-research-map-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Test research map pointer"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["research"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain(".specwright/project/codebase-map.md");
+  expect(result.prompt).toContain(".specwright/project/codebase-index.json");
+  expect(result.prompt).toContain("Optional project context:");
+  expect(result.prompt).not.toContain("# Codebase Map");
+});
+
+test("research prompt omits map pointer when map artifacts are absent", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-research-no-map-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Test research no map pointer"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["research"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).not.toContain(".specwright/project/codebase-map.md");
+  expect(result.prompt).not.toContain(".specwright/project/codebase-index.json");
+  expect(result.prompt).not.toContain("Optional project context:");
+});
+
+test("plan prompt includes map pointer when map artifacts exist", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-plan-map-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Test plan map pointer"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["plan"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain(".specwright/project/codebase-map.md");
+  expect(result.prompt).toContain(".specwright/project/codebase-index.json");
+  expect(result.prompt).toContain("Optional project context:");
+  expect(result.prompt).not.toContain("# Codebase Map");
+});
+
+test("plan prompt omits map pointer when map artifacts are absent", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-plan-no-map-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Test plan no map pointer"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["plan"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).not.toContain(".specwright/project/codebase-map.md");
+  expect(result.prompt).not.toContain(".specwright/project/codebase-index.json");
+  expect(result.prompt).not.toContain("Optional project context:");
+});
+
+test("execute prompt includes map reference path", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-execute-map-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Test execute map pointer"])).ok).toBe(true);
+
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-test-execute-map-pointer/tasks.md"),
+    "- [ ] T001: Build something\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["execute"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain(".specwright/project/codebase-map.md");
+  expect(result.prompt).toContain(".specwright/project/codebase-index.json");
+  expect(result.prompt).toContain("Optional project context:");
+  expect(result.prompt).not.toContain("# Codebase Map");
+});
+
+test("handoff prompt includes map pointer when no task is specified", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-handoff-map-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Test handoff map pointer"])).ok).toBe(true);
+
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-test-handoff-map-pointer/tasks.md"),
+    "- [x] T001: Build something\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["handoff"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain(".specwright/project/codebase-map.md");
+  expect(result.prompt).toContain(".specwright/project/codebase-index.json");
+  expect(result.prompt).toContain("Optional project context:");
+  expect(result.prompt).not.toContain("# Codebase Map");
+});
+
+test("handoff prompt omits map pointer when task is specified", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-handoff-task-map-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Test handoff task map pointer"])).ok).toBe(true);
+
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-test-handoff-task-map-pointer/tasks.md"),
+    "- [x] T001: Build something\n",
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["handoff", "--task", "T001"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).not.toContain(".specwright/project/codebase-map.md");
+  expect(result.prompt).not.toContain(".specwright/project/codebase-index.json");
+  expect(result.prompt).not.toContain("Optional project context:");
+});
+

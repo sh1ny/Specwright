@@ -411,6 +411,19 @@ async function writeIfMissing(path: string, content: string, force = false): Pro
   await writeFile(path, content, "utf8");
   return force && await exists(path) ? "updated" : "created";
 }
+async function mapPointerSection(cwd: string): Promise<string> {
+  const project = projectDir(cwd);
+  const mapPath = join(project, "codebase-map.md");
+  const indexPath = join(project, "codebase-index.json");
+  const mapExists = await exists(mapPath);
+  const indexExists = await exists(indexPath);
+  if (!mapExists && !indexExists) return "";
+  const lines = ["", "Optional project context:"];
+  if (mapExists) lines.push("- .specwright/project/codebase-map.md");
+  if (indexExists) lines.push("- .specwright/project/codebase-index.json");
+  return lines.join("\n");
+}
+
 
 interface CodebaseIndex {
   version: number;
@@ -870,6 +883,7 @@ async function commandResearch(ctx: CommandContext, args: ParsedArgs): Promise<C
   const lifecycleStrategy = ctx.runtime === "omp"
     ? renderOmpLifecycleSpawnStrategy({ step: "research", config })
     : renderLifecycleSpawnStrategy({ step: "research", config });
+  const mapPointer = await mapPointerSection(ctx.cwd);
   const subagentRetry = ctx.runtime === "omp"
     ? renderOmpSubagentRetryClause()
     : renderSubagentRetryClause();
@@ -887,7 +901,7 @@ Read first:
 - .specwright/changes/${change.id}-${change.slug}/research.md
 - .specwright/changes/${change.id}-${change.slug}/sources.md
 - .specwright/changes/${change.id}-${change.slug}/evidence.md
-- .specwright/changes/${change.id}-${change.slug}/options.md
+- .specwright/changes/${change.id}-${change.slug}/options.md${mapPointer}
 
 Research rules:
 - Start with local repository evidence: find, OMP grep/search, read, and lsp when available.
@@ -919,6 +933,7 @@ async function commandPlan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   const lifecycleStrategy = ctx.runtime === "omp"
     ? renderOmpLifecycleSpawnStrategy({ step: "plan", config })
     : renderLifecycleSpawnStrategy({ step: "plan", config });
+  const mapPointer = await mapPointerSection(ctx.cwd);
   const prompt = `# Specwright Plan: ${updated.id}-${updated.slug}
 
 ${renderContextBudget(config)}
@@ -931,8 +946,7 @@ Read first:
 - .specwright/changes/${updated.id}-${updated.slug}/research.md
 - .specwright/changes/${updated.id}-${updated.slug}/evidence.md
 - .specwright/changes/${updated.id}-${updated.slug}/plan.md
-- .specwright/changes/${updated.id}-${updated.slug}/tasks.md
-
+- .specwright/changes/${updated.id}-${updated.slug}/tasks.md${mapPointer}
 Produce a decision-complete plan.md and a CLI-parseable tasks.md.
 
 tasks.md contract required by the Specwright CLI:
@@ -1101,7 +1115,8 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const lifecycleStrategy = ctx.runtime === "omp"
     ? renderOmpLifecycleSpawnStrategy({ step: "execute", config })
     : renderLifecycleSpawnStrategy({ step: "execute", config });
-  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\n${lifecycleStrategy}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
+  const mapPointer = await mapPointerSection(ctx.cwd);
+  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\n${lifecycleStrategy}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md${mapPointer}\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
   return ok(`Prepared execute prompt for ${task.id}.`, { prompt });
 }
 
@@ -1169,7 +1184,8 @@ async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const tasks = artifacts[2] ?? "";
   const verify = artifacts[3] ?? "";
   const taskLines = tasks.split(/\r?\n/).filter((line) => args.task ? line.includes(args.task) : /^\s*- \[ ] T\d{3}:/.test(line)).join("\n");
-  const handoff = `# Agent Handoff: ${change.id}\n\n## Goal\n\n${intent}\n\n## Read first\n\n- .specwright/changes/${change.id}-${change.slug}/intent.md\n- .specwright/changes/${change.id}-${change.slug}/evidence.md\n- .specwright/changes/${change.id}-${change.slug}/tasks.md\n- .specwright/changes/${change.id}-${change.slug}/verify.md\n\n## Current state\n\nstatus=${change.status}; step=${change.step}\n\n## Constraints\n\nSee intent.md and evidence.md.\n\n## Acceptance\n\n${verify}\n\n## Next task\n\n${taskLines || "No incomplete tasks."}\n\n## Evidence\n\n${evidence}\n`;
+  const mapPointer = !args.task ? await mapPointerSection(ctx.cwd) : "";
+  const handoff = `# Agent Handoff: ${change.id}\n\n## Goal\n\n${intent}\n\n## Read first\n\n- .specwright/changes/${change.id}-${change.slug}/intent.md\n- .specwright/changes/${change.id}-${change.slug}/evidence.md\n- .specwright/changes/${change.id}-${change.slug}/tasks.md\n- .specwright/changes/${change.id}-${change.slug}/verify.md${mapPointer}\n\n## Current state\n\nstatus=${change.status}; step=${change.step}\n\n## Constraints\n\nSee intent.md and evidence.md.\n\n## Acceptance\n\n${verify}\n\n## Next task\n\n${taskLines || "No incomplete tasks."}\n\n## Evidence\n\n${evidence}\n`;
   const handoffPath = join(dir, "handoff.md");
   await writeFile(handoffPath, handoff, "utf8");
   const report = await validateChange(ctx.cwd, change);
