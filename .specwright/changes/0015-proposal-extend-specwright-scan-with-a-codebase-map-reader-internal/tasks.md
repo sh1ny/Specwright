@@ -44,8 +44,12 @@
 
 ## Wave 3 — Lifecycle pointers
 
-- [ ] T007: Point lifecycle prompts at maps
+- [x] T007: Point lifecycle prompts at maps
   - Files: `src/core/commands.ts`, `test/core-commands.test.ts`
   - Action: Add optional pointer-only references to `codebase-map.md` and `codebase-index.json` in research, plan, execute, and handoff prompts when artifacts exist.
   - Acceptance: Prompts cite map artifact paths without inlining contents; absent artifacts produce no pointer; execute includes only task-relevant pointers or a reference path.
   - Verification: Run targeted lifecycle prompt tests in `test/core-commands.test.ts`.
+
+## Verification status
+
+- Status: PASS (recorded in `verify.md`)
