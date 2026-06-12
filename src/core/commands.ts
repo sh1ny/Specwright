@@ -14,7 +14,7 @@ import {
   statePath,
 } from "./paths";
 import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderLifecycleSpawnStrategy, renderScanPrompt, renderSubagentRetryClause } from "./prompts";
-import { renderOmpDiscussPrompt, renderOmpLifecycleSpawnStrategy, renderOmpSubagentRetryClause } from "../runtime/omp/prompts";
+import { renderOmpDiscussPrompt, renderOmpLifecycleSpawnStrategy, renderOmpScanPrompt, renderOmpSubagentRetryClause } from "../runtime/omp/prompts";
 import { slugify, nextChangeId } from "./slug";
 import {
   defaultConfig,
@@ -622,7 +622,9 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
     }
   }
 
-  const prompt = renderScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection });
+  const prompt = ctx.runtime === "omp"
+    ? renderOmpScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection })
+    : renderScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection });
   return ok("Prepared project scan prompt.", { prompt, filesCreated: created, filesUpdated: updated });
 }
 

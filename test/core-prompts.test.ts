@@ -8,6 +8,7 @@ import {
   renderOmpLifecycleSpawnStrategy,
   renderOmpDiscussPrompt,
   renderOmpSubagentRetryClause,
+  renderOmpScanPrompt,
 } from "../src/runtime/omp/prompts";
 import { runSpecwrightCommand } from "../src/core/commands";
 
@@ -414,4 +415,27 @@ test("renderScanPrompt is runtime-neutral and avoids OMP-specific scout wording"
   expect(prompt).not.toContain("task tool");
   expect(prompt).toContain("Subagent fallback");
   expect(prompt).toContain("retry the same assignment once");
+});
+
+test("renderOmpScanPrompt includes parallel scout guidance for mapping subsystems", () => {
+  const config = defaultConfig("omp-scan-prompt-test");
+  const prompt = renderOmpScanPrompt({ config, map: true, refresh: false });
+  expect(prompt).toContain("# Specwright Scan");
+  expect(prompt).toContain("OMP map guidance");
+  expect(prompt).toContain("parallel read-only scouts");
+  expect(prompt).toContain("OMP's `task` tool");
+  expect(prompt).toContain("CLI and command kernel");
+  expect(prompt).toContain("runtime adapters");
+  expect(prompt).toContain("packs, templates, and agents");
+  expect(prompt).toContain("fall back to sequential mapping");
+});
+
+test("renderOmpScanPrompt preserves refresh section and contract in refresh mode", () => {
+  const config = defaultConfig("omp-scan-refresh-test");
+  const refreshSection = "\n\n## Stale files\n\n- src/core/x.ts (changed)";
+  const prompt = renderOmpScanPrompt({ config, map: false, refresh: true, refreshSection });
+  expect(prompt).toContain("Refresh contract:");
+  expect(prompt).toContain("## Stale files");
+  expect(prompt).toContain("src/core/x.ts (changed)");
+  expect(prompt).toContain("OMP map guidance");
 });
