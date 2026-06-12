@@ -6,7 +6,7 @@ import specwrightOmpExtension from "../src/runtime/omp/extension";
 import { defaultConfig } from "../src/core/state";
 import { installOmpAdapter } from "../src/runtime/omp/install";
 import { runSpecwrightCommand } from "../src/core/commands";
-import { refreshStatus } from "../src/runtime/omp/status";
+import { getArgumentCompletions, refreshStatus } from "../src/runtime/omp/status";
 import type { ExtensionApiLike, OmpCommandContextLike, ToolDefinition } from "../src/runtime/omp/types";
 interface SpecwrightStateLike {
   version: number;
@@ -99,6 +99,15 @@ test("OMP extension registers and handles specwright command", async () => {
   expect(notifications.at(-1)).toContain("Specwright ·");
   expect(statuses.at(-1)).toBeUndefined();
   expect(sentMessages).toHaveLength(0);
+});
+
+test("OMP argument completions include complete", () => {
+  const all = getArgumentCompletions("").map((entry) => entry.value);
+  expect(all).toContain("complete");
+
+  const c = getArgumentCompletions("c").map((entry) => entry.value);
+  expect(c).toContain("complete");
+  expect(c).not.toContain("publish");
 });
 
 test("OMP status refresh syncs tasks.md before rendering status", async () => {

@@ -109,10 +109,13 @@ Complete runs all guards **before** any side effect. It fails before push, PR cr
 - Not in a git worktree or on a detached HEAD.
 - On the base branch.
 - Worktree is dirty.
-- Validation fails or tasks are incomplete.
-- `verify.md` or `handoff.md` is missing or empty.
+- Validation fails.
+- Tasks are missing or incomplete.
+- `verify.md` is missing or lacks observed command/output evidence.
+- `handoff.md` is missing or empty.
 - Branch name does not match the change.
-- Merge conflicts occur.
+
+Merge conflicts are discovered during the merge itself, after switching to the base branch and starting the merge. They are not a pre-side-effect guard. If a merge fails, you may need to run `git merge --abort` and clean up manually.
 
 Complete does **not** delete branches by default and does **not** pull/update the base branch automatically.
 
@@ -127,13 +130,13 @@ bun run specwright plan --print-prompt
 Specwright can record workflow progress for a phase or task:
 
 ```bash
-bun run specwright checkpoint --task T001 --files src/example.ts,test/example.test.ts
+bun run specwright checkpoint --task T001 --summary "Add example feature" --files src/example.ts,test/example.test.ts
 ```
 
 To create a Git commit for selected files:
 
 ```bash
-bun run specwright commit --task T001 --files src/example.ts,test/example.test.ts
+bun run specwright commit --task T001 --summary "Add example feature" --files src/example.ts,test/example.test.ts
 ```
 
 Use explicit file lists. This keeps checkpoints narrow and makes review easier.

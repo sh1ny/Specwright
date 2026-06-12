@@ -29,8 +29,8 @@ import {
   updateCachedChange,
   upsertChange,
 } from "./state";
-import { branchNameForChange, commitStaged, createPullRequest, currentBranch, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, switchToExistingBranch, mergeNoFastForward, writePullRequestBodyFile } from "./git";
-import { renderValidationReport, validateChange, validateSpecwrightConfig, hasNonHeadingContent } from "./validators";
+import { branchNameForChange, commitStaged, createPullRequest, currentBranch, hasGitIdentity, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, switchToExistingBranch, mergeNoFastForward, writePullRequestBodyFile } from "./git";
+import { renderValidationReport, validateChange, validateSpecwrightConfig, hasNonHeadingContent, hasObservedOutput } from "./validators";
 import type {
   ChangeKind,
   ChangeState,
@@ -58,6 +58,8 @@ interface ParsedArgs {
   phase?: string;
   files?: string[];
   summary?: string;
+  online?: OnlineResearchMode;
+  task?: string;
   unknown?: string;
 }
 
@@ -68,6 +70,7 @@ const PUBLISH_MODES = new Set<WorkflowPublishMode>(["none", "push", "pr"]);
 const COMPLETE_MODES = new Set<WorkflowCompleteMode>(["none", "push", "pr", "merge"]);
 const CHECKPOINT_PHASES = new Set(["discuss", "research", "plan", "tasks", "verify", "handoff"]);
 const REQUEST_FILE_GLOB_PATTERN = /[*?\[\]{}]/;
+const MAX_REQUEST_FILE_BYTES = 64 * 1024;
 const TEMPLATE_FILES = [
   "change.md",
   "discussion.md",
@@ -116,7 +119,14 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   for (let index = 0; index < rest.length; index += 1) {
-    const arg = rest[index];
+    let arg = rest[index];
+    if (arg?.startsWith("--") && arg.includes("=")) {
+      const equalIndex = arg.indexOf("=");
+      const key = arg.slice(0, equalIndex);
+      const value = arg.slice(equalIndex + 1);
+      arg = key;
+      rest.splice(index + 1, 0, value);
+    }
     if (arg === "--json") {
       parsed.json = true;
     } else if (arg === "--force") {
@@ -506,8 +516,14 @@ async function expandRequestFileReference(cwd: string, token: string): Promise<s
   if (REQUEST_FILE_GLOB_PATTERN.test(fileReference)) {
     throw new Error(`Glob patterns are not supported in @file references: ${token}. Pass one explicit file path.`);
   }
+  if (fileReference.includes("..") || fileReference.includes("//") || fileReference.startsWith("/") || fileReference.startsWith("\\")) {
+    throw new Error(`Invalid @file reference: ${token}. Path traversal and absolute paths are not allowed.`);
+  }
 
   const filePath = resolve(cwd, fileReference);
+  if (!filePath.startsWith(resolve(cwd))) {
+    throw new Error(`Invalid @file reference: ${token}. File must be inside the project directory.`);
+  }
   let fileStat;
   try {
     fileStat = await stat(filePath);
@@ -651,8 +667,12 @@ async function commandNew(ctx: CommandContext, args: ParsedArgs): Promise<Comman
 
   const updated = [statePath(ctx.cwd)];
   if (inGitWorktree && config.workflow.autoCommit) {
-    await stageFiles(ctx.cwd, [...created, statePath(ctx.cwd)]);
-    await commitStaged(ctx.cwd, `specwright: start ${id}-${slug}`);
+    if (!await hasGitIdentity(ctx.cwd)) {
+      return fail("Git user.name and user.email must be configured to auto-commit. Run git config user.name/email or disable workflow.autoCommit.");
+    }
+    const commitFiles = [...created, statePath(ctx.cwd)];
+    await stageFiles(ctx.cwd, commitFiles);
+    await commitStaged(ctx.cwd, `specwright: start ${id}-${slug}`, undefined, commitFiles);
   }
 
   const summary = `Created change ${id}-${slug} and set it current.`;
@@ -901,7 +921,7 @@ async function commandCheckpoint(ctx: CommandContext, args: ParsedArgs): Promise
   bodyLines.push("Files:", ...args.files.map(file => `- ${file}`));
   const body = bodyLines.join("\n");
   await stageFiles(ctx.cwd, filesToStage);
-  await commitStaged(ctx.cwd, subject, body);
+  await commitStaged(ctx.cwd, subject, body, filesToStage);
   return ok(`Created checkpoint commit for ${unit}.`);
 }
 
@@ -974,20 +994,9 @@ async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<Com
       throw error;
     }
   }
-  // Validate against ORIGINAL cached state (before sync)
+  // Validate against ORIGINAL cached state (before sync). validateChange already
+  // surfaces unreconciled task drift as SW009 issues, so we do not duplicate them here.
   const report = await validateChange(ctx.cwd, change);
-  // Surface sync issues as SW009 errors in the validation report
-  if (syncResult && syncResult.issues.length > 0) {
-    for (const issue of syncResult.issues) {
-      report.issues.push({
-        level: "error",
-        code: "SW009",
-        message: `Unreconciled task drift: ${issue.message}`,
-        file: "tasks.md",
-      });
-    }
-    report.ok = false;
-  }
   const verifyPath = join(changeDir(ctx.cwd, change.id, change.slug), "verify.md");
   await writeFile(verifyPath, renderValidationReport(report), "utf8");
   if (!report.ok) {
@@ -1022,8 +1031,11 @@ async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const handoffPath = join(dir, "handoff.md");
   await writeFile(handoffPath, handoff, "utf8");
   const report = await validateChange(ctx.cwd, change);
+  if (!report.ok) {
+    return fail("Handoff generated but validation failed. Run specwright verify to see issues.", { filesUpdated: [handoffPath] });
+  }
   const allDone = Object.values(change.tasks).length > 0 && Object.values(change.tasks).every((task) => task.status === "done");
-  const status = allDone && report.ok ? "done" : change.status;
+  const status = allDone ? "done" : change.status;
   await updateCachedChange(ctx.cwd, { ...change, status, step: "handoff", updatedAt: ctx.now().toISOString() });
   return ok(`Generated handoff for ${change.id}.`, { filesUpdated: [handoffPath], prompt: handoff });
 }
@@ -1031,8 +1043,12 @@ async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<Co
 async function discoverPackManifests(cwd: string): Promise<string[]> {
   const config = await loadConfig(cwd);
   const manifests: string[] = [];
+  const projectRoot = resolve(cwd);
   for (const root of config.packs.roots) {
     const absoluteRoot = resolve(cwd, root);
+    if (!absoluteRoot.startsWith(projectRoot)) {
+      continue;
+    }
     try {
       for (const entry of await readdir(absoluteRoot, { withFileTypes: true })) {
         if (entry.isDirectory() && await exists(join(absoluteRoot, entry.name, "pack.json"))) {
@@ -1138,7 +1154,12 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
     return fail("Complete requires a git worktree.");
   }
 
-  const branch = await currentBranch(ctx.cwd);
+  let branch: string;
+  try {
+    branch = await currentBranch(ctx.cwd);
+  } catch {
+    return fail("Complete requires a non-detached HEAD.");
+  }
 
   let change = await findCurrentChange(ctx.cwd, args.positionals[0]);
 
@@ -1156,16 +1177,25 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
   if (!await isWorktreeClean(ctx.cwd)) {
     return fail("Complete requires a clean worktree. Commit or stash local changes first.");
   }
+
   // Lifecycle artifact and evidence guards.
-  const synced = await syncChangeTasksForCommand(ctx, change);
-  change = synced;
+  const syncResult = await syncChangeTasksFromFileIfPresent(ctx.cwd, change, ctx.now());
+  if (syncResult.issues.length > 0) {
+    const messages = syncResult.issues.map((issue) => issue.message).join("; ");
+    return fail(`Complete cannot reconcile tasks.md: ${messages}.`);
+  }
+  change = syncResult.change;
+
   const validationReport = await validateChange(ctx.cwd, change);
   if (!validationReport.ok) {
     return fail("Complete requires passing validation. Run specwright verify to see issues.");
   }
 
   const { total, done } = taskProgress(change);
-  if (total > 0 && done !== total) {
+  if (total === 0) {
+    return fail("Complete requires at least one task; add tasks to tasks.md first.");
+  }
+  if (done !== total) {
     return fail(`Complete requires all tasks to be done (${done}/${total} done).`);
   }
 
@@ -1192,8 +1222,8 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
       throw error;
     }
   }
-  if (!verifyContent || !hasNonHeadingContent(verifyContent)) {
-    return fail("Complete requires a non-empty verify.md with observed verification evidence.");
+  if (!verifyContent || !hasObservedOutput(verifyContent)) {
+    return fail("Complete requires verify.md to contain observed command/output evidence.");
   }
   if (!handoffContent || !hasNonHeadingContent(handoffContent)) {
     return fail("Complete requires a non-empty handoff.md.");
@@ -1222,6 +1252,11 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
     try {
       await mergeNoFastForward(ctx.cwd, branch);
     } catch (error) {
+      try {
+        await switchToExistingBranch(ctx.cwd, branch);
+      } catch {
+        // Best-effort rollback failed; leave repo on baseBranch and report original error.
+      }
       return fail(`Merge failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     await updateChangeStep(ctx.cwd, change, "done", "handoff", ctx.now());
@@ -1251,6 +1286,9 @@ async function commandPack(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   }
   if (action === "add") {
     if (!value) return fail("Usage: specwright pack add <id>");
+    if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+      return fail(`Invalid pack id: ${value}. Use only letters, numbers, hyphens, and underscores.`);
+    }
     const source = join(packageRoot(), "packs", value);
     if (!await exists(source)) return fail(`Pack not found locally: ${value}`);
     await cp(source, join(packsDir(ctx.cwd), value), { recursive: true, force: false, errorOnExist: false });

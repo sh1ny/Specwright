@@ -7,18 +7,17 @@
 - Add `specwright complete` as a distinct lifecycle command for finished changes.
 - Supported complete modes are `none`, `push`, `pr`, and `merge`.
 - `publish` remains remote-only; merge behavior is owned by `complete`.
-- `complete --mode none` runs final guards without side effects.
+- `complete --mode none` runs final guards without side effects and is the default when `--mode` is omitted.
 - `complete --mode push` pushes the current feature branch only after guards pass.
-- `complete --mode pr` pushes the branch and opens a PR only after guards pass.
-- `complete --mode merge` switches to the resolved base branch and performs a no-fast-forward merge commit only after guards pass.
-- Fail closed before side effects for invalid git state, dirty worktree, validation failure, incomplete tasks, missing artifacts/evidence, branch/change mismatch, unresolved base, and merge conflicts.
+- `complete --mode pr` pushes the branch and opens a PR via `gh pr create` only after guards pass; existing/duplicate PR behavior is delegated to `gh`.
+- `complete --mode merge` switches to the resolved base branch and performs a no-fast-forward merge commit only after guards pass; it does not fetch or update the base branch first.
+- Fail closed before side effects for invalid git state, detached HEAD, dirty worktree, validation failure, missing or incomplete tasks, missing artifacts/evidence, branch/change mismatch, and unresolved base.
+- `verify.md` must contain observed command/output evidence, not just arbitrary prose.
+- Task sync drift detected while loading `tasks.md` fails the command before the synced change is used.
 
 ## Deferred
 
-- Default mode selection when `--mode` is omitted.
-- Duplicate or existing PR behavior for `complete --mode pr`.
-- Whether `complete --mode merge` should fetch/update the base branch before merging.
-- The exact final artifact completeness policy beyond current validators.
+- None remaining for this change.
 
 ## Ready state
 

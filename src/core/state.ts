@@ -2,13 +2,57 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { changeDir, configPath, statePath } from "./paths";
 import { readJsonFile, writeJsonFile } from "./json";
-import type { ChangeState, ParsedTaskArtifact, SpecwrightAgentConfig, SpecwrightAgentName, SpecwrightConfig, SpecwrightState, TaskState, TaskSyncIssue, TaskSyncIssueKind, TaskSyncResult } from "./types";
+import { validateSpecwrightConfig } from "./validators";
+import type { ChangeKind, ChangeState, ParsedTaskArtifact, SpecwrightAgentConfig, SpecwrightAgentName, SpecwrightConfig, SpecwrightState, TaskState, TaskSyncIssue, TaskSyncIssueKind, TaskSyncResult } from "./types";
 
 type StoredSpecwrightConfig = Partial<Omit<SpecwrightConfig, "agents" | "workflow">> & {
   version?: unknown;
   agents?: Partial<Record<SpecwrightAgentName, Partial<SpecwrightAgentConfig>>>;
   workflow?: Partial<SpecwrightConfig["workflow"]>;
 };
+
+const CHANGE_KINDS = new Set<ChangeKind>(["feature", "bugfix", "refactor", "research"]);
+const SLUG_PATTERN = /^[a-z0-9-]+$/;
+const FOUR_DIGIT_ID_PATTERN = /^\d{4}$/;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertChangeState(value: unknown, id: string): asserts value is ChangeState {
+  if (!isPlainObject(value)) {
+    throw new Error(`Invalid change ${id}: expected object`);
+  }
+  const change = value as Record<string, unknown>;
+  if (change.id !== id || !FOUR_DIGIT_ID_PATTERN.test(String(change.id ?? ""))) {
+    throw new Error(`Invalid change ${id}: id must be a 4-digit string`);
+  }
+  const slug = String(change.slug ?? "");
+  if (!SLUG_PATTERN.test(slug) || slug === "" || slug.includes("..") || slug.includes("/") || slug.includes("\\")) {
+    throw new Error(`Invalid change ${id}: slug must be a safe lowercase slug`);
+  }
+  if (typeof change.title !== "string" || change.title.trim() === "") {
+    throw new Error(`Invalid change ${id}: title must be a non-empty string`);
+  }
+  if (!CHANGE_KINDS.has(change.kind as ChangeKind)) {
+    throw new Error(`Invalid change ${id}: kind must be one of feature, bugfix, refactor, research`);
+  }
+  if (typeof change.pack !== "string") {
+    throw new Error(`Invalid change ${id}: pack must be a string`);
+  }
+  if (change.mode !== "lite" && change.mode !== "full") {
+    throw new Error(`Invalid change ${id}: mode must be lite or full`);
+  }
+  if (typeof change.status !== "string" || typeof change.step !== "string") {
+    throw new Error(`Invalid change ${id}: status and step must be strings`);
+  }
+  if (typeof change.createdAt !== "string" || typeof change.updatedAt !== "string") {
+    throw new Error(`Invalid change ${id}: createdAt and updatedAt must be strings`);
+  }
+  if (!isPlainObject(change.tasks)) {
+    throw new Error(`Invalid change ${id}: tasks must be an object`);
+  }
+}
 
 export function defaultConfig(projectName: string): SpecwrightConfig {
   return {
@@ -262,7 +306,7 @@ export async function loadConfig(cwd: string): Promise<SpecwrightConfig> {
     throw new Error(`Unsupported Specwright config version: ${String(existing.version)}`);
   }
 
-  return {
+  const merged: SpecwrightConfig = {
     version: 1,
     project: {
       ...defaults.project,
@@ -305,6 +349,8 @@ export async function loadConfig(cwd: string): Promise<SpecwrightConfig> {
       ...existing.workflow,
     },
   };
+  validateSpecwrightConfig(merged);
+  return merged;
 }
 
 export async function loadState(cwd: string): Promise<SpecwrightState> {
@@ -314,6 +360,12 @@ export async function loadState(cwd: string): Promise<SpecwrightState> {
   }
   if (state.version !== 1) {
     throw new Error(`Unsupported Specwright state version: ${String(state.version)}`);
+  }
+  if (!isPlainObject(state.changes)) {
+    throw new Error("Invalid Specwright state: changes must be an object");
+  }
+  for (const [id, change] of Object.entries(state.changes)) {
+    assertChangeState(change, id);
   }
   return state as SpecwrightState;
 }
