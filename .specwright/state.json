@@ -674,7 +674,7 @@
       "status": "verifying",
       "step": "verify",
       "createdAt": "2026-06-12T18:06:12.831Z",
-      "updatedAt": "2026-06-12T22:52:13.941Z",
+      "updatedAt": "2026-06-12T23:02:48.905Z",
       "tasks": {
         "T001": {
           "id": "T001",
@@ -751,6 +751,6 @@
       }
     }
   },
-  "updatedAt": "2026-06-12T22:52:13.941Z",
+  "updatedAt": "2026-06-12T23:02:48.905Z",
   "currentChange": "0015"
 }
