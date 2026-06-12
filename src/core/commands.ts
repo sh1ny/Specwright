@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adapterNeedsRegeneration, installOmpAdapter } from "../runtime/omp/install";
-import { writeJsonFile } from "./json";
+import { computeFileFingerprint, readJsonFile, writeJsonFile, type FileFingerprint } from "./json";
 import {
   changeDir,
   changesDir,
@@ -412,6 +412,64 @@ async function writeIfMissing(path: string, content: string, force = false): Pro
   return force && await exists(path) ? "updated" : "created";
 }
 
+interface CodebaseIndex {
+  version: number;
+  generatedAt?: string;
+  entrypoints?: Array<{ path: string }>;
+  modules?: Array<{ path: string; tests?: string[] }>;
+  commands?: unknown[];
+  verification?: unknown[];
+  risks?: unknown[];
+  fingerprints?: Record<string, FileFingerprint>;
+}
+
+async function trackedPaths(index: CodebaseIndex): Promise<Set<string>> {
+  const paths = new Set<string>();
+  for (const entry of index.entrypoints ?? []) {
+    if (entry.path) paths.add(entry.path);
+  }
+  for (const mod of index.modules ?? []) {
+    if (mod.path) paths.add(mod.path);
+    for (const testPath of mod.tests ?? []) {
+      if (testPath) paths.add(testPath);
+    }
+  }
+  return paths;
+}
+
+async function compareRefreshFingerprints(
+  cwd: string,
+  index: CodebaseIndex,
+): Promise<{ stale: string[]; current: Record<string, FileFingerprint> }> {
+  const paths = await trackedPaths(index);
+  const stored = index.fingerprints ?? {};
+  const current: Record<string, FileFingerprint> = {};
+  const stale: string[] = [];
+  for (const rel of paths) {
+    const absolute = resolve(cwd, rel);
+    const computed = await computeFileFingerprint(absolute);
+    if (computed === undefined) {
+      current[rel] = { mtime: 0, size: 0, checksum: "" };
+      if (stored[rel] !== undefined) {
+        stale.push(`${rel} (missing)`);
+      }
+    } else {
+      current[rel] = computed;
+      const previous = stored[rel];
+      if (
+        previous === undefined ||
+        previous.mtime !== computed.mtime ||
+        previous.size !== computed.size ||
+        previous.checksum !== computed.checksum
+      ) {
+        stale.push(`${rel} (changed)`);
+      }
+    }
+  }
+  stale.sort((a, b) => a.localeCompare(b));
+  return { stale, current };
+}
+
 function packageRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
@@ -539,7 +597,32 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   }
 
   const config = await loadConfig(ctx.cwd);
-  const prompt = `# Specwright Scan\n\n${renderContextBudget(config)}\n\nInspect the repository using find, search/OMP grep, read, and lsp when available. Update only these files:\n- .specwright/project/scan.md\n- .specwright/project/tech-stack.md\n- .specwright/project/architecture.md\n- .specwright/project/codebase-map.md\n- .specwright/project/codebase-index.json\n\nDo not load full packs or unrelated docs.\n\n${renderSubagentRetryClause()}`;
+
+  let refreshSection = "";
+  if (args.refresh) {
+    const index = (await readJsonFile<CodebaseIndex>(indexPath)) ?? {
+      version: 1,
+      generatedAt: ctx.now().toISOString(),
+      entrypoints: [],
+      modules: [],
+      commands: [],
+      verification: [],
+      risks: [],
+    };
+    const { stale, current } = await compareRefreshFingerprints(ctx.cwd, index);
+    index.fingerprints = current;
+    await writeJsonFile(indexPath, index);
+    if (!created.includes(indexPath) && !updated.includes(indexPath)) {
+      updated.push(indexPath);
+    }
+    if (stale.length === 0) {
+      refreshSection = "\n\n## Refresh status\n\nNo tracked files are stale; all recorded fingerprints match the current working tree.";
+    } else {
+      refreshSection = `\n\n## Stale files\n\nThe following tracked files changed or are missing since the last refresh:\n${stale.map((line) => `- ${line}`).join("\n")}`;
+    }
+  }
+
+  const prompt = `# Specwright Scan\n\n${renderContextBudget(config)}\n\nInspect the repository using find, search/OMP grep, read, and lsp when available. Update only these files:\n- .specwright/project/scan.md\n- .specwright/project/tech-stack.md\n- .specwright/project/architecture.md\n- .specwright/project/codebase-map.md\n- .specwright/project/codebase-index.json\n\nDo not load full packs or unrelated docs.${refreshSection}\n\n${renderSubagentRetryClause()}`;
   return ok("Prepared project scan prompt.", { prompt, filesCreated: created, filesUpdated: updated });
 }
 

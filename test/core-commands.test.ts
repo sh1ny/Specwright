@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { computeFileFingerprint } from "../src/core/json";
 import { runSpecwrightCommand, renderHelp } from "../src/core/commands";
 import {
   branchNameForChange,
@@ -2561,4 +2562,110 @@ test("scan --json returns accurate result shape", async () => {
   expect(result.filesCreated.length).toBe(3);
   expect(result.filesUpdated).toEqual([]);
   expect(result.prompt).toBeDefined();
+});
+
+test("scan --refresh reports no stale files when fingerprints match", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-fresh-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src", "core"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(join(cwd, "src", "core", "sample.ts"), "export const sample = 1;\n", "utf8");
+  await writeFile(join(cwd, "test", "sample.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  const sampleFp = await computeFileFingerprint(join(cwd, "src", "core", "sample.ts"));
+  const testFp = await computeFileFingerprint(join(cwd, "test", "sample.test.ts"));
+  if (!sampleFp || !testFp) throw new Error("Expected fingerprints for sample files");
+  await writeFile(
+    indexPath,
+    JSON.stringify(
+      {
+        version: 1,
+        generatedAt: ctx.now().toISOString(),
+        entrypoints: [{ path: "src/core/sample.ts", kind: "module" }],
+        modules: [{ path: "src/core/sample.ts", kind: "core", tests: ["test/sample.test.ts"] }],
+        commands: [],
+        verification: [],
+        risks: [],
+        fingerprints: {
+          "src/core/sample.ts": sampleFp,
+          "test/sample.test.ts": testFp,
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toBe("Prepared project scan prompt.");
+  expect(result.prompt).toContain("## Refresh status");
+  expect(result.prompt).toContain("No tracked files are stale; all recorded fingerprints match the current working tree.");
+  expect(result.prompt).not.toContain("## Stale files");
+  expect(result.filesUpdated).toContain(indexPath);
+
+  const refreshed = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(refreshed.fingerprints["src/core/sample.ts"]).toEqual(sampleFp);
+  expect(refreshed.fingerprints["test/sample.test.ts"]).toEqual(testFp);
+});
+
+test("scan --refresh reports deterministic stale warnings for changed and missing files", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-stale-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src", "core"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(join(cwd, "src", "core", "stale.ts"), "export const stale = 1;\n", "utf8");
+  await writeFile(join(cwd, "test", "stale.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+  await writeFile(join(cwd, "src", "core", "new.ts"), "export const fresh = 1;\n", "utf8");
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  const staleFp = await computeFileFingerprint(join(cwd, "src", "core", "stale.ts"));
+  const staleTestFp = await computeFileFingerprint(join(cwd, "test", "stale.test.ts"));
+  if (!staleFp || !staleTestFp) throw new Error("Expected fingerprints for stale files");
+  await writeFile(
+    indexPath,
+    JSON.stringify(
+      {
+        version: 1,
+        generatedAt: ctx.now().toISOString(),
+        entrypoints: [{ path: "src/core/new.ts", kind: "module" }],
+        modules: [{ path: "src/core/stale.ts", kind: "core", tests: ["test/stale.test.ts"] }],
+        commands: [],
+        verification: [],
+        risks: [],
+        fingerprints: {
+          "src/core/stale.ts": staleFp,
+          "test/stale.test.ts": staleTestFp,
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  await writeFile(join(cwd, "src", "core", "stale.ts"), "export const stale = 2;\n", "utf8");
+  await rm(join(cwd, "test", "stale.test.ts"));
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh"]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).toBe("Prepared project scan prompt.");
+  expect(result.prompt).toContain("## Stale files");
+  expect(result.prompt).toContain("- src/core/new.ts (changed)");
+  expect(result.prompt).toContain("- src/core/stale.ts (changed)");
+  expect(result.prompt).toContain("- test/stale.test.ts (missing)");
+  expect(result.prompt).not.toContain("## Refresh status");
+  expect(result.filesUpdated).toContain(indexPath);
+
+  const refreshed = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(refreshed.fingerprints["src/core/stale.ts"]).not.toEqual(staleFp);
+  expect(refreshed.fingerprints["src/core/stale.ts"].checksum).not.toBe(staleFp.checksum);
+  expect(refreshed.fingerprints["test/stale.test.ts"]).toEqual({ mtime: 0, size: 0, checksum: "" });
+  expect(refreshed.fingerprints["src/core/new.ts"]).toBeDefined();
 });
