@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { changeDir } from "./paths";
 import { loadConfig, unreconciledTaskDriftIssues } from "./state";
 import { SPECWRIGHT_AGENT_NAMES } from "./types";
@@ -56,7 +56,7 @@ function isStringArray(value: unknown): value is string[] {
 export function isSafeRelativePath(value: string): boolean {
   if (value === "") return false;
   if (/[\x00-\x1f\x7f]/.test(value)) return false;
-  if (value.startsWith("/") || value.startsWith("\\")) return false;
+  if (posix.isAbsolute(value) || win32.isAbsolute(value)) return false;
   for (const segment of value.split(/[/\\]/)) {
     if (segment === "..") return false;
   }
@@ -173,7 +173,10 @@ export async function validateCodebaseIndex(
 
   async function warnIfMissing(path: string, context: string): Promise<void> {
     try {
-      await stat(join(cwd, path));
+      const stats = await stat(join(cwd, path));
+      if (!stats.isFile()) {
+        issues.push({ level: "warning", code: "SW106", message: `${context} references non-file path: ${path}.` });
+      }
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
         issues.push({ level: "warning", code: "SW106", message: `${context} references missing file: ${path}.` });
@@ -269,6 +272,31 @@ export async function validateCodebaseIndex(
         continue;
       }
       requireString(entry as Record<string, unknown>, "area", context);
+    }
+  }
+
+  const fingerprints = obj.fingerprints;
+  if (fingerprints !== undefined) {
+    if (fingerprints === null || typeof fingerprints !== "object" || Array.isArray(fingerprints)) {
+      issues.push({ level: "error", code: "SW109", message: "fingerprints must be an object keyed by safe relative paths." });
+    } else {
+      for (const [path, fingerprint] of Object.entries(fingerprints)) {
+        validatePath(path, `fingerprints[${JSON.stringify(path)}]`);
+        if (
+          fingerprint === null ||
+          typeof fingerprint !== "object" ||
+          Array.isArray(fingerprint) ||
+          !Number.isFinite((fingerprint as Record<string, unknown>).mtime) ||
+          !Number.isFinite((fingerprint as Record<string, unknown>).size) ||
+          typeof (fingerprint as Record<string, unknown>).checksum !== "string"
+        ) {
+          issues.push({
+            level: "error",
+            code: "SW109",
+            message: `fingerprints[${JSON.stringify(path)}] must contain numeric mtime, numeric size, and string checksum.`,
+          });
+        }
+      }
     }
   }
 

@@ -190,10 +190,12 @@ test("validateCodebaseIndex reports invalid version and shape errors", async () 
 
 test("validateCodebaseIndex reports unsafe and absolute paths", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-index-paths-"));
+  await mkdir(join(cwd, "safe"), { recursive: true });
+  await writeFile(join(cwd, "safe", "test.ts"), "", "utf8");
   const report = await validateCodebaseIndex(cwd, {
     version: 1,
     entrypoints: [],
-    modules: [{ path: "/absolute/module.ts", tests: ["../escape.test.ts", "safe/test.ts"] }],
+    modules: [{ path: "/absolute/module.ts", tests: ["../escape.test.ts", "safe/test.ts"] }, { path: "C:\\Users\\me\\secret.ts" }, { path: "C:/Users/me/secret.ts" }],
     commands: [],
     verification: [],
     risks: [],
@@ -203,6 +205,8 @@ test("validateCodebaseIndex reports unsafe and absolute paths", async () => {
   const messages = report.issues.map((issue) => issue.message);
   expect(messages).toContainEqual(expect.stringContaining("/absolute/module.ts"));
   expect(messages).toContainEqual(expect.stringContaining("../escape.test.ts"));
+  expect(messages).toContainEqual(expect.stringContaining("C:\\Users\\me\\secret.ts"));
+  expect(messages).toContainEqual(expect.stringContaining("C:/Users/me/secret.ts"));
   expect(messages).not.toContainEqual(expect.stringContaining("safe/test.ts"));
   await rm(cwd, { recursive: true, force: true });
 });
@@ -247,6 +251,24 @@ test("validateCodebaseIndex warns when listed paths do not exist", async () => {
   await rm(cwd, { recursive: true, force: true });
 });
 
+test("validateCodebaseIndex warns when listed path is a directory", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-directory-"));
+  await mkdir(join(cwd, "src", "dir"), { recursive: true });
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [],
+    modules: [{ path: "src/dir" }],
+    commands: [],
+    verification: [],
+    risks: [],
+  });
+
+  expect(report.ok).toBe(true);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "warning", code: "SW106", message: expect.stringContaining("non-file path: src/dir") }));
+  await rm(cwd, { recursive: true, force: true });
+});
+
 test("validateCodebaseIndex treats ENOTDIR as a missing indexed path", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-index-enotdir-"));
   await writeFile(join(cwd, "src"), "", "utf8");
@@ -281,5 +303,30 @@ test("validateCodebaseIndex rejects control-character paths without statting the
 
   expect(report.ok).toBe(false);
   expect(report.issues.filter((issue) => issue.level === "error" && issue.code === "SW105").length).toBeGreaterThanOrEqual(2);
+  await rm(cwd, { recursive: true, force: true });
+});
+
+test("validateCodebaseIndex rejects malformed fingerprints", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-fingerprints-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "module.ts"), "", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [],
+    modules: [{ path: "src/module.ts" }],
+    commands: [],
+    verification: [],
+    risks: [],
+    fingerprints: {
+      "src/module.ts": null,
+      "../escape.ts": { mtime: 1, size: 1, checksum: "x" },
+      "src/bad.ts": { mtime: "now", size: 1, checksum: "x" },
+    },
+  });
+
+  expect(report.ok).toBe(false);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW109" }));
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW105", message: expect.stringContaining("../escape.ts") }));
   await rm(cwd, { recursive: true, force: true });
 });

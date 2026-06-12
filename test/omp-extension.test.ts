@@ -1790,6 +1790,8 @@ test("OMP runtime scan prompt includes parallel scout map guidance", async () =>
   expect(result.prompt).toContain("OMP's `task` tool");
   expect(result.prompt).toContain("runtime adapters");
   expect(result.prompt).toContain("fall back to sequential mapping");
+  expect(result.prompt).toContain(".specwright/project/codebase-map.md under Open questions");
+  expect(result.prompt).not.toContain(".specwright/project/scan.md");
 });
 
 test("CLI runtime scan prompt stays neutral without OMP map guidance", async () => {
@@ -1803,4 +1805,6 @@ test("CLI runtime scan prompt stays neutral without OMP map guidance", async () 
   expect(result.prompt).not.toContain("OMP map guidance");
   expect(result.prompt).not.toContain("parallel read-only scouts");
   expect(result.prompt).not.toContain("OMP's `task` tool");
+  expect(result.prompt).toContain(".specwright/project/codebase-map.md under Open questions");
+  expect(result.prompt).not.toContain(".specwright/project/scan.md");
 });

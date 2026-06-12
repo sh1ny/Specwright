@@ -374,6 +374,9 @@ test("renderScanPrompt default mode lists all project intelligence files and bou
   expect(prompt).not.toContain("Refresh contract");
   expect(prompt).toContain("Mapping contract:\n- Preserve existing confirmed facts");
   expect(prompt).not.toContain("Mapping contract:,- Preserve");
+  expect(prompt).toContain("Record the retry in .specwright/project/scan.md under Open questions");
+  expect(prompt).toContain("fingerprints");
+  expect(prompt).toContain("{ \"mtime\": number, \"size\": number, \"checksum\": string }");
 });
 
 test("renderScanPrompt map mode focuses only on map artifacts", () => {
@@ -382,6 +385,7 @@ test("renderScanPrompt map mode focuses only on map artifacts", () => {
   expect(prompt).toContain("Focus only on codebase mapping for this run");
   expect(prompt).toContain(".specwright/project/codebase-map.md");
   expect(prompt).toContain(".specwright/project/codebase-index.json");
+  expect(prompt).toContain("Record the retry in .specwright/project/codebase-map.md under Open questions");
   expect(prompt).not.toContain(".specwright/project/scan.md");
   expect(prompt).not.toContain(".specwright/project/tech-stack.md");
   expect(prompt).not.toContain(".specwright/project/architecture.md");
@@ -405,6 +409,7 @@ test("renderScanPrompt map+refresh mode focuses map artifacts and refresh contra
   expect(prompt).toContain("Refresh the codebase map by patching stale sections");
   expect(prompt).toContain("Focus only on these map artifacts");
   expect(prompt).toContain(".specwright/project/codebase-map.md");
+  expect(prompt).toContain("Record the retry in .specwright/project/codebase-map.md under Open questions");
   expect(prompt).not.toContain(".specwright/project/scan.md");
   expect(prompt).toContain("Refresh contract:");
 });

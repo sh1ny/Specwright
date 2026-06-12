@@ -37,3 +37,7 @@ Choose Option 2.
 
 `scan` is becoming a multi-mode project-intelligence subsystem, not a one-off command. Extracting it keeps the deterministic core easier to test and leaves room for later `scan --query` or workstream-scoped maps without turning `commands.ts` into a second framework. Keep the first extraction boring: one `scan.ts` module, no dependency on Graphify, no dependency on `skill://codemap`, and no compatibility shim for `.slim/codemap.json`.
 
+
+## Final decision
+
+The branch kept the in-place command implementation because the review fixes are localized to `commandScan`, prompt helpers, validators, JSON fingerprint I/O, and tests. Do not create `src/core/scan.ts` as part of this review-fix pass.

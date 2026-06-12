@@ -404,12 +404,13 @@ async function ensureDir(path: string): Promise<void> {
 }
 
 async function writeIfMissing(path: string, content: string, force = false): Promise<"created" | "updated" | "preserved"> {
-  if (!force && await exists(path)) {
+  const existed = await exists(path);
+  if (!force && existed) {
     return "preserved";
   }
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content, "utf8");
-  return force && await exists(path) ? "updated" : "created";
+  return existed ? "updated" : "created";
 }
 async function mapPointerSection(cwd: string): Promise<string> {
   const project = projectDir(cwd);
@@ -436,46 +437,67 @@ interface CodebaseIndex {
   fingerprints?: Record<string, FileFingerprint>;
 }
 
-async function trackedPaths(index: CodebaseIndex): Promise<Set<string>> {
+function trackedPaths(index: CodebaseIndex): Set<string> {
   const paths = new Set<string>();
   const addPath = (value: unknown): void => {
     if (typeof value === "string" && isSafeRelativePath(value)) {
       paths.add(value);
     }
   };
-  for (const entry of index.entrypoints ?? []) {
-    addPath(entry.path);
+  if (Array.isArray(index.entrypoints)) {
+    for (const entry of index.entrypoints) {
+      if (entry !== null && typeof entry === "object") {
+        addPath((entry as Record<string, unknown>).path);
+      }
+    }
   }
-  for (const mod of index.modules ?? []) {
-    addPath(mod.path);
-    for (const testPath of mod.tests ?? []) {
-      addPath(testPath);
+  if (Array.isArray(index.modules)) {
+    for (const mod of index.modules) {
+      if (mod === null || typeof mod !== "object") {
+        continue;
+      }
+      const record = mod as Record<string, unknown>;
+      addPath(record.path);
+      if (Array.isArray(record.tests)) {
+        for (const testPath of record.tests) {
+          addPath(testPath);
+        }
+      }
     }
   }
   return paths;
+}
+
+function isFileFingerprint(value: unknown): value is FileFingerprint {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Number.isFinite((value as Record<string, unknown>).mtime)
+    && Number.isFinite((value as Record<string, unknown>).size)
+    && typeof (value as Record<string, unknown>).checksum === "string";
 }
 
 async function compareRefreshFingerprints(
   cwd: string,
   index: CodebaseIndex,
 ): Promise<{ stale: string[]; current: Record<string, FileFingerprint> }> {
-  const paths = await trackedPaths(index);
+  const paths = trackedPaths(index);
   const stored = index.fingerprints ?? {};
   const current: Record<string, FileFingerprint> = {};
   const stale: string[] = [];
-  for (const rel of paths) {
+  for (const rel of Array.from(paths).sort((a, b) => a.localeCompare(b))) {
     const absolute = resolve(cwd, rel);
     const computed = await computeFileFingerprint(absolute);
+    const previous = stored[rel];
     if (computed === undefined) {
       current[rel] = { mtime: 0, size: 0, checksum: "" };
-      if (stored[rel] !== undefined) {
+      if (previous !== undefined) {
         stale.push(`${rel} (missing)`);
       }
     } else {
       current[rel] = computed;
-      const previous = stored[rel];
       if (
-        previous === undefined ||
+        !isFileFingerprint(previous) ||
         previous.mtime !== computed.mtime ||
         previous.size !== computed.size ||
         previous.checksum !== computed.checksum
@@ -484,7 +506,6 @@ async function compareRefreshFingerprints(
       }
     }
   }
-  stale.sort((a, b) => a.localeCompare(b));
   return { stale, current };
 }
 
@@ -580,15 +601,19 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   const created: string[] = [];
   const updated: string[] = [];
 
-  for (const { path, content } of [
+  const scanArtifacts = [
     { path: join(project, "scan.md"), content: "# Project Scan\n\n## Files inspected\n\n## Patterns found\n\n## Constraints\n\n## Open questions\n" },
     { path: join(project, "tech-stack.md"), content: "# tech stack\n\n" },
     { path: join(project, "architecture.md"), content: "# architecture\n\n" },
+  ];
+  const mapArtifacts = [
     {
       path: join(project, "codebase-map.md"),
       content: `# Codebase Map\n\n## Entry points\n\n## Core modules\n\n## Runtime adapters\n\n## Data and state artifacts\n\n## Command surface\n\n## Test surface\n\n## Build and verification commands\n\n## Conventions\n\n## Known risks and gaps\n\n## Open questions\n`,
     },
-  ]) {
+  ];
+  const artifactsToEnsure = args.map ? mapArtifacts : [...scanArtifacts, ...mapArtifacts];
+  for (const { path, content } of artifactsToEnsure) {
     const result = await writeIfMissing(path, content, args.force);
     if (result === "created") {
       created.push(path);
@@ -606,6 +631,7 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
     commands: [],
     verification: [],
     risks: [],
+    fingerprints: {},
   };
   const indexExists = await exists(indexPath);
   if (args.force || !indexExists) {
@@ -617,34 +643,47 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
     }
   }
 
-  let index = (await readJsonFile<CodebaseIndex>(indexPath)) ?? defaultIndex;
+  const index = (await readJsonFile<CodebaseIndex>(indexPath)) ?? defaultIndex;
 
   const config = await loadConfig(ctx.cwd);
+  const validationReport = await validateCodebaseIndex(ctx.cwd, index);
 
   let refreshSection = "";
-  if (args.refresh) {
+  let refreshResult: { skipped: boolean; staleFiles: string[]; currentFingerprints: Record<string, FileFingerprint> } | undefined;
+  if (args.refresh && !validationReport.ok) {
+    refreshSection = "\n\n## Refresh status\n\nRefresh fingerprint comparison skipped because codebase-index.json has validation errors. Fix the Codebase index validation issues, then rerun `specwright scan --refresh`.";
+    refreshResult = { skipped: true, staleFiles: [], currentFingerprints: {} };
+  } else if (args.refresh) {
     const { stale, current } = await compareRefreshFingerprints(ctx.cwd, index);
-    index.fingerprints = current;
-    await writeJsonFile(indexPath, index);
-    if (!created.includes(indexPath) && !updated.includes(indexPath)) {
-      updated.push(indexPath);
-    }
+    refreshResult = { skipped: false, staleFiles: stale, currentFingerprints: current };
     if (stale.length === 0) {
       refreshSection = "\n\n## Refresh status\n\nNo tracked files are stale; all recorded fingerprints match the current working tree.";
     } else {
-      refreshSection = `\n\n## Stale files\n\nThe following tracked files changed or are missing since the last refresh:\n${stale.map((line) => `- ${line}`).join("\n")}`;
+      refreshSection = `\n\n## Stale files\n\nThe following tracked files changed or are missing since the last refresh:\n${stale.map((line) => `- ${line}`).join("\n")}\n\n## Current fingerprints\n\nAfter updating the stale map sections, update .specwright/project/codebase-index.json fingerprints to this exact JSON object:\n\n\`\`\`json\n${JSON.stringify(current, null, 2)}\n\`\`\``;
     }
   }
 
-  const validationReport = await validateCodebaseIndex(ctx.cwd, index);
   const validationSection = validationReport.issues.length > 0
-    ? "\n\n## Codebase index validation\n\n" + validationReport.issues.map((issue) => `- ${issue.level.toUpperCase()}: ${issue.message}`).join("\n")
+    ? "\n\n## Codebase index validation\n\n" + validationReport.issues.map((issue) => `- ${issue.level.toUpperCase()} ${issue.code}: ${issue.message}`).join("\n")
     : "";
 
   const prompt = ctx.runtime === "omp"
     ? renderOmpScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection })
     : renderScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection });
-  return ok("Prepared project scan prompt.", { prompt, filesCreated: created, filesUpdated: updated });
+  const humanSummary = "Prepared project scan prompt.";
+  const scanSummary = args.json
+    ? JSON.stringify({
+        summary: humanSummary,
+        map: args.map,
+        refresh: args.refresh,
+        filesCreated: created,
+        filesUpdated: updated,
+        validation: validationReport,
+        ...(args.refresh ? { refreshResult } : {}),
+        prompt,
+      }, null, 2)
+    : humanSummary;
+  return ok(scanSummary, { prompt, filesCreated: created, filesUpdated: updated });
 
 }
 
@@ -1343,17 +1382,21 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
     return fail("Complete requires a clean worktree. Commit or stash local changes first.");
   }
 
-  // Lifecycle artifact and evidence guards.
-  const syncResult = await syncChangeTasksFromFileIfPresent(ctx.cwd, change, ctx.now());
-  if (syncResult.issues.length > 0) {
-    const messages = syncResult.issues.map((issue) => issue.message).join("; ");
-    return fail(`Complete cannot reconcile tasks.md: ${messages}.`);
-  }
-  change = syncResult.change;
-
-  const validationReport = await validateChange(ctx.cwd, change);
-  if (!validationReport.ok) {
-    return fail("Complete requires passing validation. Run specwright verify to see issues.");
+  // Lifecycle artifact and evidence guards. Sync tasks in memory only; complete
+  // must not dirty state.json before every guard has passed.
+  const tasksPath = join(changeDir(ctx.cwd, change.id, change.slug), "tasks.md");
+  try {
+    const tasksMarkdown = await readFile(tasksPath, "utf8");
+    const syncResult = syncChangeTasksFromMarkdown(change, tasksMarkdown, ctx.now());
+    if (syncResult.issues.length > 0) {
+      const messages = syncResult.issues.map((issue) => issue.message).join("; ");
+      return fail(`Complete cannot reconcile tasks.md: ${messages}.`);
+    }
+    change = syncResult.change;
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
   }
 
   const { total, done } = taskProgress(change);
@@ -1392,6 +1435,11 @@ async function commandComplete(ctx: CommandContext, args: ParsedArgs): Promise<C
   }
   if (!handoffContent || !hasNonHeadingContent(handoffContent)) {
     return fail("Complete requires a non-empty handoff.md.");
+  }
+
+  const validationReport = await validateChange(ctx.cwd, change);
+  if (!validationReport.ok) {
+    return fail("Complete requires passing validation. Run specwright verify to see issues.");
   }
   const remote = config.workflow.remote;
 

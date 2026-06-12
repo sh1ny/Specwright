@@ -11,3 +11,4 @@
 
 ## Summary
 
+`specwright scan` now preserves map-only scope, emits machine-readable JSON when requested, and prepares refresh prompts without prematurely persisting fresh fingerprints. Index validation now catches unsafe paths, malformed fingerprints, and directory/non-file references before refresh traversal.

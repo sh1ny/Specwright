@@ -11,11 +11,14 @@ export interface FileFingerprint {
 export async function computeFileFingerprint(path: string): Promise<FileFingerprint | undefined> {
   try {
     const stats = await stat(path);
+    if (!stats.isFile()) {
+      return undefined;
+    }
     const content = await readFile(path);
     const checksum = createHash("sha256").update(content).digest("hex");
     return { mtime: stats.mtimeMs, size: stats.size, checksum };
   } catch (error) {
-    if (error && typeof error === "object" && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+    if (error && typeof error === "object" && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR" || error.code === "EISDIR")) {
       return undefined;
     }
     throw error;

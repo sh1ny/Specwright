@@ -4,18 +4,16 @@
 
 ## Local evidence
 
-- Current `commandScan` only ensures `.specwright/project/scan.md` and emits a bounded prompt to update `scan.md`, `tech-stack.md`, and `architecture.md`; it does not create `codebase-map.md` or `codebase-index.json` (`src/core/commands.ts:496-502`).
-- `ensureProjectFiles` creates `charter.md`, `principles.md`, `glossary.md`, `tech-stack.md`, and `architecture.md` during init, so scan currently depends on init-created project files instead of ensuring the full project-intelligence set itself (`src/core/commands.ts:438-445`).
-- `.specwright/project/` currently contains `architecture.md`, `scan.md`, `tech-stack.md`, `charter.md`, `glossary.md`, and `principles.md`; `codebase-map.md` and `codebase-index.json` are absent.
-- `ParsedArgs` has `json`, `force`, and `printPrompt`, but no `map` or `refresh` fields (`src/core/commands.ts:48-64`). `parseArgs` handles `--json`, `--force`, and `--print-prompt`; it treats unknown `--map`/`--refresh` flags as `unknown` today (`src/core/commands.ts:121-204`).
-- `CommandResult` already carries `filesCreated`, `filesUpdated`, and optional `prompt`; JSON-mode commands can return JSON in `summary` while preserving the same result shape (`src/core/types.ts:149-157`).
-- Runtime-neutral prompt helpers live in `src/core/prompts.ts`; OMP-specific lifecycle/discuss wording lives in `src/runtime/omp/prompts.ts`. New map prompt wording should keep the same split (`src/core/prompts.ts:31-36`, `src/runtime/omp/prompts.ts:30-67`).
-- Lifecycle prompts are assembled inline in `commands.ts`; research and plan have explicit read-first lists (`src/core/commands.ts:750-779`, `src/core/commands.ts:796-825`), execute embeds its read-first list in one prompt string (`src/core/commands.ts:961-979`), and handoff writes a read-first section into `handoff.md` (`src/core/commands.ts:1035-1055`). None reference project map artifacts today.
-- Validation has reusable issue/report types with `error`/`warning` levels (`src/core/validators.ts:8-18`) and a safe-relative-path helper rejecting absolute and parent-directory paths (`src/core/validators.ts:56-63`). A command-scoped `codebase-index.json` validator can follow this pattern without becoming lifecycle-blocking.
-- JSON helpers already provide safe JSON read and atomic JSON write (`src/core/json.ts:13-29`).
-- `projectDir(cwd)` centralizes `.specwright/project` path construction (`src/core/paths.ts:16-18`).
-- `renderHelp` still documents `specwright scan [--print-prompt]`, so the help text must add `--map`, `--refresh`, and JSON behavior (`src/core/commands.ts:1350-1352`).
-- Existing tests cover command behavior, prompt content, OMP-vs-core prompt wording, and validation patterns in `test/core-commands.test.ts`, `test/core-prompts.test.ts`, and `test/core-validators.test.ts`; no scan-specific tests were found by search.
+- Pre-change `commandScan` on main only ensured `.specwright/project/scan.md` and emitted a bounded prompt to update `scan.md`, `tech-stack.md`, and `architecture.md`; it did not create `codebase-map.md` or `codebase-index.json` (`src/core/commands.ts` on main).
+- Pre-change `ParsedArgs` had `json`, `force`, and `printPrompt`, but no `map` or `refresh` fields; `parseArgs` treated unknown `--map`/`--refresh` flags as `unknown` on main.
+- Current `commandScan` scopes artifact writes: default scan ensures `scan.md`, `tech-stack.md`, `architecture.md`, `codebase-map.md`, and `codebase-index.json`; `scan --map` ensures only `codebase-map.md` and `codebase-index.json` (`src/core/commands.ts:598-646`).
+- `writeIfMissing` records pre-write existence before writing, so forced creation and forced updates report accurate `filesCreated`/`filesUpdated` values (`src/core/commands.ts:406-413`).
+- `scan --json` now serializes `summary`, `map`, `refresh`, `filesCreated`, `filesUpdated`, `validation`, optional `refreshResult`, and `prompt` in `CommandResult.summary` while preserving the existing `CommandResult` shape (`src/core/commands.ts:673-686`; `src/core/types.ts:149-157`).
+- Refresh validation now runs before fingerprint traversal; invalid indexes produce a skipped-refresh prompt instead of traversal crashes (`src/core/commands.ts:648-668`; `src/core/validators.ts:111-305`).
+- Refresh no longer writes new fingerprints immediately. Stale refresh prompts include a current-fingerprint JSON patch that the mapping agent applies after updating map sections (`src/core/commands.ts:656-663`).
+- Directory and non-file paths are warnings, not crashes: `validateCodebaseIndex` stats listed entry/module/test paths and emits `SW106` for non-file paths (`src/core/validators.ts:174-187`).
+- `computeFileFingerprint` returns `undefined` for directories and treats `EISDIR` like missing/non-traversable paths, preserving refresh execution when a tracked path is a directory (`src/core/json.ts:11-23`).
+- Map-only prompts record retry attempts in `.specwright/project/codebase-map.md` rather than `.specwright/project/scan.md`, preserving map-only scope (`src/core/prompts.ts:35-41`, `src/core/prompts.ts:110-152`).
 
 ## Research attempts
 

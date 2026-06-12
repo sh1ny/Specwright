@@ -5,9 +5,15 @@
 <frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
 ## Goal
 
+Extend `specwright scan` with file-backed codebase mapping and safe refresh prompts.
+
 ## Users
 
+Agents and operators preparing bounded, durable project intelligence before planning or handoff.
+
 ## Non-goals
+
+Graph databases, embeddings, whole-repo eager reads, and mandatory fresh-map enforcement.
 
 </frozen-after-approval>
 
@@ -207,13 +213,13 @@ Do not blindly add the full map to every prompt. The map exists to reduce contex
 
 ## Acceptance criteria
 
-- `specwright scan --map` creates or updates `codebase-map.md` and `codebase-index.json`.
+- `specwright scan --map` ensures `codebase-map.md` and `codebase-index.json` exist; without `--force` it preserves existing map artifacts and emits an update prompt, and with `--force` it regenerates only those two map artifacts.
 - Existing scan behavior still works.
 - The map prompt is runtime-neutral in core code.
 - OMP-specific instructions live in the OMP prompt adapter.
 - `codebase-index.json` is validated for shape and safe relative paths.
 - Later lifecycle prompts can reference the map without eagerly loading unrelated content.
-- Tests cover artifact creation, prompt contents, JSON validation, and `--refresh` behavior.
+- Tests cover artifact creation, map-only force scoping, prompt contents, scan JSON shape, index validation, directory paths, malformed fingerprints, and `--refresh` no-premature-persist behavior.
 
 ## Non-goals
 
@@ -227,9 +233,8 @@ Do not blindly add the full map to every prompt. The map exists to reduce contex
 
 1. `specwright scan --query <question>` over `codebase-index.json`.
 2. `specwright scan --graphify` handoff to the external Graphify workflow.
-3. Staleness detection based on file mtimes or checksums.
-4. Workstream-scoped maps once Specwright supports workstreams.
-5. Runtime-specific map sections for non-OMP adapters.
+3. Workstream-scoped maps once Specwright supports workstreams.
+4. Runtime-specific map sections for non-OMP adapters.
 
 ### Discuss-settled intent
 

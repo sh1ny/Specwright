@@ -89,12 +89,17 @@ async function createCompleteFixture(prefix: string): Promise<
     "utf8",
   );
   await writeFile(
+    join(changeDir, "evidence.md"),
+    "# Evidence\n\n## Local evidence\n\nFixture evidence for complete command guards.\n",
+    "utf8",
+  );
+  await writeFile(
     join(changeDir, "handoff.md"),
     "# Handoff\n\n## Goal\n\nImplement inventory crafting.\n",
     "utf8",
   );
-  await stageFiles(cwd, [join(changeDir, "tasks.md"), join(changeDir, "verify.md"), join(changeDir, "handoff.md"), statePath]);
-  await commitStaged(cwd, "add tasks verify and handoff");
+  await stageFiles(cwd, [join(changeDir, "tasks.md"), join(changeDir, "verify.md"), join(changeDir, "handoff.md"), join(changeDir, "evidence.md"), statePath]);
+  await commitStaged(cwd, "add tasks verify evidence and handoff");
 
   const branch = (await expectGit(cwd, ["branch", "--show-current"])).stdout.trim();
   return { cwd, ctx, changeDir, branch, statePath, remote };
@@ -1559,6 +1564,11 @@ test("handoff on an explicit non-current change does not modify currentChange", 
     "- [x] T001: Build something\n",
     "utf8",
   );
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-first/verify.md"),
+    "# Verify\n\n## Observed output\n\n`bun test` passed.\n",
+    "utf8",
+  );
 
   const result = await runSpecwrightCommand(ctx, ["handoff", "0001"]);
   expect(result.ok).toBe(true);
@@ -2258,9 +2268,8 @@ test("complete fails when verify.md only has an empty observed output section", 
 
 test("complete pr pushes branch and opens pull request", async () => {
   const { cwd, ctx, branch, remote } = await createCompleteFixture("specwright-complete-pr-");
-  const binDir = join(cwd, "bin");
+  const binDir = await mkdtemp(join(tmpdir(), "specwright-complete-pr-bin-"));
   const capture = join(cwd, "gh-complete-capture.json");
-  await mkdir(binDir);
   const ghPath = join(binDir, "gh");
   await writeFile(
     ghPath,
@@ -2333,9 +2342,8 @@ test("complete prevents push, pr, and merge side effects on later guard failures
   await stageFiles(cwd, [join(changeDir, "intent.md")]);
   await commitStaged(cwd, "setup for later guard failure test");
 
-  const binDir = join(cwd, "bin");
+  const binDir = await mkdtemp(join(tmpdir(), "specwright-complete-guard-bin-"));
   const capture = join(cwd, "gh-guard-capture.json");
-  await mkdir(binDir);
   const ghPath = join(binDir, "gh");
   await writeFile(
     ghPath,
@@ -2448,7 +2456,7 @@ test("scan accepts --map, --refresh, and combinations without treating them as u
     "--print-prompt",
   ]);
   expect(combinedResult.ok).toBe(true);
-  expect(combinedResult.summary).toBe("Prepared project scan prompt.");
+  expect(JSON.parse(combinedResult.summary).summary).toBe("Prepared project scan prompt.");
 });
 
 test("scan still rejects unknown flags", async () => {
@@ -2495,6 +2503,26 @@ test("scan ensures all project intelligence artifacts", async () => {
   expect(Array.isArray(index.commands)).toBe(true);
   expect(Array.isArray(index.verification)).toBe(true);
   expect(Array.isArray(index.risks)).toBe(true);
+  expect(index.fingerprints).toEqual({});
+});
+
+test("scan --map ensures only map artifacts", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-map-artifacts-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--map"]);
+  expect(result.ok).toBe(true);
+
+  const project = join(cwd, ".specwright", "project");
+  const scanPath = join(project, "scan.md");
+  const mapPath = join(project, "codebase-map.md");
+  const indexPath = join(project, "codebase-index.json");
+
+  expect(result.filesCreated.sort()).toEqual([indexPath, mapPath].sort());
+  expect(result.filesUpdated).toEqual([]);
+  expect(await readFile(mapPath, "utf8")).toContain("# Codebase Map");
+  await expect(readFile(scanPath, "utf8")).rejects.toThrow();
 });
 
 test("scan preserves existing map artifacts unless --force is used", async () => {
@@ -2540,6 +2568,36 @@ test("scan --force regenerates existing map artifacts", async () => {
   expect(JSON.parse(await readFile(indexPath, "utf8")).generatedAt).toBe(ctx.now().toISOString());
 });
 
+test("scan --map --force regenerates only map artifacts", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-map-force-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const project = join(cwd, ".specwright", "project");
+  const scanPath = join(project, "scan.md");
+  const techStackPath = join(project, "tech-stack.md");
+  const architecturePath = join(project, "architecture.md");
+  const mapPath = join(project, "codebase-map.md");
+  const indexPath = join(project, "codebase-index.json");
+
+  await writeFile(scanPath, "# Custom scan\n\n", "utf8");
+  await writeFile(techStackPath, "# Custom tech stack\n\n", "utf8");
+  await writeFile(architecturePath, "# Custom architecture\n\n", "utf8");
+  await writeFile(mapPath, "# Stale map\n\n", "utf8");
+  await writeFile(indexPath, JSON.stringify({ version: 1, generatedAt: "2020-01-01T00:00:00.000Z", entrypoints: [], modules: [], commands: [], verification: [], risks: [], fingerprints: {} }, null, 2), "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--map", "--force"]);
+  expect(result.ok).toBe(true);
+  expect(result.filesCreated).toEqual([]);
+  expect(result.filesUpdated.sort()).toEqual([indexPath, mapPath].sort());
+  expect(await readFile(scanPath, "utf8")).toBe("# Custom scan\n\n");
+  expect(await readFile(techStackPath, "utf8")).toBe("# Custom tech stack\n\n");
+  expect(await readFile(architecturePath, "utf8")).toBe("# Custom architecture\n\n");
+  expect(await readFile(mapPath, "utf8")).toContain("# Codebase Map");
+  expect(JSON.parse(await readFile(indexPath, "utf8")).generatedAt).toBe(ctx.now().toISOString());
+});
+
 test("scan prompt references map artifacts", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-prompt-"));
   const ctx = testContext(cwd);
@@ -2558,10 +2616,15 @@ test("scan --json returns accurate result shape", async () => {
 
   const result = await runSpecwrightCommand(ctx, ["scan", "--json"]);
   expect(result.ok).toBe(true);
-  expect(result.summary).toBe("Prepared project scan prompt.");
-  expect(result.filesCreated.length).toBe(3);
-  expect(result.filesUpdated).toEqual([]);
-  expect(result.prompt).toBeDefined();
+  const payload = JSON.parse(result.summary);
+  expect(payload.summary).toBe("Prepared project scan prompt.");
+  expect(payload.map).toBe(false);
+  expect(payload.refresh).toBe(false);
+  expect(payload.filesCreated).toEqual(result.filesCreated);
+  expect(payload.filesUpdated).toEqual(result.filesUpdated);
+  expect(payload.validation.ok).toBe(true);
+  expect(typeof payload.prompt).toBe("string");
+  expect(payload.prompt).toContain(".specwright/project/codebase-map.md");
 });
 
 test("scan --refresh reports no stale files when fingerprints match", async () => {
@@ -2578,27 +2641,24 @@ test("scan --refresh reports no stale files when fingerprints match", async () =
   const sampleFp = await computeFileFingerprint(join(cwd, "src", "core", "sample.ts"));
   const testFp = await computeFileFingerprint(join(cwd, "test", "sample.test.ts"));
   if (!sampleFp || !testFp) throw new Error("Expected fingerprints for sample files");
-  await writeFile(
-    indexPath,
-    JSON.stringify(
-      {
-        version: 1,
-        generatedAt: ctx.now().toISOString(),
-        entrypoints: [{ path: "src/core/sample.ts", kind: "module" }],
-        modules: [{ path: "src/core/sample.ts", kind: "core", tests: ["test/sample.test.ts"] }],
-        commands: [],
-        verification: [],
-        risks: [],
-        fingerprints: {
-          "src/core/sample.ts": sampleFp,
-          "test/sample.test.ts": testFp,
-        },
+  const originalIndex = JSON.stringify(
+    {
+      version: 1,
+      generatedAt: ctx.now().toISOString(),
+      entrypoints: [{ path: "src/core/sample.ts", kind: "module" }],
+      modules: [{ path: "src/core/sample.ts", kind: "core", tests: ["test/sample.test.ts"] }],
+      commands: [],
+      verification: [],
+      risks: [],
+      fingerprints: {
+        "src/core/sample.ts": sampleFp,
+        "test/sample.test.ts": testFp,
       },
-      null,
-      2,
-    ),
-    "utf8",
+    },
+    null,
+    2,
   );
+  await writeFile(indexPath, originalIndex, "utf8");
 
   const result = await runSpecwrightCommand(ctx, ["scan", "--refresh"]);
   expect(result.ok).toBe(true);
@@ -2606,11 +2666,8 @@ test("scan --refresh reports no stale files when fingerprints match", async () =
   expect(result.prompt).toContain("## Refresh status");
   expect(result.prompt).toContain("No tracked files are stale; all recorded fingerprints match the current working tree.");
   expect(result.prompt).not.toContain("## Stale files");
-  expect(result.filesUpdated).toContain(indexPath);
-
-  const refreshed = JSON.parse(await readFile(indexPath, "utf8"));
-  expect(refreshed.fingerprints["src/core/sample.ts"]).toEqual(sampleFp);
-  expect(refreshed.fingerprints["test/sample.test.ts"]).toEqual(testFp);
+  expect(result.filesUpdated).not.toContain(indexPath);
+  expect(await readFile(indexPath, "utf8")).toBe(originalIndex);
 });
 
 test("scan --refresh reports deterministic stale warnings for changed and missing files", async () => {
@@ -2653,21 +2710,27 @@ test("scan --refresh reports deterministic stale warnings for changed and missin
   await writeFile(join(cwd, "src", "core", "stale.ts"), "export const stale = 2;\n", "utf8");
   await rm(join(cwd, "test", "stale.test.ts"));
 
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh"]);
+  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--json"]);
   expect(result.ok).toBe(true);
-  expect(result.summary).toBe("Prepared project scan prompt.");
+  const payload = JSON.parse(result.summary);
+  expect(payload.refreshResult.skipped).toBe(false);
+  expect(payload.refreshResult.staleFiles).toEqual([
+    "src/core/new.ts (changed)",
+    "src/core/stale.ts (changed)",
+    "test/stale.test.ts (missing)",
+  ]);
   expect(result.prompt).toContain("## Stale files");
   expect(result.prompt).toContain("- src/core/new.ts (changed)");
   expect(result.prompt).toContain("- src/core/stale.ts (changed)");
   expect(result.prompt).toContain("- test/stale.test.ts (missing)");
-  expect(result.prompt).not.toContain("## Refresh status");
-  expect(result.filesUpdated).toContain(indexPath);
+  expect(result.prompt).toContain("## Current fingerprints");
+  expect(result.prompt).toContain("\"src/core/new.ts\"");
+  expect(result.filesUpdated).not.toContain(indexPath);
 
   const refreshed = JSON.parse(await readFile(indexPath, "utf8"));
-  expect(refreshed.fingerprints["src/core/stale.ts"]).not.toEqual(staleFp);
-  expect(refreshed.fingerprints["src/core/stale.ts"].checksum).not.toBe(staleFp.checksum);
-  expect(refreshed.fingerprints["test/stale.test.ts"]).toEqual({ mtime: 0, size: 0, checksum: "" });
-  expect(refreshed.fingerprints["src/core/new.ts"]).toBeDefined();
+  expect(refreshed.fingerprints["src/core/stale.ts"]).toEqual(staleFp);
+  expect(refreshed.fingerprints["test/stale.test.ts"]).toEqual(staleTestFp);
+  expect(refreshed.fingerprints["src/core/new.ts"]).toBeUndefined();
 });
 
 test("scan --refresh skips unsafe index paths before fingerprinting", async () => {
@@ -2700,9 +2763,69 @@ test("scan --refresh skips unsafe index paths before fingerprinting", async () =
   expect(result.ok).toBe(true);
   expect(result.prompt).toContain("## Codebase index validation");
   expect(result.prompt).toContain("not a safe relative path");
+  expect(result.prompt).toContain("Refresh fingerprint comparison skipped because codebase-index.json has validation errors");
 
   const refreshed = JSON.parse(await readFile(indexPath, "utf8"));
   expect(refreshed.fingerprints["../escape.ts"]).toBeUndefined();
+});
+
+test("scan --refresh reports malformed index shape without throwing", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-shape-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  await writeFile(
+    indexPath,
+    JSON.stringify({ version: 1, entrypoints: [], modules: [null], commands: [], verification: [], risks: [], fingerprints: {} }, null, 2),
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("modules[0] must be an object");
+  expect(result.prompt).toContain("Refresh fingerprint comparison skipped because codebase-index.json has validation errors");
+});
+
+test("scan --refresh reports malformed fingerprints without throwing", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-fingerprint-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src", "core"), { recursive: true });
+  await writeFile(join(cwd, "src", "core", "sample.ts"), "export const sample = 1;\n", "utf8");
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  await writeFile(
+    indexPath,
+    JSON.stringify({ version: 1, entrypoints: [], modules: [{ path: "src/core/sample.ts" }], commands: [], verification: [], risks: [], fingerprints: { "src/core/sample.ts": null } }, null, 2),
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("SW109");
+  expect(result.prompt).toContain("Refresh fingerprint comparison skipped because codebase-index.json has validation errors");
+});
+
+test("scan --refresh treats directory paths as validation warnings", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-directory-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src", "dir"), { recursive: true });
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  await writeFile(
+    indexPath,
+    JSON.stringify({ version: 1, entrypoints: [], modules: [{ path: "src/dir" }], commands: [], verification: [], risks: [], fingerprints: {} }, null, 2),
+    "utf8",
+  );
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("references non-file path: src/dir");
 });
 
 test("scan --map prompt focuses only on map artifacts", async () => {
@@ -2781,7 +2904,7 @@ test("scan surfaces validation issues for an invalid codebase-index.json", async
   expect(result.prompt).toContain("missing file");
 });
 
-test("scan --json surfaces validation issues without changing summary shape", async () => {
+test("scan --json surfaces validation issues in machine-readable output", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-validation-json-"));
   const ctx = testContext(cwd);
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
@@ -2792,9 +2915,9 @@ test("scan --json surfaces validation issues without changing summary shape", as
     indexPath,
     JSON.stringify(
       {
-        version: 2,
+        version: 1,
         generatedAt: ctx.now().toISOString(),
-        entrypoints: [],
+        entrypoints: [{ path: "../escape.ts" }],
         modules: [],
         commands: [],
         verification: [],
@@ -2808,9 +2931,11 @@ test("scan --json surfaces validation issues without changing summary shape", as
 
   const result = await runSpecwrightCommand(ctx, ["scan", "--json"]);
   expect(result.ok).toBe(true);
-  expect(result.summary).toBe("Prepared project scan prompt.");
+  const payload = JSON.parse(result.summary);
+  expect(payload.validation.ok).toBe(false);
+  expect(payload.validation.issues.some((issue: { message: string }) => issue.message.includes("not a safe relative path"))).toBe(true);
   expect(result.prompt).toContain("## Codebase index validation");
-  expect(result.prompt).toContain("Expected version 1");
+  expect(result.prompt).toContain("not a safe relative path");
 });
 test("research prompt includes map pointer when map artifacts exist", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-research-map-"));
@@ -2901,6 +3026,11 @@ test("handoff prompt includes map pointer when no task is specified", async () =
     "- [x] T001: Build something\n",
     "utf8",
   );
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-test-handoff-map-pointer/verify.md"),
+    "# Verify\n\n## Observed output\n\n`bun test` passed.\n",
+    "utf8",
+  );
 
   const result = await runSpecwrightCommand(ctx, ["handoff"]);
   expect(result.ok).toBe(true);
@@ -2920,6 +3050,11 @@ test("handoff prompt omits map pointer when task is specified", async () => {
   await writeFile(
     join(cwd, ".specwright/changes/0001-test-handoff-task-map-pointer/tasks.md"),
     "- [x] T001: Build something\n",
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, ".specwright/changes/0001-test-handoff-task-map-pointer/verify.md"),
+    "# Verify\n\n## Observed output\n\n`bun test` passed.\n",
     "utf8",
   );
 

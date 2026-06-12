@@ -50,6 +50,38 @@
   - Acceptance: Prompts cite map artifact paths without inlining contents; absent artifacts produce no pointer; execute includes only task-relevant pointers or a reference path.
   - Verification: Run targeted lifecycle prompt tests in `test/core-commands.test.ts`.
 
+## Wave 4 — Review fixes
+
+- [x] T008: Scope map writes and JSON summary
+  - Files: `src/core/commands.ts`, `test/core-commands.test.ts`
+  - Action: Scope `scan --map` writes to map artifacts and return a parseable JSON summary for `scan --json`.
+  - Acceptance: Map-only force leaves non-map project notes unchanged; JSON payload includes summary, mode flags, file lists, validation, and prompt.
+  - Verification: `bun test test/core-commands.test.ts -t "scan --map"` and `bun test test/core-commands.test.ts -t "scan --json"`.
+
+- [x] T009: Harden index validation and fingerprints
+  - Files: `src/core/json.ts`, `src/core/validators.ts`, `test/core-validators.test.ts`, `test/core-commands.test.ts`
+  - Action: Reject Windows/absolute/unsafe index paths, validate fingerprint shape, warn on directories, and make fingerprint reads directory-safe.
+  - Acceptance: Malformed fingerprints and unsafe paths are errors; directory paths warn without throwing.
+  - Verification: `bun test test/core-validators.test.ts -t "validateCodebaseIndex"`.
+
+- [x] T010: Preserve refresh baseline until map update
+  - Files: `src/core/commands.ts`, `test/core-commands.test.ts`
+  - Action: Validate before refresh traversal, skip comparison on invalid indexes, and provide current fingerprint patches without writing them immediately.
+  - Acceptance: Refresh reports stale/current fingerprints while leaving existing index fingerprints unchanged until an agent applies the patch.
+  - Verification: `bun test test/core-commands.test.ts -t "scan --refresh"`.
+
+- [x] T011: Align scan prompt retry targets
+  - Files: `src/core/prompts.ts`, `src/runtime/omp/prompts.ts`, `test/core-prompts.test.ts`, `test/omp-extension.test.ts`
+  - Action: Send map-only retry notes to `codebase-map.md` and document the fingerprint wire shape in the mapping contract.
+  - Acceptance: Default retries target `scan.md`; map and map-refresh retries target `codebase-map.md`; OMP prompt inherits the target and keeps OMP guidance separate.
+  - Verification: `bun test test/core-prompts.test.ts -t "renderScanPrompt"` and `bun test test/omp-extension.test.ts -t "scan prompt"`.
+
+- [x] T012: Refresh change artifacts
+  - Files: `.specwright/changes/0015-proposal-extend-specwright-scan-with-a-codebase-map-reader-internal/*`
+  - Action: Align intent, evidence, sources, plan, options, handoff, tasks, change summary, and verification with implemented review-fix behavior.
+  - Acceptance: Artifacts no longer claim map-only runs update non-map files or that refresh persists fingerprints before the map update.
+  - Verification: `bun src/cli.ts verify 0015-proposal-extend-specwright-scan-with-a-codebase-map-reader-internal`.
+
 ## Verification status
 
 - Status: PASS (recorded in `verify.md`)
