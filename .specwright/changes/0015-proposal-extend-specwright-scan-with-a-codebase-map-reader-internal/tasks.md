@@ -10,7 +10,7 @@
   - Acceptance: `specwright scan --map`, `specwright scan --refresh`, and combinations with `--json`, `--force`, and `--print-prompt` parse deterministically.
   - Verification: Run targeted command parser/help tests in `test/core-commands.test.ts`.
 
-- [ ] T002: Ensure map artifacts
+- [x] T002: Ensure map artifacts
   - Files: `src/core/commands.ts`, `src/core/json.ts`, `test/core-commands.test.ts`
   - Action: Make scan ensure `scan.md`, `tech-stack.md`, `architecture.md`, `codebase-map.md`, and a valid version-1 `codebase-index.json` under `projectDir(cwd)`.
   - Acceptance: Missing files are created; existing map/index content is preserved unless `--force` is used; `filesCreated`, `filesUpdated`, prompt, and `--json` result shape are accurate.
