@@ -1081,6 +1081,18 @@ test("verify syncs task artifact changes before updating change status", async (
   expect(state.changes["0001"].tasks.T001.status).toBe("done");
   expect(state.changes["0001"].tasks.T002.status).toBe("pending");
 });
+
+test("verify preserves existing observed command output", async () => {
+  const { cwd, ctx, dir } = await createCommandSyncFixture("specwright-verify-preserve-output-", taskListMarkdown(false, false));
+  const observedOutput = "```\n$ bun test\nTest Results:\n   PASS: 2 passed\n```\n";
+  await writeFile(join(dir, "verify.md"), `# Verification\n\n## Result\n\nPASS\n\n## Issues\n\nNo issues.\n\n## Observed output\n\n${observedOutput}`, "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["verify"]);
+  expect(result.ok).toBe(true);
+
+  const verify = await readFile(join(dir, "verify.md"), "utf8");
+  expect(verify).toContain(observedOutput);
+});
 test("verify reports SW009 for title drift even when tasks.md was edited", async () => {
   const { cwd, ctx, dir } = await createCommandSyncFixture("specwright-verify-drift-", taskListMarkdown(false, false));
   expect((await runSpecwrightCommand(ctx, ["tasks"])).ok).toBe(true);
@@ -2222,6 +2234,21 @@ test("complete fails when verify.md has prose but no observed output", async () 
   );
   await stageFiles(cwd, [join(changeDir, "verify.md")]);
   await commitStaged(cwd, "setup for verify prose test");
+
+  const result = await runSpecwrightCommand(ctx, ["complete"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toBe("Complete requires verify.md to contain observed command/output evidence.");
+});
+
+test("complete fails when verify.md only has an empty observed output section", async () => {
+  const { cwd, ctx, changeDir } = await createCompleteFixture("specwright-complete-verify-empty-observed-");
+  await writeFile(
+    join(changeDir, "verify.md"),
+    "# Verify\n\n## Observed output\n\n",
+    "utf8",
+  );
+  await stageFiles(cwd, [join(changeDir, "verify.md")]);
+  await commitStaged(cwd, "setup for empty observed output test");
 
   const result = await runSpecwrightCommand(ctx, ["complete"]);
   expect(result.ok).toBe(false);

@@ -979,6 +979,14 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
   return ok(`Prepared execute prompt for ${task.id}.`, { prompt });
 }
 
+function preservedObservedOutput(markdown: string | undefined): string {
+  if (!markdown) return "";
+  const match = markdown.match(/(?:^|\n)## Observed output\s*\n([\s\S]*)$/i);
+  if (!match) return "";
+  const content = match[1] ?? "";
+  return content.length > 0 && !content.endsWith("\n") ? `${content}\n` : content;
+}
+
 async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   const change = await findCurrentChange(ctx.cwd, args.positionals[0]);
   // Compute sync result without persisting, so validation can detect drift
@@ -996,9 +1004,17 @@ async function commandVerify(ctx: CommandContext, args: ParsedArgs): Promise<Com
   }
   // Validate against ORIGINAL cached state (before sync). validateChange already
   // surfaces unreconciled task drift as SW009 issues, so we do not duplicate them here.
-  const report = await validateChange(ctx.cwd, change);
   const verifyPath = join(changeDir(ctx.cwd, change.id, change.slug), "verify.md");
-  await writeFile(verifyPath, renderValidationReport(report), "utf8");
+  let existingVerify: string | undefined;
+  try {
+    existingVerify = await readFile(verifyPath, "utf8");
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
+  }
+  const report = await validateChange(ctx.cwd, change);
+  await writeFile(verifyPath, renderValidationReport(report, preservedObservedOutput(existingVerify)), "utf8");
   if (!report.ok) {
     const summary = args.json ? JSON.stringify(report, null, 2) : "Specwright validation failed.";
     return fail(summary, { filesUpdated: [verifyPath] });

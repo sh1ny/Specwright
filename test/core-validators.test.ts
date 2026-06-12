@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSpecwrightCommand } from "../src/core/commands";
 import { defaultConfig, findCurrentChange, upsertChange } from "../src/core/state";
-import { validateChange, validateSpecwrightConfig } from "../src/core/validators";
+import { hasObservedOutput, validateChange, validateSpecwrightConfig } from "../src/core/validators";
 
 test("validators reject duplicate task IDs", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-validators-"));
@@ -144,4 +144,10 @@ test("validators accept workflow config defaults and reject unsafe git values", 
   expect(() => validateSpecwrightConfig({ ...config, workflow: { ...config.workflow, remote: "bad remote" } })).toThrow(
     "Invalid workflow.remote",
   );
+});
+
+test("hasObservedOutput requires content under the observed output heading", () => {
+  expect(hasObservedOutput("# Verification\n\n## Observed output\n\n")).toBe(false);
+  expect(hasObservedOutput("# Verification\n\n## Observed output\n\n```\n$ bun test\nPASS\n```\n")).toBe(true);
+  expect(hasObservedOutput("# Verification\n\nObserved command output: bun test passed.\n")).toBe(true);
 });

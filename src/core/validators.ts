@@ -108,6 +108,15 @@ async function readArtifact(cwd: string, change: ChangeState, file: string): Pro
   }
 }
 
+function isNonHeadingContentLine(trimmed: string): boolean {
+  return trimmed.length > 0
+    && !trimmed.startsWith("#")
+    && !trimmed.startsWith("-->")
+    && !trimmed.startsWith("<frozen-after-approval")
+    && trimmed !== "</frozen-after-approval>"
+    && !trimmed.startsWith("```");
+}
+
 export function hasNonHeadingContent(markdown: string): boolean {
   let inHtmlComment = false;
   return markdown.split(/\r?\n/).some((line) => {
@@ -124,16 +133,27 @@ export function hasNonHeadingContent(markdown: string): boolean {
       }
       return false;
     }
-    return trimmed.length > 0
-      && !trimmed.startsWith("#")
-      && !trimmed.startsWith("-->")
-      && !trimmed.startsWith("<frozen-after-approval")
-      && trimmed !== "</frozen-after-approval>";
+    return isNonHeadingContentLine(trimmed);
   });
 }
 
 export function hasObservedOutput(markdown: string): boolean {
-  return /observed (command|output)|command output|observed output/i.test(markdown);
+  let inObservedSection = false;
+  const observedPattern = /observed (command|output)|command output|observed output/i;
+  for (const line of markdown.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (/^#{1,6}\s+/.test(trimmed)) {
+      inObservedSection = observedPattern.test(trimmed);
+      continue;
+    }
+    if (observedPattern.test(trimmed) && isNonHeadingContentLine(trimmed)) {
+      return true;
+    }
+    if (inObservedSection && isNonHeadingContentLine(trimmed)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function taskBlocks(tasksMarkdown: string): Array<{ id: string; title: string; block: string; checked: boolean }> {
@@ -246,7 +266,7 @@ export async function validateChange(cwd: string, change: ChangeState): Promise<
   };
 }
 
-export function renderValidationReport(report: ValidationReport): string {
+export function renderValidationReport(report: ValidationReport, observedOutput = ""): string {
   const result = report.ok ? "PASS" : "FAIL";
   const issues = report.issues.length === 0
     ? "No issues."
@@ -255,5 +275,5 @@ export function renderValidationReport(report: ValidationReport): string {
       return `- ${issue.level.toUpperCase()} ${issue.code}${file}: ${issue.message}`;
     }).join("\n");
 
-  return `# Verification\n\n## Result\n\n${result}\n\n## Issues\n\n${issues}\n\n## Observed output\n\n`;
+  return `# Verification\n\n## Result\n\n${result}\n\n## Issues\n\n${issues}\n\n## Observed output\n\n${observedOutput}`;
 }
