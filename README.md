@@ -20,12 +20,12 @@ Specwright helps you run a change through a repeatable lifecycle:
 6. **Verify** — check the change against its acceptance criteria.
 7. **Handoff** — leave enough context for the next maintainer or agent.
 
-The tool stores change artifacts under `.specwright/`, tracks current state in a local state file, and provides commands that print prompts or perform workflow bookkeeping.
+The tool stores change artifacts and project scan notes under `.specwright/`, tracks current workflow state in a local state file, and provides commands that print prompts or perform workflow bookkeeping.
 
 ## Requirements
 
 - Bun
-- Git
+- Git for branch, checkpoint, publish, and complete workflows
 - Node-compatible shell environment
 
 Install dependencies after cloning:
@@ -40,6 +40,13 @@ Initialize Specwright in a repository:
 
 ```bash
 bun run specwright init
+```
+
+Create or refresh project scan notes and the deterministic codebase index:
+
+```bash
+bun run specwright scan
+bun run specwright scan --json
 ```
 
 Check current workflow state:
@@ -65,6 +72,31 @@ bun run specwright execute --task T001
 bun run specwright verify
 bun run specwright handoff
 ```
+
+## Project scanning
+
+`specwright scan` keeps mechanical codebase facts command-owned and leaves interpretation to agents or maintainers.
+
+On every run, Specwright rebuilds the deterministic codebase index and writes it only when it is missing, stale, or forced. The index contains file inventory, fingerprints, package scripts, entrypoints, modules, tests, verification commands, and scan coverage risks. Agents should treat that data as read-only evidence.
+
+The editable scan documents remain prose-owned. Use them for architecture notes, conventions, semantic summaries, and open questions. Do not hand-edit checksums or fingerprint JSON.
+
+Useful scan modes:
+
+```bash
+bun run specwright scan
+bun run specwright scan --json
+bun run specwright scan --map
+bun run specwright scan --refresh
+```
+
+Scan modes:
+- plain `scan` — refresh deterministic index data and prompt for project prose review.
+- `--json` — return observable scan state such as `indexUpdated`, `staleFiles`, `scannedFiles`, `indexedFiles`, and `truncated`.
+- `--map` — focus the prose prompt on the codebase map while keeping deterministic index ownership unchanged.
+- `--refresh` — compatibility spelling for the same deterministic refresh path, with refresh-oriented prompt wording.
+
+Scan works without Git. In Git repositories, Specwright can use tracked and untracked file discovery while respecting ignore rules.
 
 ## Publishing and completing a change
 
