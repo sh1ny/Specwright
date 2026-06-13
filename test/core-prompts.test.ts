@@ -459,6 +459,23 @@ test("renderScanPrompt surfaces validation issues and scratch-rebuild status", (
   expect(prompt).toContain("ERROR SW100: version must be 1");
   expect(prompt).toContain("Hard validation errors in the existing codebase-index.json caused a scratch rebuild");
 });
+test("renderScanPrompt never requests manual fingerprint edits in any mode", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const modes: Array<{ map: boolean; refresh: boolean }> = [
+    { map: false, refresh: false },
+    { map: true, refresh: false },
+    { map: false, refresh: true },
+    { map: true, refresh: true },
+  ];
+
+  for (const { map, refresh } of modes) {
+    const prompt = renderScanPrompt({ config, map, refresh, deterministicSummary: scanSummary() });
+    expect(prompt).not.toContain("## Current fingerprints");
+    expect(prompt).not.toContain('"mtime": number');
+    expect(prompt).not.toContain('{ "mtime": number, "size": number, "checksum": string }');
+    expect(prompt).toContain("Never author, paste, or hand-edit fingerprints");
+  }
+});
 
 test("renderOmpScanPrompt includes parallel scout guidance for mapping subsystems", () => {
   const config = defaultConfig("omp-scan-prompt-test");
