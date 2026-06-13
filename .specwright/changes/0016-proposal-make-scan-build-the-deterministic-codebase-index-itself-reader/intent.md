@@ -243,3 +243,10 @@ Focused scenarios:
 ## Success signal
 
 A maintainer can run plain `specwright scan --json` in a fresh non-Git project and get a populated, deterministic, current `codebase-index.json` without any agent-authored checksum JSON. Re-running scan without changes is a no-op. Editing an indexed file updates its fingerprint through the command path. The agent prompt only asks for semantic prose review.
+
+### Discuss settlements
+
+- `specwright scan --map` remains accepted only as compatibility spelling; it should not keep a separate map-only deterministic index path.
+- Hard validation errors in an existing `codebase-index.json` trigger a deterministic rebuild without preserving semantic fields from the invalid object.
+- Discovery should be git-assisted when Git is available and fall back to deterministic filesystem discovery for non-Git projects.
+- Scan prompts must never ask agents to author, paste, or hand-edit fingerprints; agents own semantic prose only.
