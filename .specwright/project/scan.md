@@ -2,7 +2,7 @@
 
 ## Last scanned
 
-- 2026-06-13T10:31:39.106Z
+- 2026-06-13T15:02:23.528Z
 
 ## Sources inspected
 
@@ -10,6 +10,7 @@
 - `tsconfig.json:1-18` — ES2022/Bundler strict TypeScript compiler settings.
 - `bin/specwright.mjs:1-23`, `src/cli.ts:1-26` — published wrapper and Bun CLI entrypoint.
 - `src/core/commands.ts:48-80,263-371,429-509,598-686,1513-1548` — argument model, config keys, scan/index refresh support, dispatcher, command help.
+- `src/core/codebase-index.ts` — command-owned deterministic codebase map builder; discovers files through Git or filesystem fallback, classifies entrypoints/modules/tests, derives package scripts, records risks, and fingerprints indexed files.
 - `src/core/state.ts:57-87,124-279,299-421`, `src/core/types.ts:1-132`, `src/core/paths.ts:1-42` — defaults, lifecycle/domain types, task sync, config/state loading, path layout.
 - `src/core/validators.ts:73-99,100-308,408-493` — config validation, codebase-index validation, change validation, validation report rendering.
 - `src/runtime/omp/extension.ts:1-222`, `src/runtime/omp/install.ts:39-187`, `src/runtime/omp/status.ts:61-232` — OMP command/tools/hooks, generated adapter files, passive status behavior.
@@ -24,7 +25,7 @@
 - The fixed lifecycle is `discuss -> research -> plan -> execute -> verify -> handoff` (`src/core/types.ts:4`, `packs/core/workflows/feature.json:5-12`).
 - Machine state lives in `.specwright/config.json` and `.specwright/state.json`; change artifacts live under `.specwright/changes/<id>-<slug>/` (`src/core/paths.ts:4-25`).
 - Task truth is Markdown checklist syntax in `tasks.md`; sync detects malformed lines, duplicate IDs, title drift, and cached tasks missing from artifacts (`src/core/state.ts:124-279`).
-- `scan` now ensures `codebase-map.md` and `codebase-index.json`, validates the index, and can compare fingerprints for refresh/staleness (`src/core/commands.ts:598-686`, `src/core/validators.ts:100-308`).
+- `scan` now ensures project prose artifacts, regenerates command-owned `codebase-index.json` through the deterministic builder, validates generated index data, and emits a bounded prose-update prompt (`src/core/commands.ts:598-686`, `src/core/codebase-index.ts`, `src/core/validators.ts:100-308`).
 - OMP is the only runtime integration. Runtime-specific code stays under `src/runtime/omp/*` and wraps the core command engine (`src/runtime/omp/extension.ts:24-61`).
 - The OMP extension registers `/specwright`, tools (`specwright_status`, `specwright_checkpoint`, `specwright_validate`), passive status hooks, and a `tool_call` guard for lifecycle subagent routing (`src/runtime/omp/extension.ts:64-160`).
 - Packs are local file trees. The built-in `core` pack defines 13 artifacts, one `feature` workflow, four lifecycle agent cards, and one validator set (`packs/core/pack.json:1-33`).
@@ -38,7 +39,7 @@
 - Keep core runtime-neutral. OMP behavior belongs in `src/runtime/omp/*`.
 - Keep CLI behavior deterministic and prompt-producing.
 - Keep project scans bounded: do not load full packs or unrelated docs.
-- Preserve the file ownership model: human/model-editable Markdown artifacts, CLI-owned JSON cache.
+- Preserve the file ownership model: human/model-editable Markdown artifacts, CLI-owned JSON cache, and command-owned codebase-index fingerprints.
 - `codebase-index.json` paths must be safe relative paths and fingerprints must be `{mtime,size,checksum}` objects (`src/core/validators.ts:278-299`).
 
 ## Open questions

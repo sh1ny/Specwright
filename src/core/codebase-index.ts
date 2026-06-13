@@ -130,6 +130,14 @@ interface DiscoveredFile {
 function normalizePath(relPath: string): string {
   return relPath.replace(/\\/g, "/");
 }
+function compareCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+function compareRisk(a: { area: string; summary?: string }, b: { area: string; summary?: string }): number {
+  return compareCodeUnit(`${a.area}:${a.summary ?? ""}`, `${b.area}:${b.summary ?? ""}`);
+}
+
+
 
 function shouldExclude(relPath: string): boolean {
   const normalized = normalizePath(relPath);
@@ -147,7 +155,8 @@ function isTestFile(relPath: string): boolean {
   if (/[.-](?:test|spec)\.[^.]+$/i.test(base)) {
     return true;
   }
-  return /[\\/](?:__tests?__|tests?)(?:[\\/]|$)/i.test(normalizePath(relPath));
+  const normalized = normalizePath(relPath);
+  return /^(?:__tests?__|tests?)(?:\/|$)/i.test(normalized) || /\/(?:__tests?__|tests?)(?:\/|$)/i.test(normalized);
 }
 
 function inferKind(relPath: string): string {
@@ -198,12 +207,9 @@ async function discoverFiles(
   const gitFiles = await tryGitFileList(cwd);
   if (gitFiles !== undefined) {
     const files: DiscoveredFile[] = [];
-    for (const relPath of gitFiles.sort((a, b) => a.localeCompare(b))) {
+    for (const relPath of gitFiles.sort(compareCodeUnit)) {
       if (shouldExclude(relPath)) {
         continue;
-      }
-      if (files.length >= maxFilesScanned) {
-        return { files, scannedFiles: files.length, truncated: true };
       }
       const absolute = resolve(cwd, relPath);
       try {
@@ -213,6 +219,9 @@ async function discoverFiles(
           continue;
         }
         if (st.isFile()) {
+          if (files.length >= maxFilesScanned) {
+            return { files, scannedFiles: files.length, truncated: true };
+          }
           files.push({ relPath, absolute, size: st.size });
         }
       } catch {
@@ -235,7 +244,7 @@ async function discoverFiles(
     } catch {
       return;
     }
-    const sorted = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
+    const sorted = entries.slice().sort((a, b) => compareCodeUnit(a.name, b.name));
     for (const entry of sorted) {
       if (truncated) {
         break;
@@ -254,11 +263,11 @@ async function discoverFiles(
       } else if (entry.isFile()) {
         try {
           const st = await stat(absolute);
-          files.push({ relPath, absolute, size: st.size });
           if (files.length >= maxFilesScanned) {
             truncated = true;
             break;
           }
+          files.push({ relPath, absolute, size: st.size });
         } catch {
           // Ignore files that disappeared during the walk.
         }
@@ -327,7 +336,7 @@ function packageEntrypointCandidates(
       entrypoints.push({ path, kind: "bin" });
     }
   } else if (isRecord(pkg.bin)) {
-    for (const [name, value] of Object.entries(pkg.bin).sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [name, value] of Object.entries(pkg.bin).sort(([a], [b]) => compareCodeUnit(a, b))) {
       if (typeof value === "string") {
         const path = normalizePackageEntrypointPath(value, filePaths);
         if (path !== undefined) {
@@ -356,7 +365,7 @@ function addPackageCommands(pkg: PackageInfo, commands: Array<{ name: string; su
   if (!isRecord(pkg.scripts)) {
     return;
   }
-  for (const name of Object.keys(pkg.scripts).sort()) {
+  for (const name of Object.keys(pkg.scripts).sort(compareCodeUnit)) {
     commands.push({ name, summary: `package script: ${name}` });
   }
 }
@@ -421,12 +430,12 @@ function normalizeIndexPart(index: CodebaseIndex): NormalizedIndexPart {
       }
       return out;
     })
-    .sort((a, b) => a.path.localeCompare(b.path));
+    .sort((a, b) => compareCodeUnit(a.path, b.path));
   const modules = (index.modules ?? [])
     .map((mod) => {
       const out: { path: string; kind?: string; summary?: string; tests: string[] } = {
         path: mod.path,
-        tests: [...(mod.tests ?? [])].sort(),
+        tests: [...(mod.tests ?? [])].sort(compareCodeUnit),
       };
       if (mod.kind !== undefined) {
         out.kind = mod.kind;
@@ -436,17 +445,13 @@ function normalizeIndexPart(index: CodebaseIndex): NormalizedIndexPart {
       }
       return out;
     })
-    .sort((a, b) => a.path.localeCompare(b.path));
-  const commands = [...(index.commands ?? [])].sort((a, b) => a.name.localeCompare(b.name));
-  const verification = [...(index.verification ?? [])].sort((a, b) => a.command.localeCompare(b.command));
-  const risks = [...(index.risks ?? [])].sort((a, b) => {
-    const aKey = `${a.area}:${a.summary ?? ""}`;
-    const bKey = `${b.area}:${b.summary ?? ""}`;
-    return aKey.localeCompare(bKey);
-  });
+    .sort((a, b) => compareCodeUnit(a.path, b.path));
+  const commands = [...(index.commands ?? [])].sort((a, b) => compareCodeUnit(a.name, b.name));
+  const verification = [...(index.verification ?? [])].sort((a, b) => compareCodeUnit(a.command, b.command));
+  const risks = [...(index.risks ?? [])].sort(compareRisk);
   const fingerprints = Object.entries(index.fingerprints ?? {})
     .filter((entry): entry is [string, FileFingerprint] => isFileFingerprint(entry[1]))
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => compareCodeUnit(a, b))
     .map(([path, fp]) => [path, { mtime: fp.mtime, size: fp.size, checksum: fp.checksum }] as [string, { mtime: number; size: number; checksum: string }]);
   return { entrypoints, modules, commands, verification, risks, fingerprints };
 }
@@ -476,6 +481,10 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   const verification: Array<{ command: string; purpose?: string }> = [];
   let indexedFiles = 0;
   let indexedTruncated = false;
+  type EntryPointRecord = NonNullable<CodebaseIndex["entrypoints"]>[number];
+  type ModuleRecord = NonNullable<CodebaseIndex["modules"]>[number];
+  const entrypointPaths = new Set<string>();
+  const modulesByPath = new Map<string, ModuleRecord>();
 
   function checkIndexedCap(): boolean {
     if (indexedFiles >= limits.maxIndexedFiles) {
@@ -485,12 +494,35 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     return false;
   }
 
+  function addEntrypoint(entry: EntryPointRecord): void {
+    if (entrypointPaths.has(entry.path)) {
+      return;
+    }
+    if (checkIndexedCap()) {
+      return;
+    }
+    entrypoints.push(entry);
+    entrypointPaths.add(entry.path);
+    indexedFiles++;
+  }
+
+  function addModule(mod: ModuleRecord): ModuleRecord | undefined {
+    const existing = modulesByPath.get(mod.path);
+    if (existing) {
+      return existing;
+    }
+    if (checkIndexedCap()) {
+      return undefined;
+    }
+    modules.push(mod);
+    modulesByPath.set(mod.path, mod);
+    indexedFiles++;
+    return mod;
+  }
+
   if (pkg) {
     for (const entry of packageEntrypointCandidates(pkg, filePaths)) {
-      if (!checkIndexedCap()) {
-        entrypoints.push(entry);
-        indexedFiles++;
-      }
+      addEntrypoint(entry);
     }
     addPackageVerification(pkg, verification);
     addPackageCommands(pkg, commands);
@@ -502,9 +534,6 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     if (file.relPath === "package.json") {
       continue;
     }
-    if (file.size > limits.maxFingerprintBytesPerFile) {
-      risks.push({ area: "large file skipped", summary: `Skipped fingerprint for large file: ${file.relPath}` });
-    }
     if (isTestFile(file.relPath)) {
       testPaths.push(file.relPath);
       continue;
@@ -514,23 +543,14 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     const isEntry = normalized.startsWith("bin/") || ENTRYPOINT_BASE_NAMES[base] === true;
     const kind = inferKind(file.relPath);
     if (isEntry) {
-      if (!checkIndexedCap()) {
-        entrypoints.push({ path: file.relPath, kind });
-        indexedFiles++;
-      }
-      if (!checkIndexedCap()) {
-        modules.push({ path: file.relPath, kind });
-        indexedFiles++;
-      }
+      addEntrypoint({ path: file.relPath, kind });
+      addModule({ path: file.relPath, kind });
     } else if (SOURCE_EXTENSIONS[extname(file.relPath).toLowerCase()] === true) {
-      if (!checkIndexedCap()) {
-        modules.push({ path: file.relPath, kind });
-        indexedFiles++;
-      }
+      addModule({ path: file.relPath, kind });
     }
   }
 
-  for (const testPath of testPaths.sort()) {
+  for (const testPath of testPaths.sort(compareCodeUnit)) {
     const candidate = findAssociatedModule(testPath, modules);
     let associated = false;
     if (candidate) {
@@ -542,10 +562,7 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
       }
     }
     if (!associated) {
-      if (!checkIndexedCap()) {
-        modules.push({ path: testPath, kind: "test" });
-        indexedFiles++;
-      }
+      addModule({ path: testPath, kind: "test" });
     }
   }
 
@@ -556,20 +573,15 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     });
   }
 
-  entrypoints.sort((a, b) => a.path.localeCompare(b.path));
-  modules.sort((a, b) => a.path.localeCompare(b.path));
+  entrypoints.sort((a, b) => compareCodeUnit(a.path, b.path));
+  modules.sort((a, b) => compareCodeUnit(a.path, b.path));
   for (const mod of modules) {
     if (mod.tests) {
-      mod.tests = Array.from(new Set(mod.tests)).sort();
+      mod.tests = Array.from(new Set(mod.tests)).sort(compareCodeUnit);
     }
   }
-  commands.sort((a, b) => a.name.localeCompare(b.name));
-  verification.sort((a, b) => a.command.localeCompare(b.command));
-  risks.sort((a, b) => {
-    const aKey = `${a.area}:${a.summary ?? ""}`;
-    const bKey = `${b.area}:${b.summary ?? ""}`;
-    return aKey.localeCompare(bKey);
-  });
+  commands.sort((a, b) => compareCodeUnit(a.name, b.name));
+  verification.sort((a, b) => compareCodeUnit(a.command, b.command));
 
   if (options.existing) {
     const existingEntrypoints = new Map((options.existing.entrypoints ?? []).map((entry) => [entry.path, entry]));
@@ -598,7 +610,7 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
         const previousTests = previous.tests ?? [];
         const merged = Array.from(
           new Set([...(mod.tests ?? []), ...previousTests.filter((testPath) => filePaths.has(testPath))]),
-        ).sort();
+        ).sort(compareCodeUnit);
         if (merged.length > 0) {
           mod.tests = merged;
         }
@@ -628,11 +640,6 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
       }
     }
 
-    risks.sort((a, b) => {
-      const aKey = `${a.area}:${a.summary ?? ""}`;
-      const bKey = `${b.area}:${b.summary ?? ""}`;
-      return aKey.localeCompare(bKey);
-    });
   }
 
   const fileByPath = new Map(files.map((file) => [file.relPath, file]));
@@ -652,9 +659,10 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   const fingerprints: Record<string, FileFingerprint> = {};
   const staleFiles: string[] = [];
   const previousFingerprints = options.existing?.fingerprints ?? {};
-  for (const relPath of Array.from(indexedPaths).sort((a, b) => a.localeCompare(b))) {
+  for (const relPath of Array.from(indexedPaths).sort(compareCodeUnit)) {
     const file = fileByPath.get(relPath);
     if (file && file.size > limits.maxFingerprintBytesPerFile) {
+      risks.push({ area: "large file skipped", summary: `Skipped fingerprint for large file: ${relPath}` });
       continue;
     }
     const absolute = resolve(options.cwd, relPath);
@@ -675,12 +683,14 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
       }
     }
   }
-  for (const relPath of Object.keys(previousFingerprints).sort((a, b) => a.localeCompare(b))) {
+  for (const relPath of Object.keys(previousFingerprints).sort(compareCodeUnit)) {
     if (!indexedPaths.has(relPath) && isSafeRelativePath(relPath) && !filePaths.has(relPath)) {
       staleFiles.push(`${relPath} (missing)`);
     }
   }
-  staleFiles.sort((a, b) => a.localeCompare(b));
+  staleFiles.sort(compareCodeUnit);
+
+  risks.sort(compareRisk);
 
   const candidate: CodebaseIndex = {
     version: 1,

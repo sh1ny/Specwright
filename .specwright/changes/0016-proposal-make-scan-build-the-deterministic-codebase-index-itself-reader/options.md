@@ -23,5 +23,5 @@ Tradeoffs:
 
 ## Recommendation
 
-Adopt Option 1. It matches the intent, constraints, and acceptance criteria: plain scan is the primary UX, the index is always command-owned, fingerprints are never agent-authored, and the second-scan idempotency test (`indexUpdated: false`) is straightforward to verify. Git-assisted discovery can be added later as an optimization inside `buildCodebaseIndex()` without changing the command flow.
+Adopt Option 1. It matches the intent, constraints, and acceptance criteria: plain scan is the primary UX, the index is always command-owned, fingerprints are never agent-authored, and the second-scan idempotency test (`indexUpdated: false`) is straightforward to verify. Git-assisted discovery is included inside buildCodebaseIndex() when Git file listing is available, with a deterministic filesystem fallback for non-Git directories; this keeps the command flow unchanged.
 

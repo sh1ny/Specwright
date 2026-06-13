@@ -2,119 +2,116 @@
 
 Scope: `main...refactor/0016-proposal-make-scan-build-the-deter`
 
-Verdict: **FIX BEFORE MERGE**
+Verdict: **FIX BEFORE MERGE** until the follow-up review findings below are resolved.
 
-Reviewed 21 changed files via 8 parallel reviewer agents. Each reviewer ran `git diff main...refactor/0016-proposal-make-scan-build-the-deter -- <assigned files>` for its assigned files. One disputed test-failure claim was spot-checked with `bun test test/core-commands.test.ts`; result: `139 passed`.
+Reviewed the current PR scope via 8 parallel reviewer agents. This artifact supersedes the earlier 21-file review snapshot.
 
 ## Findings
 
-### [MEDIUM] Unsafe package entrypoints can escape scan filters
+### [MEDIUM] Deterministic ordering depends on host locale
 
-**Files**: `src/core/codebase-index.ts:296-305`, `src/core/commands.ts:573-575`
+**File**: `src/core/codebase-index.ts`
 
-**Issue**: Package `main`/`module`/`bin` paths are added directly and later persisted without revalidating the generated index. Absolute or `../` paths, or ignored `dist/` paths, can be fingerprinted/written despite traversal filters.
+**Issue**: Index sorting uses `localeCompare`, so entrypoint, module, command, verification, risk, stale-file, and fingerprint order can differ across host locale/ICU settings.
 
-**Why it matters**: `specwright scan` can persist an invalid or unsafe `codebase-index.json`, including paths outside the intended workspace or files excluded from traversal.
+**Required fix**: Use a private code-unit comparator for all deterministic index ordering and prove the public module order follows it.
 
-**Suggestion**: Normalize package entrypoints through the same safe-relative-path and exclusion checks before adding them; validate the generated index before `writeJsonFile`.
+### [MEDIUM] Root test directories are not classified as tests
 
-### [MEDIUM] Git path discovery corrupts valid filenames
+**File**: `src/core/codebase-index.ts`
 
-**File**: `src/core/codebase-index.ts:190-193`
+**Issue**: `isTestFile()` only matches `test/`, `tests/`, and `__tests__/` when preceded by a slash, so root-level test directories can become normal modules or lose source associations.
 
-**Issue**: `git ls-files -z` entries are `.trim()`ed. Valid tracked filenames with leading/trailing spaces are changed before `lstat`.
+**Required fix**: Match root and nested test directories after slash normalization while keeping the basename suffix rule.
 
-**Why it matters**: The scanner can omit valid tracked files or fingerprint a different trimmed path if it exists.
+### [MEDIUM] Exact scan cap is reported as truncation
 
-**Suggestion**: Split on `\0`; filter only `line.length > 0`.
+**File**: `src/core/codebase-index.ts`
 
-### [MEDIUM] Indexed file cap is bypassed by associated tests
+**Issue**: Discovery marks `truncated: true` as soon as `files.length >= maxFilesScanned`, even when exactly the cap was scanned and no eligible file was omitted.
 
-**File**: `src/core/codebase-index.ts:479-488`
+**Required fix**: Set truncation only when an eligible regular file would be skipped because the cap is already full.
 
-**Issue**: Associated tests are appended to modules without cap accounting. Many matching tests can be fingerprinted while `truncated: false`.
+### [MEDIUM] Duplicate entrypoints inflate indexed cap accounting
 
-**Why it matters**: The deterministic index can exceed its intended resource bounds and report misleading cap state.
+**File**: `src/core/codebase-index.ts`
 
-**Suggestion**: Count associated tests against the same cap or exclude them from fingerprinted/indexed paths.
+**Issue**: The same path can be added once from package metadata and again from inferred entrypoint detection, producing duplicate entries and duplicate `indexedFiles` increments.
 
-### [MEDIUM] Test association by basename is ambiguous
+**Required fix**: Deduplicate entrypoints and modules by path before cap accounting, while allowing a path to appear once in each array.
 
-**File**: `src/core/codebase-index.ts:483-488`
+### [MEDIUM] Large-file risks are emitted for unindexed files
 
-**Issue**: `index.test.ts` can attach to the first lexicographic `index.ts` in another directory.
+**File**: `src/core/codebase-index.ts`
 
-**Why it matters**: The generated module-to-test metadata can point reviewers and agents at unrelated tests.
+**Issue**: The pre-classification pass reports `large file skipped` for oversized assets that are discovered but never fingerprint candidates.
 
-**Suggestion**: Prefer same-directory/nearest-source matching before basename fallback.
+**Required fix**: Emit the risk only during fingerprinting for oversized indexed paths.
 
-### [MEDIUM] Read stream errors abort scan
+### [MEDIUM] Risk ordering is not final after fingerprint-time additions
 
-**File**: `src/core/codebase-index.ts:118-119`
+**File**: `src/core/codebase-index.ts`
 
-**Issue**: If a file disappears or becomes unreadable after `stat`, the stream rejection aborts `buildCodebaseIndex`.
+**Issue**: Risks are sorted before existing user risks and fingerprint-time large-file risks are appended, so final risk order can drift.
 
-**Why it matters**: Scan can fail on ordinary repository churn, especially for untracked files discovered by Git.
+**Required fix**: Use a shared private risk comparator and sort once after all deterministic and preserved risks are present.
 
-**Suggestion**: Catch read-stream errors and mark the path stale/skipped instead of aborting the full index build.
+### [MEDIUM] Index-builder regression tests miss review cases
 
-### [MEDIUM] `scan --map` prompt has contradictory artifact ownership
+**File**: `test/core-commands.test.ts`
 
-**File**: `src/core/prompts.ts:166-192`
+**Issue**: Existing tests do not cover root test directories, exact scan-cap semantics, indexed-only large-file risks, deduped package/inferred entrypoints, Git tracked/untracked/ignored discovery, or code-unit sort order.
 
-**Issue**: Map mode still says agent-owned files include `scan.md`, `tech-stack.md`, and `architecture.md`, while retry/update target narrows to `codebase-map.md`.
+**Required fix**: Add targeted regression tests for each case.
 
-**Why it matters**: A map-only scan can instruct agents to edit non-map project intelligence files.
+### [MEDIUM] Core scan prompt has overbroad ownership wording
 
-**Suggestion**: Make ownership/update lists mode-aware.
+**Files**: `src/core/prompts.ts`, `test/core-prompts.test.ts`
 
-### [MEDIUM] New test gaps allow empty or silent rebuilds
+**Issue**: The prompt tells agents that broad machine-derived arrays are command-owned without clearly scoping the do-not-edit rule to `codebase-index.json`, while map mode needs prose-only ownership wording.
 
-**File**: `test/core-commands.test.ts:2775-2779`, `test/core-commands.test.ts:3055-3058`
+**Required fix**: Make the JSON/machine-field boundary explicit and update default, map, and refresh prompt assertions.
 
-**Issue**: Invalid-index rebuild test does not assert live files are re-indexed. Deleted-file refresh test does not assert stale/missing state is reported.
+### [MEDIUM] OMP scout guidance references stale contract text
 
-**Why it matters**: Regressions that write an empty index or silently drop stale-file reporting can pass.
+**Files**: `src/runtime/omp/prompts.ts`, `test/core-prompts.test.ts`
 
-**Suggestion**: Assert rebuilt index contains current files and `staleFiles` records missing deleted paths.
+**Issue**: OMP scan guidance tells scouts to use the "bounded discovery and mapping contract", a stale phrase that no longer names the exact core prompt sections scouts must obey.
 
-### [MEDIUM] Specwright artifacts contain stale/contradictory contracts
+**Required fix**: Point scouts at the `Ownership boundary` and `Agent contract` sections and assert the stale phrase is absent.
+
+### [MEDIUM] Change planning artifacts still describe Git discovery as future work
 
 **Files**:
-- `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/intent.md`
-- `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/research.md`
-- `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/evidence.md`
-- `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/sources.md`
-- `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/handoff.md`
+- `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/options.md`
+- `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/plan.md`
 
-**Issue**: Git discovery policy contradicts itself; `--map` contract conflicts with final settled behavior; cap-test plan needs a limit override not present in the proposed helper contract; research/evidence/sources cite pre-change line ranges and deleted functions as current; handoff sections are blank despite completed tasks and PASS verification.
+**Issue**: The artifacts still say Git-assisted discovery can be added later and omit the Git worktree verification case, while the implementation already uses Git listing when available.
 
-**Why it matters**: `.specwright` artifacts are source-of-truth workflow records. Stale or contradictory artifacts mislead future execution, verification, and handoff.
+**Required fix**: Update the stale statements without rewriting human-owned content.
 
-**Suggestion**: Refresh artifacts to clearly label baseline-vs-implemented evidence, resolve `--map`/discovery contracts, and fill handoff current state/acceptance/next task.
+### [MEDIUM] Project scan prose still describes manual index ownership
 
-### [LOW] Change record metadata is incomplete
+**Files**:
+- `.specwright/project/codebase-map.md`
+- `.specwright/project/scan.md`
+- `.specwright/project/architecture.md`
+- `.specwright/project/tech-stack.md`
 
-**File**: `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/change.md`
+**Issue**: Project-level prose can still imply `codebase-index.json` is manually curated by scan agents instead of command-owned JSON/fingerprint data.
 
-**Issue**: Title includes copied Markdown headings; summary is empty.
+**Required fix**: Refresh plain scan output and patch only stale prose caused by the codebase-index ownership shift.
 
-**Why it matters**: Status/handoff readers see a malformed change index artifact.
+## Resolution status
 
-**Suggestion**: Use a plain title and one concise summary.
-
-## Summary
-
-| Severity | Count |
-|---|---:|
-| CRITICAL | 0 |
-| HIGH | 0 |
-| MEDIUM | 8 |
-| LOW | 1 |
-
-## Recommended Actions
-
-1. Fix index safety first: sanitize package entrypoints, preserve Git path bytes, cap associated tests, and handle stream errors.
-2. Resolve prompt and artifact contract contradictions around `scan --map` and discovery.
-3. Add regression assertions for rebuilt live files and stale missing files.
-4. Refresh handoff/change metadata before merge.
+- [ ] Deterministic ordering depends on host locale.
+- [ ] Root test directories are not classified as tests.
+- [ ] Exact scan cap is reported as truncation.
+- [ ] Duplicate entrypoints inflate indexed cap accounting.
+- [ ] Large-file risks are emitted for unindexed files.
+- [ ] Risk ordering is not final after fingerprint-time additions.
+- [ ] Index-builder regression tests miss review cases.
+- [ ] Core scan prompt has overbroad ownership wording.
+- [ ] OMP scout guidance references stale contract text.
+- [ ] Change planning artifacts still describe Git discovery as future work.
+- [ ] Project scan prose still describes manual index ownership.

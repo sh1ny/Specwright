@@ -376,7 +376,7 @@ test("renderScanPrompt default mode lists prose artifacts, deterministic state, 
   expect(prompt).toContain(".specwright/project/tech-stack.md");
   expect(prompt).toContain(".specwright/project/architecture.md");
   expect(prompt).toContain(".specwright/project/codebase-map.md");
-  expect(prompt).toContain("Command-owned (do not edit): .specwright/project/codebase-index.json");
+  expect(prompt).toContain("Command-owned (do not edit directly): .specwright/project/codebase-index.json and its machine fields");
   expect(prompt).toContain("Deterministic index state:");
   expect(prompt).toContain("codebase-index.json updated: true");
   expect(prompt).toContain("Files scanned: 120");
@@ -384,10 +384,10 @@ test("renderScanPrompt default mode lists prose artifacts, deterministic state, 
   expect(prompt).toContain("Stale files: none");
   expect(prompt).toContain("Truncated/capped: no");
   expect(prompt).toContain("Ownership boundary:");
-  expect(prompt).toContain("Command-owned (do not edit):");
-  expect(prompt).toContain("Agent-owned (edit these):");
+  expect(prompt).toContain("Command-owned (do not edit directly):");
+  expect(prompt).toContain("Agent-owned (edit prose only):");
   expect(prompt).toContain(
-    "Agent-owned (edit these): .specwright/project/scan.md, .specwright/project/tech-stack.md, .specwright/project/architecture.md, .specwright/project/codebase-map.md.",
+    "Agent-owned (edit prose only): .specwright/project/scan.md, .specwright/project/tech-stack.md, .specwright/project/architecture.md, .specwright/project/codebase-map.md. You may summarize current index facts in prose",
   );
   expect(prompt).toContain("Never author, paste, or hand-edit fingerprints");
   expect(prompt).toContain("Use file discovery (find)");
@@ -408,11 +408,11 @@ test("renderScanPrompt map mode focuses only on map prose artifact", () => {
   expect(prompt).toContain("Focus only on codebase mapping for this run.");
   expect(prompt).toContain(".specwright/project/codebase-map.md");
   expect(prompt).toContain("Record the retry in .specwright/project/codebase-map.md under Open questions");
-  expect(prompt).toContain("Agent-owned (edit these): .specwright/project/codebase-map.md.");
+  expect(prompt).toContain("Agent-owned (edit prose only): .specwright/project/codebase-map.md. You may summarize current index facts in prose");
   expect(prompt).not.toContain(".specwright/project/scan.md");
   expect(prompt).not.toContain(".specwright/project/tech-stack.md");
   expect(prompt).not.toContain(".specwright/project/architecture.md");
-  expect(prompt).toContain("Command-owned (do not edit): .specwright/project/codebase-index.json");
+  expect(prompt).toContain("Command-owned (do not edit directly): .specwright/project/codebase-index.json and its machine fields");
 });
 
 test("renderScanPrompt refresh mode shows deterministic stale files and refresh note", () => {
@@ -437,6 +437,8 @@ test("renderScanPrompt map+refresh mode focuses map artifact and refresh note", 
   expect(prompt).not.toContain(".specwright/project/scan.md");
   expect(prompt).toContain("Refresh run:");
   expect(prompt).not.toContain("Refresh contract:");
+  expect(prompt).toContain("Command-owned (do not edit directly): .specwright/project/codebase-index.json and its machine fields");
+  expect(prompt).toContain("Agent-owned (edit prose only): .specwright/project/codebase-map.md. You may summarize current index facts in prose");
 });
 
 test("renderScanPrompt is runtime-neutral and avoids OMP-specific scout wording", () => {
@@ -492,7 +494,9 @@ test("renderOmpScanPrompt includes parallel scout guidance for mapping subsystem
   expect(prompt).toContain("runtime adapters");
   expect(prompt).toContain("packs, templates, and agents");
   expect(prompt).toContain("fall back to sequential mapping");
+  expect(prompt).toContain("Ownership boundary and Agent contract sections");
   expect(prompt).toContain("Merge scout findings into agent-owned prose artifacts only; read `codebase-index.json` for confirmed facts and record uncertainty in Open questions.");
+  expect(prompt).not.toContain("bounded discovery and mapping contract");
   expect(prompt).not.toContain("Merge scout findings into `codebase-map.md` and `codebase-index.json`");
   expect(prompt).not.toContain("Merge scout findings into agent-owned prose artifacts only; read `codebase-index.json` and `codebase-index.json`");
 });

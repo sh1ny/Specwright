@@ -3152,6 +3152,117 @@ test("buildCodebaseIndex skips oversized files and records a large file skipped 
   expect(result.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
   expect(result.index.fingerprints?.["src/small.ts"]).toBeDefined();
 });
+test("buildCodebaseIndex treats root test directories as tests", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-root-tests-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await mkdir(join(cwd, "__tests__"), { recursive: true });
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import '../src/cli';\n", "utf8");
+  await writeFile(join(cwd, "__tests__", "standalone.ts"), "export const standalone = true;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const cliModule = result.index.modules?.find((mod) => mod.path === "src/cli.ts");
+  const standaloneTest = result.index.modules?.find((mod) => mod.path === "__tests__/standalone.ts");
+  const normalRootTestModules =
+    result.index.modules?.filter(
+      (mod) =>
+        (mod.path === "test/cli.test.ts" || mod.path === "__tests__/standalone.ts") &&
+        mod.kind !== "test",
+    ) ?? [];
+
+  expect(cliModule?.tests).toContain("test/cli.test.ts");
+  expect(standaloneTest?.kind).toBe("test");
+  expect(normalRootTestModules).toEqual([]);
+});
+
+test("buildCodebaseIndex does not mark exact scan cap as truncated", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-exact-scan-cap-"));
+  await writeFile(join(cwd, "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "b.ts"), "export const b = 2;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFilesScanned: 2 },
+  });
+  expect(result.truncated).toBe(false);
+  expect(result.scannedFiles).toBe(2);
+  expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(false);
+});
+
+test("buildCodebaseIndex records large-file risk only for indexed oversized files", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-indexed-oversized-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "assets"), { recursive: true });
+  await writeFile(join(cwd, "src", "huge.ts"), "x".repeat(64), "utf8");
+  await writeFile(join(cwd, "assets", "video.bin"), "x".repeat(64), "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  const largeFileRisks = result.index.risks?.filter((risk) => risk.area === "large file skipped") ?? [];
+  expect(largeFileRisks).toHaveLength(1);
+  expect(largeFileRisks[0]?.summary).toContain("src/huge.ts");
+  expect(largeFileRisks[0]?.summary).not.toContain("assets/video.bin");
+  expect(result.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
+  expect(result.index.fingerprints?.["assets/video.bin"]).toBeUndefined();
+});
+
+test("buildCodebaseIndex deduplicates package and inferred entrypoints before cap accounting", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-dedup-entrypoints-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ main: "./src/cli.ts", bin: { cli: "src/cli.ts" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  expect(result.index.entrypoints?.filter((entry) => entry.path === "src/cli.ts")).toHaveLength(1);
+  expect(result.index.modules?.filter((mod) => mod.path === "src/cli.ts")).toHaveLength(1);
+});
+
+test("buildCodebaseIndex uses Git discovery for tracked and untracked files while ignoring ignored files", async () => {
+  const cwd = await initGitRepo("specwright-build-index-git-discovery-");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
+  await writeFile(join(cwd, "src", "tracked.ts"), "export const tracked = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "untracked.ts"), "export const untracked = 1;\n", "utf8");
+  await writeFile(join(cwd, ".gitignore"), "ignored.ts\n", "utf8");
+  await writeFile(join(cwd, "ignored.ts"), "export const ignored = 1;\n", "utf8");
+  await expectGit(cwd, ["add", "package.json", "src/tracked.ts", ".gitignore"]);
+  await expectGit(cwd, ["commit", "-m", "seed"]);
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  expect(modulePaths).toContain("src/tracked.ts");
+  expect(modulePaths).toContain("src/untracked.ts");
+  expect(modulePaths).not.toContain("ignored.ts");
+  expect(result.index.fingerprints?.["src/tracked.ts"]).toBeDefined();
+  expect(result.index.fingerprints?.["src/untracked.ts"]).toBeDefined();
+  expect(result.index.fingerprints?.["ignored.ts"]).toBeUndefined();
+});
+
+test("buildCodebaseIndex sorts paths by code-unit order", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-code-unit-sort-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  const paths = ["src/Z.ts", "src/a.ts", "src/ä.ts"];
+  for (const relPath of paths) {
+    await writeFile(join(cwd, relPath), "export const value = 1;\n", "utf8");
+  }
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const modulePaths = (result.index.modules?.map((mod) => mod.path) ?? []).filter((path) =>
+    paths.includes(path),
+  );
+  const expected = [...paths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  expect(modulePaths).toEqual(expected);
+});
+
 
 test("scan --json surfaces validation issues in machine-readable output", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-validation-json-"));

@@ -166,8 +166,8 @@ export function renderScanPrompt(input: ScanPromptInput): string {
 
   const ownershipBoundary = [
     "Ownership boundary:",
-    "- Command-owned (do not edit): .specwright/project/codebase-index.json, fingerprints, file inventory, package scripts, entrypoints, modules, tests, commands, verification, and cap/truncation risks.",
-    `- Agent-owned (edit these): ${agentOwnedFiles}.`,
+    "- Command-owned (do not edit directly): .specwright/project/codebase-index.json and its machine fields: fingerprints, file inventory, package-script-derived entries, deterministic entrypoint/module/test/command/verification arrays, and cap/truncation risks.",
+    `- Agent-owned (edit prose only): ${agentOwnedFiles}. You may summarize current index facts in prose, but never paste or hand-edit JSON/fingerprint data.`,
   ];
 
   const agentContract = [

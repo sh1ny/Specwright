@@ -30,7 +30,7 @@ Update scan prompt inputs and `renderScanPrompt()` so core prompt text shows a c
 
 ### Wave 3: Tests and verification
 
-Update command tests for first non-Git scan, idempotent second scan, edited-file refresh through plain scan, hard-invalid index rebuild, cap/truncation risk, and `--refresh` no longer showing `## Current fingerprints`. Update prompt tests so core never asks for manual fingerprint JSON and OMP-only scout guidance remains isolated. Evidence: `evidence.md` records current tests that lock in old refresh behavior (`test/core-commands.test.ts:2630-2734`) and prompt boundary tests (`test/core-prompts.test.ts:358-440`).
+Update command tests for first non-Git scan, idempotent second scan, edited-file refresh through plain scan, hard-invalid index rebuild, cap/truncation risk, and `--refresh` no longer showing `## Current fingerprints`. Add a Git-worktree discovery case that proves tracked and untracked files are indexed while ignored files are excluded. Update prompt tests so core never asks for manual fingerprint JSON and OMP-only scout guidance remains isolated. Evidence: `evidence.md` records current tests that lock in old refresh behavior (`test/core-commands.test.ts:2630-2734`) and prompt boundary tests (`test/core-prompts.test.ts:358-440`).
 
 ## Risks
 
