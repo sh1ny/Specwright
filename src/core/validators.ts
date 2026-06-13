@@ -4,6 +4,7 @@ import { changeDir } from "./paths";
 import { loadConfig, unreconciledTaskDriftIssues } from "./state";
 import { SPECWRIGHT_AGENT_NAMES } from "./types";
 import type { ChangeState, LifecycleStep, OnlineResearchMode, SpecwrightAgentName, SpecwrightConfig, SpecwrightMode, WorkflowPublishMode } from "./types";
+import type { CodebaseIndex } from "./codebase-index";
 
 export interface ValidationIssue {
   level: "error" | "warning";
@@ -97,16 +98,6 @@ export function validateSpecwrightConfig(config: SpecwrightConfig): void {
   }
   validateGitName(config.workflow.remote, "workflow.remote", GIT_REMOTE_PATTERN);
 }
-export interface CodebaseIndex {
-  version: number;
-  generatedAt?: string;
-  entrypoints?: Array<{ path: string; kind?: string; summary?: string }>;
-  modules?: Array<{ path: string; kind?: string; summary?: string; tests?: string[] }>;
-  commands?: Array<{ name: string; summary?: string }>;
-  verification?: Array<{ command: string; purpose?: string }>;
-  risks?: Array<{ area: string; summary?: string }>;
-  fingerprints?: Record<string, unknown>;
-}
 
 export async function validateCodebaseIndex(
   cwd: string,
@@ -162,6 +153,15 @@ export async function validateCodebaseIndex(
     }
     return value;
   }
+  function requireOptionalString(obj: Record<string, unknown>, key: string, context: string): void {
+    const value = obj[key];
+    if (value === undefined) {
+      return;
+    }
+    if (typeof value !== "string") {
+      issues.push({ level: "error", code: "SW104", message: `${context} field ${key} must be a string.` });
+    }
+  }
 
   function validatePath(value: string, context: string): boolean {
     if (!isSafeRelativePath(value)) {
@@ -202,6 +202,8 @@ export async function validateCodebaseIndex(
       }
       const record = entry as Record<string, unknown>;
       const path = requireString(record, "path", context);
+      requireOptionalString(record, "kind", context);
+      requireOptionalString(record, "summary", context);
       if (path !== undefined && validatePath(path, context)) {
         await warnIfMissing(path, context);
       }
@@ -219,6 +221,8 @@ export async function validateCodebaseIndex(
       }
       const record = mod as Record<string, unknown>;
       const path = requireString(record, "path", context);
+      requireOptionalString(record, "kind", context);
+      requireOptionalString(record, "summary", context);
       if (path !== undefined && validatePath(path, context)) {
         await warnIfMissing(path, context);
       }
@@ -247,7 +251,9 @@ export async function validateCodebaseIndex(
         issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
         continue;
       }
-      requireString(entry as Record<string, unknown>, "name", context);
+      const record = entry as Record<string, unknown>;
+      requireString(record, "name", context);
+      requireOptionalString(record, "summary", context);
     }
   }
 
@@ -259,7 +265,9 @@ export async function validateCodebaseIndex(
         issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
         continue;
       }
-      requireString(entry as Record<string, unknown>, "command", context);
+      const record = entry as Record<string, unknown>;
+      requireString(record, "command", context);
+      requireOptionalString(record, "purpose", context);
     }
   }
 
@@ -271,7 +279,9 @@ export async function validateCodebaseIndex(
         issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
         continue;
       }
-      requireString(entry as Record<string, unknown>, "area", context);
+      const record = entry as Record<string, unknown>;
+      requireString(record, "area", context);
+      requireOptionalString(record, "summary", context);
     }
   }
 

@@ -3,7 +3,8 @@ import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adapterNeedsRegeneration, installOmpAdapter } from "../runtime/omp/install";
-import { computeFileFingerprint, readJsonFile, writeJsonFile, type FileFingerprint } from "./json";
+import { readJsonFile, writeJsonFile } from "./json";
+import { buildCodebaseIndex, type CodebaseIndex } from "./codebase-index";
 import {
   changeDir,
   changesDir,
@@ -31,6 +32,7 @@ import {
 } from "./state";
 import { branchNameForChange, commitStaged, createPullRequest, currentBranch, hasGitIdentity, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, switchToExistingBranch, mergeNoFastForward, writePullRequestBodyFile } from "./git";
 import { renderValidationReport, validateChange, validateCodebaseIndex, validateSpecwrightConfig, hasNonHeadingContent, hasObservedOutput, isSafeRelativePath } from "./validators";
+import type { ValidationIssue } from "./validators";
 import type {
   ChangeKind,
   ChangeState,
@@ -426,88 +428,6 @@ async function mapPointerSection(cwd: string): Promise<string> {
 }
 
 
-interface CodebaseIndex {
-  version: number;
-  generatedAt?: string;
-  entrypoints?: Array<{ path: string }>;
-  modules?: Array<{ path: string; tests?: string[] }>;
-  commands?: unknown[];
-  verification?: unknown[];
-  risks?: unknown[];
-  fingerprints?: Record<string, FileFingerprint>;
-}
-
-function trackedPaths(index: CodebaseIndex): Set<string> {
-  const paths = new Set<string>();
-  const addPath = (value: unknown): void => {
-    if (typeof value === "string" && isSafeRelativePath(value)) {
-      paths.add(value);
-    }
-  };
-  if (Array.isArray(index.entrypoints)) {
-    for (const entry of index.entrypoints) {
-      if (entry !== null && typeof entry === "object") {
-        addPath((entry as Record<string, unknown>).path);
-      }
-    }
-  }
-  if (Array.isArray(index.modules)) {
-    for (const mod of index.modules) {
-      if (mod === null || typeof mod !== "object") {
-        continue;
-      }
-      const record = mod as Record<string, unknown>;
-      addPath(record.path);
-      if (Array.isArray(record.tests)) {
-        for (const testPath of record.tests) {
-          addPath(testPath);
-        }
-      }
-    }
-  }
-  return paths;
-}
-
-function isFileFingerprint(value: unknown): value is FileFingerprint {
-  return value !== null
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && Number.isFinite((value as Record<string, unknown>).mtime)
-    && Number.isFinite((value as Record<string, unknown>).size)
-    && typeof (value as Record<string, unknown>).checksum === "string";
-}
-
-async function compareRefreshFingerprints(
-  cwd: string,
-  index: CodebaseIndex,
-): Promise<{ stale: string[]; current: Record<string, FileFingerprint> }> {
-  const paths = trackedPaths(index);
-  const stored = index.fingerprints ?? {};
-  const current: Record<string, FileFingerprint> = {};
-  const stale: string[] = [];
-  for (const rel of Array.from(paths).sort((a, b) => a.localeCompare(b))) {
-    const absolute = resolve(cwd, rel);
-    const computed = await computeFileFingerprint(absolute);
-    const previous = stored[rel];
-    if (computed === undefined) {
-      current[rel] = { mtime: 0, size: 0, checksum: "" };
-      if (previous !== undefined) {
-        stale.push(`${rel} (missing)`);
-      }
-    } else {
-      current[rel] = computed;
-      if (
-        !isFileFingerprint(previous) ||
-        previous.mtime !== computed.mtime ||
-        previous.size !== computed.size ||
-        previous.checksum !== computed.checksum
-      ) {
-        stale.push(`${rel} (changed)`);
-      }
-    }
-  }
-  return { stale, current };
-}
 
 function packageRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -595,6 +515,24 @@ async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<Com
   });
 }
 
+function codebaseIndexReadIssue(error: unknown): ValidationIssue | undefined {
+  if (error instanceof SyntaxError) {
+    return {
+      level: "error",
+      code: "SW100",
+      message: `codebase-index.json could not be parsed: ${error.message}`,
+    };
+  }
+  if (error instanceof Error && error.message.startsWith("Invalid JSON:")) {
+    return {
+      level: "error",
+      code: "SW100",
+      message: `codebase-index.json could not be parsed: ${error.message}`,
+    };
+  }
+  return undefined;
+}
+
 async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   await ensureDir(projectDir(ctx.cwd));
   const project = projectDir(ctx.cwd);
@@ -623,63 +561,94 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   }
 
   const indexPath = join(project, "codebase-index.json");
-  const defaultIndex: CodebaseIndex = {
-    version: 1,
-    generatedAt: ctx.now().toISOString(),
-    entrypoints: [],
-    modules: [],
-    commands: [],
-    verification: [],
-    risks: [],
-    fingerprints: {},
-  };
   const indexExists = await exists(indexPath);
-  if (args.force || !indexExists) {
-    await writeJsonFile(indexPath, defaultIndex);
-    if (args.force && indexExists) {
+
+  let existing: CodebaseIndex | undefined;
+  let rebuiltFromValidationErrors = false;
+  let validationReport = { ok: true, issues: [] as ValidationIssue[] };
+  if (indexExists && !args.force) {
+    let existingRead: unknown;
+    let existingReadSucceeded = false;
+    try {
+      existingRead = await readJsonFile<unknown>(indexPath);
+      existingReadSucceeded = true;
+    } catch (error) {
+      const issue = codebaseIndexReadIssue(error);
+      if (issue === undefined) {
+        throw error;
+      }
+      validationReport = { ok: false, issues: [issue] };
+      rebuiltFromValidationErrors = true;
+    }
+    if (existingReadSucceeded) {
+      validationReport = await validateCodebaseIndex(ctx.cwd, existingRead);
+      const hasHardErrors = validationReport.issues.some((issue) => issue.level === "error");
+      if (hasHardErrors) {
+        rebuiltFromValidationErrors = true;
+      } else {
+        existing = existingRead as CodebaseIndex;
+      }
+    }
+  }
+
+  const buildOptions: import("./codebase-index").BuildCodebaseIndexOptions = { cwd: ctx.cwd, now: ctx.now() };
+  if (existing) {
+    buildOptions.existing = existing;
+  }
+  const buildResult = await buildCodebaseIndex(buildOptions);
+  const generatedValidationReport = await validateCodebaseIndex(ctx.cwd, buildResult.index);
+  if (!generatedValidationReport.ok) {
+    const summary = "Generated codebase-index failed validation; refusing to write.";
+    return fail(
+      args.json ? JSON.stringify({ summary, validation: generatedValidationReport }, null, 2) : summary,
+      { filesCreated: created, filesUpdated: updated },
+    );
+  }
+  const validationIssues = [...validationReport.issues, ...generatedValidationReport.issues];
+
+  if (args.force && !buildResult.changed) {
+    buildResult.index.generatedAt = ctx.now().toISOString();
+  }
+
+  const shouldWriteIndex = args.force || !indexExists || buildResult.changed;
+  if (shouldWriteIndex) {
+    await writeJsonFile(indexPath, buildResult.index);
+    if (indexExists) {
       updated.push(indexPath);
     } else {
       created.push(indexPath);
     }
   }
 
-  const index = (await readJsonFile<CodebaseIndex>(indexPath)) ?? defaultIndex;
+  const deterministicSummary = {
+    indexUpdated: shouldWriteIndex,
+    scannedFiles: buildResult.scannedFiles,
+    indexedFiles: buildResult.indexedFiles,
+    truncated: buildResult.truncated,
+    staleFiles: buildResult.staleFiles,
+    validationIssues,
+    rebuiltFromValidationErrors,
+  };
 
   const config = await loadConfig(ctx.cwd);
-  const validationReport = await validateCodebaseIndex(ctx.cwd, index);
-
-  let refreshSection = "";
-  let refreshResult: { skipped: boolean; staleFiles: string[]; currentFingerprints: Record<string, FileFingerprint> } | undefined;
-  if (args.refresh && !validationReport.ok) {
-    refreshSection = "\n\n## Refresh status\n\nRefresh fingerprint comparison skipped because codebase-index.json has validation errors. Fix the Codebase index validation issues, then rerun `specwright scan --refresh`.";
-    refreshResult = { skipped: true, staleFiles: [], currentFingerprints: {} };
-  } else if (args.refresh) {
-    const { stale, current } = await compareRefreshFingerprints(ctx.cwd, index);
-    refreshResult = { skipped: false, staleFiles: stale, currentFingerprints: current };
-    if (stale.length === 0) {
-      refreshSection = "\n\n## Refresh status\n\nNo tracked files are stale; all recorded fingerprints match the current working tree.";
-    } else {
-      refreshSection = `\n\n## Stale files\n\nThe following tracked files changed or are missing since the last refresh:\n${stale.map((line) => `- ${line}`).join("\n")}\n\n## Current fingerprints\n\nAfter updating the stale map sections, update .specwright/project/codebase-index.json fingerprints to this exact JSON object:\n\n\`\`\`json\n${JSON.stringify(current, null, 2)}\n\`\`\``;
-    }
-  }
-
-  const validationSection = validationReport.issues.length > 0
-    ? "\n\n## Codebase index validation\n\n" + validationReport.issues.map((issue) => `- ${issue.level.toUpperCase()} ${issue.code}: ${issue.message}`).join("\n")
-    : "";
-
   const prompt = ctx.runtime === "omp"
-    ? renderOmpScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection })
-    : renderScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection });
+    ? renderOmpScanPrompt({ config, map: args.map, refresh: args.refresh, deterministicSummary })
+    : renderScanPrompt({ config, map: args.map, refresh: args.refresh, deterministicSummary });
   const humanSummary = "Prepared project scan prompt.";
   const scanSummary = args.json
     ? JSON.stringify({
+        generatedValidation: generatedValidationReport,
         summary: humanSummary,
         map: args.map,
         refresh: args.refresh,
+        indexUpdated: shouldWriteIndex,
+        staleFiles: buildResult.staleFiles,
+        scannedFiles: buildResult.scannedFiles,
+        indexedFiles: buildResult.indexedFiles,
+        truncated: buildResult.truncated,
         filesCreated: created,
         filesUpdated: updated,
         validation: validationReport,
-        ...(args.refresh ? { refreshResult } : {}),
         prompt,
       }, null, 2)
     : humanSummary;

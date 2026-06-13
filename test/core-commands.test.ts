@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { computeFileFingerprint } from "../src/core/json";
+import { buildCodebaseIndex, type CodebaseIndex } from "../src/core/codebase-index";
 import { runSpecwrightCommand, renderHelp } from "../src/core/commands";
 import {
   branchNameForChange,
@@ -19,6 +19,7 @@ import {
   switchToExistingBranch,
   writePullRequestBodyFile,
 } from "../src/core/git";
+import { validateCodebaseIndex } from "../src/core/validators";
 import { syncChangeTasksFromFileIfPresent, syncChangeTasksFromMarkdown, upsertChange } from "../src/core/state";
 import type { ChangeState, SpecwrightConfig, TaskSyncIssueKind } from "../src/core/types";
 
@@ -2567,6 +2568,61 @@ test("scan --force regenerates existing map artifacts", async () => {
   expect(await readFile(mapPath, "utf8")).toContain("# Codebase Map");
   expect(JSON.parse(await readFile(indexPath, "utf8")).generatedAt).toBe(ctx.now().toISOString());
 });
+test("scan rebuilds over malformed codebase-index.json without --force", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-malformed-index-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
+  await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  await writeFile(indexPath, "{ not valid json", "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.summary);
+  expect(payload.indexUpdated).toBe(true);
+  expect(payload.validation.ok).toBe(false);
+  expect(payload.validation.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW100" }));
+  expect(payload.generatedValidation.ok).toBe(true);
+  expect(result.prompt).toContain("Hard validation errors");
+
+  const rebuilt = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(rebuilt.entrypoints.some((entry: { path: string }) => entry.path === "package.json")).toBe(true);
+  expect(rebuilt.modules.some((mod: { path: string }) => mod.path === "src/keep.ts")).toBe(true);
+});
+test("scan validates falsy codebase-index roots before rebuilding", async () => {
+  for (const literal of ["null", "false", "0", "\"\""]) {
+    const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-falsy-index-"));
+    const ctx = testContext(cwd);
+    await mkdir(join(cwd, "src"), { recursive: true });
+    await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
+    await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+
+    expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+    expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+    const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+    await writeFile(indexPath, literal, "utf8");
+
+    const result = await runSpecwrightCommand(ctx, ["scan", "--json", "--print-prompt"]);
+    expect(result.ok).toBe(true);
+    const payload = JSON.parse(result.summary);
+    expect(payload.validation.ok).toBe(false);
+    expect(payload.validation.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW100" }));
+    expect(payload.indexUpdated).toBe(true);
+    expect(result.prompt).toContain("Hard validation errors");
+
+    const rebuilt = JSON.parse(await readFile(indexPath, "utf8"));
+    expect(rebuilt.entrypoints.some((entry: { path: string }) => entry.path === "package.json")).toBe(true);
+    expect(rebuilt.modules.some((mod: { path: string }) => mod.path === "src/keep.ts")).toBe(true);
+  }
+});
+
+
 
 test("scan --map --force regenerates only map artifacts", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-map-force-"));
@@ -2627,116 +2683,143 @@ test("scan --json returns accurate result shape", async () => {
   expect(payload.prompt).toContain(".specwright/project/codebase-map.md");
 });
 
-test("scan --refresh reports no stale files when fingerprints match", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-fresh-"));
+test("scan creates a deterministic index for a non-Git TypeScript project", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-first-"));
   const ctx = testContext(cwd);
-  await mkdir(join(cwd, "src", "core"), { recursive: true });
+  await mkdir(join(cwd, "src"), { recursive: true });
   await mkdir(join(cwd, "test"), { recursive: true });
-  await writeFile(join(cwd, "src", "core", "sample.ts"), "export const sample = 1;\n", "utf8");
-  await writeFile(join(cwd, "test", "sample.test.ts"), "import { test } from 'bun:test';\n", "utf8");
-  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
-  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
-
-  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
-  const sampleFp = await computeFileFingerprint(join(cwd, "src", "core", "sample.ts"));
-  const testFp = await computeFileFingerprint(join(cwd, "test", "sample.test.ts"));
-  if (!sampleFp || !testFp) throw new Error("Expected fingerprints for sample files");
-  const originalIndex = JSON.stringify(
-    {
-      version: 1,
-      generatedAt: ctx.now().toISOString(),
-      entrypoints: [{ path: "src/core/sample.ts", kind: "module" }],
-      modules: [{ path: "src/core/sample.ts", kind: "core", tests: ["test/sample.test.ts"] }],
-      commands: [],
-      verification: [],
-      risks: [],
-      fingerprints: {
-        "src/core/sample.ts": sampleFp,
-        "test/sample.test.ts": testFp,
-      },
-    },
-    null,
-    2,
-  );
-  await writeFile(indexPath, originalIndex, "utf8");
-
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh"]);
-  expect(result.ok).toBe(true);
-  expect(result.summary).toBe("Prepared project scan prompt.");
-  expect(result.prompt).toContain("## Refresh status");
-  expect(result.prompt).toContain("No tracked files are stale; all recorded fingerprints match the current working tree.");
-  expect(result.prompt).not.toContain("## Stale files");
-  expect(result.filesUpdated).not.toContain(indexPath);
-  expect(await readFile(indexPath, "utf8")).toBe(originalIndex);
-});
-
-test("scan --refresh reports deterministic stale warnings for changed and missing files", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-stale-"));
-  const ctx = testContext(cwd);
-  await mkdir(join(cwd, "src", "core"), { recursive: true });
-  await mkdir(join(cwd, "test"), { recursive: true });
-  await writeFile(join(cwd, "src", "core", "stale.ts"), "export const stale = 1;\n", "utf8");
-  await writeFile(join(cwd, "test", "stale.test.ts"), "import { test } from 'bun:test';\n", "utf8");
-  await writeFile(join(cwd, "src", "core", "new.ts"), "export const fresh = 1;\n", "utf8");
-  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
-  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
-
-  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
-  const staleFp = await computeFileFingerprint(join(cwd, "src", "core", "stale.ts"));
-  const staleTestFp = await computeFileFingerprint(join(cwd, "test", "stale.test.ts"));
-  if (!staleFp || !staleTestFp) throw new Error("Expected fingerprints for stale files");
   await writeFile(
-    indexPath,
-    JSON.stringify(
-      {
-        version: 1,
-        generatedAt: ctx.now().toISOString(),
-        entrypoints: [{ path: "src/core/new.ts", kind: "module" }],
-        modules: [{ path: "src/core/stale.ts", kind: "core", tests: ["test/stale.test.ts"] }],
-        commands: [],
-        verification: [],
-        risks: [],
-        fingerprints: {
-          "src/core/stale.ts": staleFp,
-          "test/stale.test.ts": staleTestFp,
-        },
-      },
-      null,
-      2,
-    ),
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test", build: "bun run build" } }),
     "utf8",
   );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
 
-  await writeFile(join(cwd, "src", "core", "stale.ts"), "export const stale = 2;\n", "utf8");
-  await rm(join(cwd, "test", "stale.test.ts"));
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json"]);
+  expect(result.ok).toBe(true);
 
+  const payload = JSON.parse(result.summary);
+  expect(payload.indexUpdated).toBe(true);
+  expect(payload.staleFiles).toEqual([]);
+  expect(payload.scannedFiles).toBeGreaterThan(0);
+  expect(payload.indexedFiles).toBeGreaterThan(0);
+  expect(payload.truncated).toBe(false);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  const index = JSON.parse(await readFile(indexPath, "utf8"));
+  const entryPaths = index.entrypoints.map((entry: { path: string }) => entry.path);
+  expect(entryPaths).toContain("package.json");
+  expect(entryPaths).toContain("src/cli.ts");
+
+  const cliModule = index.modules.find((mod: { path: string }) => mod.path === "src/cli.ts");
+  expect(cliModule).toBeDefined();
+  expect(cliModule.tests).toContain("test/cli.test.ts");
+
+  const verificationCommands = index.verification.map((v: { command: string }) => v.command);
+  expect(verificationCommands).toContain("bun test");
+
+  expect(typeof index.fingerprints["src/cli.ts"]).toBe("object");
+  expect(typeof index.fingerprints["test/cli.test.ts"]).toBe("object");
+});
+
+test("scan is a no-op when the deterministic index is already current", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-idempotent-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  const before = await readFile(indexPath, "utf8");
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json"]);
+  expect(result.ok).toBe(true);
+
+  const payload = JSON.parse(result.summary);
+  expect(payload.indexUpdated).toBe(false);
+  expect(payload.staleFiles).toEqual([]);
+  expect(await readFile(indexPath, "utf8")).toBe(before);
+});
+
+test("scan refreshes fingerprints for changed indexed files", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-changed-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  const before = JSON.parse(await readFile(indexPath, "utf8"));
+  const originalCliFingerprint = before.fingerprints["src/cli.ts"];
+  expect(originalCliFingerprint).toBeDefined();
+
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('yo');\n", "utf8");
   const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--json"]);
   expect(result.ok).toBe(true);
-  const payload = JSON.parse(result.summary);
-  expect(payload.refreshResult.skipped).toBe(false);
-  expect(payload.refreshResult.staleFiles).toEqual([
-    "src/core/new.ts (changed)",
-    "src/core/stale.ts (changed)",
-    "test/stale.test.ts (missing)",
-  ]);
-  expect(result.prompt).toContain("## Stale files");
-  expect(result.prompt).toContain("- src/core/new.ts (changed)");
-  expect(result.prompt).toContain("- src/core/stale.ts (changed)");
-  expect(result.prompt).toContain("- test/stale.test.ts (missing)");
-  expect(result.prompt).toContain("## Current fingerprints");
-  expect(result.prompt).toContain("\"src/core/new.ts\"");
-  expect(result.filesUpdated).not.toContain(indexPath);
 
-  const refreshed = JSON.parse(await readFile(indexPath, "utf8"));
-  expect(refreshed.fingerprints["src/core/stale.ts"]).toEqual(staleFp);
-  expect(refreshed.fingerprints["test/stale.test.ts"]).toEqual(staleTestFp);
-  expect(refreshed.fingerprints["src/core/new.ts"]).toBeUndefined();
+  const payload = JSON.parse(result.summary);
+  expect(payload.indexUpdated).toBe(true);
+  expect(payload.staleFiles).toContain("src/cli.ts (changed)");
+
+  const after = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(after.fingerprints["src/cli.ts"]).not.toEqual(originalCliFingerprint);
+  expect(after.fingerprints["test/cli.test.ts"]).toEqual(before.fingerprints["test/cli.test.ts"]);
+});
+test("scan --refresh reports newly indexed files", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-added-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  await writeFile(join(cwd, "src", "new.ts"), "export const added = true;\n", "utf8");
+  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--json", "--print-prompt"]);
+  expect(result.ok).toBe(true);
+
+  const payload = JSON.parse(result.summary);
+  expect(payload.indexUpdated).toBe(true);
+  expect(payload.staleFiles).toContain("src/new.ts (added)");
+  expect(result.prompt).toContain("src/new.ts (added)");
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  const after = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(after.fingerprints["src/new.ts"]).toBeDefined();
 });
 
-test("scan --refresh skips unsafe index paths before fingerprinting", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-unsafe-"));
+
+test("scan rebuilds an invalid codebase-index.json from scratch", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-invalid-rebuild-"));
   const ctx = testContext(cwd);
-  await writeFile(join(cwd, "..", "escape.ts"), "export const escape = true;\n", "utf8");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
   expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
 
@@ -2746,12 +2829,13 @@ test("scan --refresh skips unsafe index paths before fingerprinting", async () =
     JSON.stringify(
       {
         version: 1,
+        generatedAt: "2020-01-01T00:00:00.000Z",
         entrypoints: [{ path: "../escape.ts" }],
-        modules: [],
-        commands: [],
+        modules: [{ path: "src/missing.ts" }],
+        commands: [{}],
         verification: [],
-        risks: [],
-        fingerprints: {},
+        risks: [{ area: "custom risk", summary: "preserved" }],
+        fingerprints: { "src/missing.ts": { mtime: 1, size: 1, checksum: "abc" } },
       },
       null,
       2,
@@ -2759,73 +2843,95 @@ test("scan --refresh skips unsafe index paths before fingerprinting", async () =
     "utf8",
   );
 
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json", "--print-prompt"]);
   expect(result.ok).toBe(true);
-  expect(result.prompt).toContain("## Codebase index validation");
+  const payload = JSON.parse(result.summary);
+  expect(payload.validation.ok).toBe(false);
+  expect(payload.indexUpdated).toBe(true);
+  expect(result.prompt).toContain("Validation issues:");
   expect(result.prompt).toContain("not a safe relative path");
-  expect(result.prompt).toContain("Refresh fingerprint comparison skipped because codebase-index.json has validation errors");
+  expect(result.prompt).toContain("Hard validation errors");
 
-  const refreshed = JSON.parse(await readFile(indexPath, "utf8"));
-  expect(refreshed.fingerprints["../escape.ts"]).toBeUndefined();
+  const rebuilt = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(rebuilt.entrypoints.some((entry: { path: string }) => entry.path === "package.json")).toBe(true);
+  expect(rebuilt.modules.some((mod: { path: string }) => mod.path === "src/keep.ts")).toBe(true);
+  expect(rebuilt.fingerprints["src/keep.ts"]).toBeDefined();
+  expect(rebuilt.entrypoints.every((entry: { path: string }) => entry.path !== "../escape.ts")).toBe(true);
+  expect(rebuilt.modules.every((mod: { path: string }) => mod.path !== "src/missing.ts")).toBe(true);
+  expect(rebuilt.fingerprints["../escape.ts"]).toBeUndefined();
+  expect(rebuilt.fingerprints["src/missing.ts"]).toBeUndefined();
+  expect(rebuilt.risks.some((risk: { area: string }) => risk.area === "custom risk")).toBe(false);
 });
 
-test("scan --refresh reports malformed index shape without throwing", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-shape-"));
+test("scan --refresh follows the same command-owned refresh path", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-compat-"));
   const ctx = testContext(cwd);
-  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
-  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
-
-  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
   await writeFile(
-    indexPath,
-    JSON.stringify({ version: 1, entrypoints: [], modules: [null], commands: [], verification: [], risks: [], fingerprints: {} }, null, 2),
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
     "utf8",
   );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
 
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
-  expect(result.ok).toBe(true);
-  expect(result.prompt).toContain("modules[0] must be an object");
-  expect(result.prompt).toContain("Refresh fingerprint comparison skipped because codebase-index.json has validation errors");
-});
-
-test("scan --refresh reports malformed fingerprints without throwing", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-fingerprint-"));
-  const ctx = testContext(cwd);
-  await mkdir(join(cwd, "src", "core"), { recursive: true });
-  await writeFile(join(cwd, "src", "core", "sample.ts"), "export const sample = 1;\n", "utf8");
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
-  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+  const first = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--json"]);
+  expect(first.ok).toBe(true);
+  const firstPayload = JSON.parse(first.summary);
+  expect(firstPayload.indexUpdated).toBe(true);
+  expect(firstPayload.staleFiles).toEqual([]);
 
-  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
-  await writeFile(
-    indexPath,
-    JSON.stringify({ version: 1, entrypoints: [], modules: [{ path: "src/core/sample.ts" }], commands: [], verification: [], risks: [], fingerprints: { "src/core/sample.ts": null } }, null, 2),
-    "utf8",
-  );
-
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
-  expect(result.ok).toBe(true);
-  expect(result.prompt).toContain("SW109");
-  expect(result.prompt).toContain("Refresh fingerprint comparison skipped because codebase-index.json has validation errors");
+  const second = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--json"]);
+  expect(second.ok).toBe(true);
+  const secondPayload = JSON.parse(second.summary);
+  expect(secondPayload.indexUpdated).toBe(false);
+  expect(secondPayload.staleFiles).toEqual([]);
 });
 
-test("scan --refresh treats directory paths as validation warnings", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-directory-"));
+test("scan preserves SW106 warnings while rebuilding deterministic data", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-sw106-warning-"));
   const ctx = testContext(cwd);
   await mkdir(join(cwd, "src", "dir"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
   expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
 
   const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
   await writeFile(
     indexPath,
-    JSON.stringify({ version: 1, entrypoints: [], modules: [{ path: "src/dir" }], commands: [], verification: [], risks: [], fingerprints: {} }, null, 2),
+    JSON.stringify(
+      { version: 1, generatedAt: ctx.now().toISOString(), entrypoints: [], modules: [{ path: "src/dir" }], commands: [], verification: [], risks: [{ area: "manual risk", summary: "preserved" }], fingerprints: {} },
+      null,
+      2,
+    ),
     "utf8",
   );
 
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json", "--print-prompt"]);
   expect(result.ok).toBe(true);
   expect(result.prompt).toContain("references non-file path: src/dir");
+  const payload = JSON.parse(result.summary);
+  const validationIssues = payload.validation.issues as Array<{ level: string; code: string; message: string }>;
+  expect(payload.validation.ok).toBe(true);
+  expect(validationIssues).toContainEqual(
+    expect.objectContaining({ level: "warning", code: "SW106", message: expect.stringContaining("src/dir") }),
+  );
+  expect(validationIssues.some((issue) => issue.level === "error")).toBe(false);
+  expect(result.prompt).not.toContain("Hard validation errors");
+  expect(payload.indexUpdated).toBe(true);
+
+  const rebuilt = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(rebuilt.risks).toContainEqual(expect.objectContaining({ area: "manual risk", summary: "preserved" }));
+  expect(rebuilt.modules.some((mod: { path: string }) => mod.path === "src/dir")).toBe(false);
+  expect(rebuilt.entrypoints.some((entry: { path: string }) => entry.path === "package.json")).toBe(true);
+
 });
 
 test("scan --map prompt focuses only on map artifacts", async () => {
@@ -2859,16 +2965,16 @@ test("scan prompt through CLI is runtime-neutral without OMP references", async 
   expect(result.prompt).toContain("Record uncertainty, assumptions, and gaps");
 });
 
-test("scan --refresh prompt includes refresh contract", async () => {
+test("scan --refresh prompt includes deterministic refresh note", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-contract-"));
   const ctx = testContext(cwd);
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
 
   const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
   expect(result.ok).toBe(true);
-  expect(result.prompt).toContain("Refresh contract:");
-  expect(result.prompt).toContain("Compare current files against the recorded fingerprints");
-  expect(result.prompt).toContain("Update only sections that are stale, incorrect, or missing");
+  expect(result.prompt).toContain("Refresh run:");
+  expect(result.prompt).toContain("use the deterministic index state above to identify changed areas");
+  expect(result.prompt).toContain("patch stale prose sections");
 });
 
 test("scan surfaces validation issues for an invalid codebase-index.json", async () => {
@@ -2898,11 +3004,823 @@ test("scan surfaces validation issues for an invalid codebase-index.json", async
 
   const result = await runSpecwrightCommand(ctx, ["scan", "--print-prompt"]);
   expect(result.ok).toBe(true);
-  expect(result.prompt).toContain("## Codebase index validation");
+  expect(result.prompt).toContain("Validation issues:");
   expect(result.prompt).toContain("not a safe relative path");
   expect(result.prompt).toContain("missing required field");
   expect(result.prompt).toContain("missing file");
 });
+
+test("buildCodebaseIndex discovers and classifies a non-Git TypeScript project", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-nongit-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test", build: "bun run build" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  expect(result.changed).toBe(true);
+  expect(result.truncated).toBe(false);
+  expect(result.scannedFiles).toBeGreaterThan(0);
+  expect(result.indexedFiles).toBeGreaterThan(0);
+  expect(result.staleFiles).toEqual([]);
+
+  const entryPaths = result.index.entrypoints?.map((entry) => entry.path) ?? [];
+  expect(entryPaths).toContain("package.json");
+  expect(entryPaths).toContain("src/cli.ts");
+
+  const cliModule = result.index.modules?.find((mod) => mod.path === "src/cli.ts");
+  expect(cliModule).toBeDefined();
+  expect(cliModule?.tests).toContain("test/cli.test.ts");
+
+  const verificationCommands = result.index.verification?.map((v) => v.command) ?? [];
+  expect(verificationCommands).toContain("bun test");
+
+  const commandNames = result.index.commands?.map((cmd) => cmd.name) ?? [];
+  expect(commandNames.length).toBeGreaterThan(0);
+  expect(commandNames).toContain("test");
+});
+
+test("buildCodebaseIndex records deterministic scan coverage risk when indexed file cap is exceeded", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-indexed-cap-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "b.ts"), "export const b = 2;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxIndexedFiles: 1 },
+  });
+  expect(result.truncated).toBe(true);
+  expect(result.indexedFiles).toBeLessThanOrEqual(1);
+  expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(true);
+});
+
+test("buildCodebaseIndex records deterministic scan coverage risk when scanned file cap is exceeded", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-scan-cap-"));
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
+  await writeFile(join(cwd, "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "b.ts"), "export const b = 2;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFilesScanned: 1 },
+  });
+  expect(result.truncated).toBe(true);
+  expect(result.scannedFiles).toBeLessThanOrEqual(1);
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 1 exceeded"));
+});
+
+test("buildCodebaseIndex filesystem fallback applies scan cap in global path order", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fs-global-cap-"));
+  await mkdir(join(cwd, "a"), { recursive: true });
+  await writeFile(join(cwd, "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "a", "nested.ts"), "export const nested = 1;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFilesScanned: 1 },
+  });
+
+  expect(result.truncated).toBe(true);
+  expect(result.scannedFiles).toBe(1);
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  expect(modulePaths).toEqual(["a.ts"]);
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 1 exceeded"));
+});
+test("buildCodebaseIndex filesystem fallback stops after first omitted regular file", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fs-stop-cap-"));
+  await writeFile(join(cwd, "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "b.ts"), "export const b = 2;\n", "utf8");
+  await symlink("a.ts", join(cwd, "z-link.ts"));
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFilesScanned: 1 },
+  });
+
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+
+  expect(result.truncated).toBe(true);
+  expect(result.scannedFiles).toBe(1);
+  expect(modulePaths).toEqual(["a.ts"]);
+  expect(modulePaths).not.toContain("b.ts");
+  expect(result.index.fingerprints?.["b.ts"]).toBeUndefined();
+  expect(result.index.risks?.some((risk) => risk.area === "symlink skipped")).toBe(false);
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 1 exceeded"));
+});
+
+test("buildCodebaseIndex bounds repeated symlink risks", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-symlink-risks-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "target.ts"), "export const target = 1;\n", "utf8");
+  await symlink("src/target.ts", join(cwd, "link-a.ts"));
+  await symlink("src/target.ts", join(cwd, "link-b.ts"));
+  await symlink("src/target.ts", join(cwd, "link-c.ts"));
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxRisksPerArea: 2 },
+  });
+
+  expect(result.truncated).toBe(true);
+  const symlinkRisks = result.index.risks?.filter((risk) => risk.area === "symlink skipped") ?? [];
+  expect(symlinkRisks).toHaveLength(3);
+  expect(symlinkRisks.some((risk) => risk.summary?.includes("Additional symlink skipped risks omitted after 2 entries."))).toBe(true);
+  const entrypointPaths = result.index.entrypoints?.map((entry) => entry.path) ?? [];
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  for (const relPath of ["link-a.ts", "link-b.ts", "link-c.ts"]) {
+    expect(entrypointPaths).not.toContain(relPath);
+    expect(modulePaths).not.toContain(relPath);
+    expect(result.index.fingerprints?.[relPath]).toBeUndefined();
+  }
+});
+
+
+test("buildCodebaseIndex Git discovery stops deterministically when scanned file cap is exceeded", async () => {
+  const cwd = await initGitRepo("specwright-build-index-git-scan-cap-");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "b.ts"), "export const b = 2;\n", "utf8");
+  await writeFile(join(cwd, "src", "c.ts"), "export const c = 3;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFilesScanned: 2 },
+  });
+
+  expect(result.truncated).toBe(true);
+  expect(result.scannedFiles).toBe(2);
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 2 exceeded"));
+  expect(result.index.modules?.map((mod) => mod.path)).toEqual(["src/a.ts", "src/b.ts"]);
+});
+
+test("buildCodebaseIndex fingerprints indexed files and is idempotent on unchanged source", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fingerprint-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({ cwd, now });
+  expect(first.changed).toBe(true);
+  expect(first.staleFiles).toEqual([]);
+  expect(first.index.fingerprints).toBeDefined();
+  expect(first.index.fingerprints?.["package.json"]).toBeDefined();
+  expect(first.index.fingerprints?.["src/cli.ts"]).toBeDefined();
+  expect(first.index.fingerprints?.["test/cli.test.ts"]).toBeDefined();
+  expect(first.index.generatedAt).toBe(now.toISOString());
+
+  const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  expect(second.changed).toBe(false);
+  expect(second.staleFiles).toEqual([]);
+  expect(second.index.generatedAt).toBe(first.index.generatedAt);
+  expect(second.index.fingerprints).toEqual(first.index.fingerprints);
+});
+
+test("buildCodebaseIndex reports stale files and refreshes fingerprints when a source file changes", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-stale-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({ cwd, now });
+  const originalCliFingerprint = first.index.fingerprints?.["src/cli.ts"];
+  expect(originalCliFingerprint).toBeDefined();
+
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hello');\n", "utf8");
+  const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  expect(second.changed).toBe(true);
+  expect(second.staleFiles).toContain("src/cli.ts (changed)");
+  expect(second.index.fingerprints?.["src/cli.ts"]).not.toEqual(originalCliFingerprint);
+  expect(second.index.fingerprints?.["test/cli.test.ts"]).toEqual(first.index.fingerprints?.["test/cli.test.ts"]);
+});
+test("buildCodebaseIndex treats schema version drift as a changed index", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-version-drift-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({ cwd, now });
+  const second = await buildCodebaseIndex({
+    cwd,
+    now,
+    existing: { ...first.index, version: 0 },
+  });
+  expect(second.changed).toBe(true);
+  expect(second.index.version).toBe(1);
+});
+test("buildCodebaseIndex drops non-string preserved semantic fields", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-semantic-fields-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", main: "./src/cli.ts", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const invalidExisting = {
+    version: 1,
+    generatedAt: now.toISOString(),
+    entrypoints: [{ path: "src/cli.ts", kind: 123, summary: false }],
+    modules: [{ path: "src/cli.ts", kind: [], summary: {} }],
+    commands: [{ name: "test", summary: 123 }],
+    verification: [{ command: "bun test", purpose: false }],
+    risks: [{ area: "custom risk", summary: 123 }],
+    fingerprints: {},
+  };
+
+  const result = await buildCodebaseIndex({ cwd, now, existing: invalidExisting as unknown as CodebaseIndex });
+  const entrypoint = result.index.entrypoints?.find((entry) => entry.path === "src/cli.ts");
+  const module = result.index.modules?.find((mod) => mod.path === "src/cli.ts");
+  const command = result.index.commands?.find((cmd) => cmd.name === "test");
+  const verification = result.index.verification?.find((verify) => verify.command === "bun test");
+  const risk = result.index.risks?.find((candidate) => candidate.area === "custom risk");
+
+  expect(entrypoint?.kind).toBe("main");
+  expect(entrypoint?.summary).toBeUndefined();
+  expect(module?.kind).toBe("cli");
+  expect(module?.summary).toBeUndefined();
+  expect(command?.summary).toBe("package script: test");
+  expect(verification?.purpose).toBe("Run test");
+  expect(risk).toEqual({ area: "custom risk" });
+  expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
+  expect(result.changed).toBe(true);
+});
+
+
+test("buildCodebaseIndex keeps fingerprints stable when only filesystem mtime changes", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-stable-mtime-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({ cwd, now });
+  const originalFingerprint = first.index.fingerprints?.["src/cli.ts"];
+  expect(originalFingerprint).toBeDefined();
+  expect(originalFingerprint?.mtime).toBe(0);
+
+  await utimes(
+    join(cwd, "src", "cli.ts"),
+    new Date("2030-01-01T00:00:00.000Z"),
+    new Date("2030-01-01T00:00:00.000Z"),
+  );
+
+  const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  expect(second.changed).toBe(false);
+  expect(second.staleFiles).toEqual([]);
+  expect(second.index.fingerprints?.["src/cli.ts"]).toEqual(originalFingerprint);
+});
+
+test("buildCodebaseIndex removes fingerprints for paths no longer indexed", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-removed-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "drop.ts"), "export const drop = 1;\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({ cwd, now });
+  expect(first.index.fingerprints?.["src/drop.ts"]).toBeDefined();
+
+  await rm(join(cwd, "src", "drop.ts"));
+  const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  expect(second.staleFiles).toContain("src/drop.ts (missing)");
+  expect(second.changed).toBe(true);
+  expect(second.index.fingerprints?.["src/drop.ts"]).toBeUndefined();
+  expect(second.index.fingerprints?.["src/keep.ts"]).toEqual(first.index.fingerprints?.["src/keep.ts"]);
+});
+
+test("buildCodebaseIndex filters unsafe and excluded package entrypoints", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-package-entrypoints-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "bin"), { recursive: true });
+  await mkdir(join(cwd, "dist"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({
+      name: "demo",
+      main: "./src/cli.ts",
+      module: "dist/ignored.js",
+      bin: {
+        safe: "bin/specwright.mjs",
+        escape: "../escape.js",
+        absolute: "/tmp/escape.js",
+      },
+    }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+  await writeFile(join(cwd, "bin", "specwright.mjs"), "console.log('specwright');\n", "utf8");
+  await writeFile(join(cwd, "dist", "ignored.js"), "console.log('ignored');\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const entrypointPaths = result.index.entrypoints?.map((entry) => entry.path) ?? [];
+  expect(entrypointPaths).toContain("src/cli.ts");
+  expect(entrypointPaths).toContain("bin/specwright.mjs");
+  expect(entrypointPaths).not.toContain("./src/cli.ts");
+  expect(entrypointPaths).not.toContain("dist/ignored.js");
+  expect(entrypointPaths).not.toContain("../escape.js");
+  expect(entrypointPaths).not.toContain("/tmp/escape.js");
+  expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
+});
+
+test("buildCodebaseIndex fingerprints malformed package.json without package-derived metadata", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-malformed-package-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" }, main: "./src/cli.ts" }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+  const first = await buildCodebaseIndex({ cwd, now });
+  expect(first.index.fingerprints?.["package.json"]).toBeDefined();
+
+  await writeFile(join(cwd, "package.json"), "{ not valid json", "utf8");
+  const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  const entrypointPaths = second.index.entrypoints?.map((entry) => entry.path) ?? [];
+  const commandNames = second.index.commands?.map((command) => command.name) ?? [];
+  const verificationCommands = second.index.verification?.map((item) => item.command) ?? [];
+
+  expect(entrypointPaths).toContain("package.json");
+  expect(entrypointPaths).toContain("src/cli.ts");
+  expect(second.index.fingerprints?.["package.json"]).toBeDefined();
+  expect(second.staleFiles).toContain("package.json (changed)");
+  expect(commandNames).not.toContain("test");
+  expect(verificationCommands).not.toContain("bun test");
+  expect((await validateCodebaseIndex(cwd, second.index)).ok).toBe(true);
+});
+
+test("buildCodebaseIndex skips unsafe filesystem fallback paths before indexing", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fs-unsafe-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "bad\nname.ts"), "export const bad = 1;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+
+  expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
+  expect(result.index.entrypoints?.some((entry) => entry.path.includes("bad\nname.ts"))).toBe(false);
+  expect(result.index.modules?.some((mod) => mod.path.includes("bad\nname.ts"))).toBe(false);
+  expect(Object.keys(result.index.fingerprints ?? {}).some((path) => path.includes("bad\nname.ts"))).toBe(false);
+  expect(result.index.risks?.some((risk) => risk.area === "unsafe path skipped")).toBe(true);
+});
+test("buildCodebaseIndex excludes nested build and vendor directories", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-nested-excludes-"));
+  await mkdir(join(cwd, "packages", "api", "src"), { recursive: true });
+  await mkdir(join(cwd, "packages", "api", "dist"), { recursive: true });
+  await mkdir(join(cwd, "packages", "api", "node_modules", "dep"), { recursive: true });
+  await writeFile(join(cwd, "packages", "api", "src", "index.ts"), "export const kept = 1;\n", "utf8");
+  await writeFile(join(cwd, "packages", "api", "dist", "index.ts"), "export const built = 1;\n", "utf8");
+  await writeFile(join(cwd, "packages", "api", "node_modules", "dep", "index.ts"), "export const dep = 1;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  expect(modulePaths).toContain("packages/api/src/index.ts");
+  expect(modulePaths).not.toContain("packages/api/dist/index.ts");
+  expect(modulePaths).not.toContain("packages/api/node_modules/dep/index.ts");
+  expect(result.index.fingerprints?.["packages/api/src/index.ts"]).toBeDefined();
+  expect(result.index.fingerprints?.["packages/api/dist/index.ts"]).toBeUndefined();
+  expect(result.index.fingerprints?.["packages/api/node_modules/dep/index.ts"]).toBeUndefined();
+});
+
+
+test("buildCodebaseIndex counts associated tests against the indexed file cap", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-test-cap-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "a.test.ts"), "import './a';\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxIndexedFiles: 1 },
+  });
+  expect(result.truncated).toBe(true);
+  expect(result.indexedFiles).toBeLessThanOrEqual(1);
+  const sourceModule = result.index.modules?.find((mod) => mod.path === "src/a.ts");
+  expect(sourceModule).toBeDefined();
+  expect(sourceModule?.tests).toBeUndefined();
+  expect(result.index.fingerprints?.["src/a.test.ts"]).toBeUndefined();
+});
+test("buildCodebaseIndex counts preserved tests against the indexed file cap", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-preserved-test-cap-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "legacy.test.ts"), "import './a';\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    existing: {
+      version: 1,
+      modules: [{ path: "src/a.ts", tests: ["src/legacy.test.ts"] }],
+      fingerprints: {},
+    },
+    limits: { maxIndexedFiles: 1 },
+  });
+  expect(result.truncated).toBe(true);
+  expect(result.indexedFiles).toBeLessThanOrEqual(1);
+  const sourceModule = result.index.modules?.find((mod) => mod.path === "src/a.ts");
+  expect(sourceModule).toBeDefined();
+  expect(sourceModule?.tests).toBeUndefined();
+  expect(result.index.fingerprints?.["src/legacy.test.ts"]).toBeUndefined();
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Indexed file cap of 1 exceeded"));
+});
+
+
+test("buildCodebaseIndex associates tests by nearest path and avoids ambiguous basename fallback", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-test-association-"));
+  await mkdir(join(cwd, "src", "api"), { recursive: true });
+  await mkdir(join(cwd, "src", "ui"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(join(cwd, "src", "api", "index.ts"), "export const api = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "ui", "index.ts"), "export const ui = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "ui", "index.test.ts"), "import './index';\n", "utf8");
+  await writeFile(join(cwd, "test", "index.test.ts"), "export const ambiguous = true;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const apiModule = result.index.modules?.find((mod) => mod.path === "src/api/index.ts");
+  const uiModule = result.index.modules?.find((mod) => mod.path === "src/ui/index.ts");
+  const standaloneTest = result.index.modules?.find((mod) => mod.path === "test/index.test.ts");
+  expect(uiModule?.tests).toContain("src/ui/index.test.ts");
+  expect(apiModule?.tests).toBeUndefined();
+  expect(standaloneTest?.kind).toBe("test");
+});
+test("buildCodebaseIndex keeps test association semantics with many modules", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-many-test-associations-"));
+  await mkdir(join(cwd, "src", "features"), { recursive: true });
+  await mkdir(join(cwd, "src", "api"), { recursive: true });
+  await mkdir(join(cwd, "src", "ui"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+
+  for (let index = 0; index < 50; index += 1) {
+    const id = index.toString().padStart(2, "0");
+    await writeFile(join(cwd, "src", "features", `f${id}.ts`), `export const f${id} = ${index};\n`, "utf8");
+    await writeFile(join(cwd, "src", "features", `f${id}.test.ts`), `import './f${id}';\n`, "utf8");
+  }
+  await writeFile(join(cwd, "src", "api", "index.ts"), "export const api = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "ui", "index.ts"), "export const ui = 1;\n", "utf8");
+  await writeFile(join(cwd, "test", "index.test.ts"), "export const ambiguous = true;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  for (let index = 0; index < 50; index += 1) {
+    const id = index.toString().padStart(2, "0");
+    const module = result.index.modules?.find((mod) => mod.path === `src/features/f${id}.ts`);
+    expect(module?.tests).toContain(`src/features/f${id}.test.ts`);
+  }
+
+  const apiModule = result.index.modules?.find((mod) => mod.path === "src/api/index.ts");
+  const uiModule = result.index.modules?.find((mod) => mod.path === "src/ui/index.ts");
+  const standaloneTest = result.index.modules?.find((mod) => mod.path === "test/index.test.ts");
+  expect(apiModule?.tests).not.toContain("test/index.test.ts");
+  expect(uiModule?.tests).not.toContain("test/index.test.ts");
+  expect(standaloneTest?.kind).toBe("test");
+});
+
+
+test("buildCodebaseIndex skips oversized files and records a large file skipped risk", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-oversized-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
+  await writeFile(join(cwd, "src", "small.ts"), "export const small = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "huge.ts"), "x".repeat(64), "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  expect(result.index.risks?.some((risk) => risk.area === "large file skipped")).toBe(true);
+  expect(result.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
+  expect(result.index.fingerprints?.["src/small.ts"]).toBeDefined();
+});
+
+test("buildCodebaseIndex reports stale when a fingerprinted file becomes oversized", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-oversized-stale-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "huge.ts"), "export const huge = 1;\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({
+    cwd,
+    now,
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  expect(first.index.fingerprints?.["src/huge.ts"]).toBeDefined();
+
+  await writeFile(join(cwd, "src", "huge.ts"), "x".repeat(64), "utf8");
+  const second = await buildCodebaseIndex({
+    cwd,
+    now,
+    existing: first.index,
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  expect(second.staleFiles).toContain("src/huge.ts (changed)");
+  expect(second.changed).toBe(true);
+  expect(second.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
+  expect(second.index.risks?.some((risk) => risk.area === "large file skipped")).toBe(true);
+});
+
+test("buildCodebaseIndex does not re-report unchanged oversized indexed files as added", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-oversized-repeat-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "huge.ts"), "x".repeat(64), "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({
+    cwd,
+    now,
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  expect(first.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
+
+  const second = await buildCodebaseIndex({
+    cwd,
+    now,
+    existing: first.index,
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  expect(second.staleFiles).not.toContain("src/huge.ts (added)");
+  expect(second.staleFiles).toEqual([]);
+  expect(second.changed).toBe(false);
+});
+test("buildCodebaseIndex treats root test directories as tests", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-root-tests-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await mkdir(join(cwd, "__tests__"), { recursive: true });
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import '../src/cli';\n", "utf8");
+  await writeFile(join(cwd, "__tests__", "standalone.ts"), "export const standalone = true;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const cliModule = result.index.modules?.find((mod) => mod.path === "src/cli.ts");
+  const standaloneTest = result.index.modules?.find((mod) => mod.path === "__tests__/standalone.ts");
+  const normalRootTestModules =
+    result.index.modules?.filter(
+      (mod) =>
+        (mod.path === "test/cli.test.ts" || mod.path === "__tests__/standalone.ts") &&
+        mod.kind !== "test",
+    ) ?? [];
+
+  expect(cliModule?.tests).toContain("test/cli.test.ts");
+  expect(standaloneTest?.kind).toBe("test");
+  expect(normalRootTestModules).toEqual([]);
+});
+test("buildCodebaseIndex excludes non-source fixtures inside test directories from modules", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-test-fixtures-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test", "fixtures"), { recursive: true });
+  await mkdir(join(cwd, "__tests__", "data"), { recursive: true });
+  await writeFile(join(cwd, "src", "lib.ts"), "export const lib = 1;\n", "utf8");
+  await writeFile(join(cwd, "test", "lib.test.ts"), "import '../src/lib';\n", "utf8");
+  await writeFile(join(cwd, "test", "fixtures", "sample.json"), "{\"x\":1}\n", "utf8");
+  await writeFile(join(cwd, "test", "fixtures", "notes.txt"), "hello\n", "utf8");
+  await writeFile(join(cwd, "__tests__", "data", "schema.yaml"), "x: 1\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  const libModule = result.index.modules?.find((mod) => mod.path === "src/lib.ts");
+
+  expect(modulePaths).toContain("src/lib.ts");
+  expect(libModule?.tests).toContain("test/lib.test.ts");
+  for (const fixturePath of ["test/fixtures/sample.json", "test/fixtures/notes.txt", "__tests__/data/schema.yaml"]) {
+    expect(modulePaths).not.toContain(fixturePath);
+    expect(result.index.fingerprints?.[fixturePath]).toBeUndefined();
+  }
+
+  const rebuilt = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    existing: {
+      version: 1,
+      entrypoints: [],
+      modules: [{ path: "src/lib.ts", tests: ["test/fixtures/sample.json"] }],
+      commands: [],
+      verification: [],
+      risks: [],
+      fingerprints: {},
+    },
+  });
+  const rebuiltLibModule = rebuilt.index.modules?.find((mod) => mod.path === "src/lib.ts");
+  expect(rebuiltLibModule?.tests ?? []).not.toContain("test/fixtures/sample.json");
+  expect(rebuilt.index.fingerprints?.["test/fixtures/sample.json"]).toBeUndefined();
+});
+
+
+test("buildCodebaseIndex does not mark exact scan cap as truncated", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-exact-scan-cap-"));
+  await writeFile(join(cwd, "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "b.ts"), "export const b = 2;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFilesScanned: 2 },
+  });
+  expect(result.truncated).toBe(false);
+  expect(result.scannedFiles).toBe(2);
+  expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(false);
+});
+
+test("buildCodebaseIndex records large-file risk only for indexed oversized files", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-indexed-oversized-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "assets"), { recursive: true });
+  await writeFile(join(cwd, "src", "huge.ts"), "x".repeat(64), "utf8");
+  await writeFile(join(cwd, "assets", "video.bin"), "x".repeat(64), "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  const largeFileRisks = result.index.risks?.filter((risk) => risk.area === "large file skipped") ?? [];
+  expect(largeFileRisks).toHaveLength(1);
+  expect(largeFileRisks[0]?.summary).toContain("src/huge.ts");
+  expect(largeFileRisks[0]?.summary).not.toContain("assets/video.bin");
+  expect(result.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
+  expect(result.index.fingerprints?.["assets/video.bin"]).toBeUndefined();
+});
+
+test("buildCodebaseIndex deduplicates package and inferred entrypoints before cap accounting", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-dedup-entrypoints-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ main: "./src/cli.ts", bin: { cli: "src/cli.ts" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxIndexedFiles: 2 },
+  });
+  expect(result.index.entrypoints?.filter((entry) => entry.path === "src/cli.ts")).toHaveLength(1);
+  expect(result.index.modules?.filter((mod) => mod.path === "src/cli.ts")).toHaveLength(1);
+  expect(result.truncated).toBe(false);
+  expect(result.indexedFiles).toBe(2);
+});
+
+test("buildCodebaseIndex uses Git discovery for tracked and untracked files while ignoring ignored files", async () => {
+  const cwd = await initGitRepo("specwright-build-index-git-discovery-");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
+  await writeFile(join(cwd, "src", "tracked.ts"), "export const tracked = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "untracked.ts"), "export const untracked = 1;\n", "utf8");
+  await writeFile(join(cwd, ".gitignore"), "ignored.ts\n", "utf8");
+  await writeFile(join(cwd, "ignored.ts"), "export const ignored = 1;\n", "utf8");
+  await expectGit(cwd, ["add", "package.json", "src/tracked.ts", ".gitignore"]);
+  await expectGit(cwd, ["commit", "-m", "seed"]);
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  expect(modulePaths).toContain("src/tracked.ts");
+  expect(modulePaths).toContain("src/untracked.ts");
+  expect(modulePaths).not.toContain("ignored.ts");
+  expect(result.index.fingerprints?.["src/tracked.ts"]).toBeDefined();
+  expect(result.index.fingerprints?.["src/untracked.ts"]).toBeDefined();
+  expect(result.index.fingerprints?.["ignored.ts"]).toBeUndefined();
+});
+
+test("buildCodebaseIndex keeps Git discovery results when git output byte cap is exceeded", async () => {
+  const cwd = await initGitRepo("specwright-build-index-git-output-cap-");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, ".git", "info", "exclude"), "ignored.ts\n", "utf8");
+  await writeFile(join(cwd, "src", "tracked.ts"), "export const tracked = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "zzz.ts"), "export const zzz = 1;\n", "utf8");
+  await writeFile(join(cwd, "ignored.ts"), "export const ignored = 1;\n", "utf8");
+  await expectGit(cwd, ["add", "src/tracked.ts", "src/zzz.ts"]);
+  await expectGit(cwd, ["commit", "-m", "seed"]);
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxGitLsFilesBytes: Buffer.byteLength("src/tracked.ts\0") },
+  });
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+
+  expect(result.truncated).toBe(true);
+  expect(modulePaths).toContain("src/tracked.ts");
+  expect(result.index.fingerprints?.["src/tracked.ts"]).toBeDefined();
+  expect(modulePaths).not.toContain("src/zzz.ts");
+  expect(result.index.fingerprints?.["src/zzz.ts"]).toBeUndefined();
+  expect(modulePaths).not.toContain("ignored.ts");
+  expect(result.index.fingerprints?.["ignored.ts"]).toBeUndefined();
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("git ls-files output exceeded"));
+  expect(scanCoverageSummaries).not.toContainEqual(expect.stringContaining("Scanned file cap"));
+});
+
+
+test("buildCodebaseIndex Git discovery skips unsafe paths before indexing", async () => {
+  const cwd = await initGitRepo("specwright-build-index-git-unsafe-");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+  await expectGit(cwd, ["add", "src/keep.ts"]);
+  await expectGit(cwd, ["commit", "-m", "seed"]);
+  await writeFile(join(cwd, "src", "bad\nname.ts"), "export const bad = 1;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+
+  expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
+  expect(result.index.entrypoints?.some((entry) => entry.path.includes("bad\nname.ts"))).toBe(false);
+  expect(result.index.modules?.some((mod) => mod.path.includes("bad\nname.ts"))).toBe(false);
+  expect(Object.keys(result.index.fingerprints ?? {}).some((path) => path.includes("bad\nname.ts"))).toBe(false);
+  expect(result.index.risks?.some((risk) => risk.area === "unsafe path skipped")).toBe(true);
+});
+
+test("buildCodebaseIndex ignores root package metadata excluded by Git discovery", async () => {
+  const cwd = await initGitRepo("specwright-build-index-ignored-package-");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, ".gitignore"), "package.json\n", "utf8");
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+  await expectGit(cwd, ["add", ".gitignore", "src/cli.ts"]);
+  await expectGit(cwd, ["commit", "-m", "seed"]);
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ main: "./src/cli.ts", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const entrypointPaths = result.index.entrypoints?.map((entry) => entry.path) ?? [];
+  const commandNames = result.index.commands?.map((command) => command.name) ?? [];
+  const verificationCommands = result.index.verification?.map((item) => item.command) ?? [];
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+
+  expect(entrypointPaths).not.toContain("package.json");
+  expect(result.index.fingerprints?.["package.json"]).toBeUndefined();
+  expect(commandNames).not.toContain("test");
+  expect(verificationCommands).not.toContain("bun test");
+  expect(modulePaths).toContain("src/cli.ts");
+});
+
+test("buildCodebaseIndex sorts paths by code-unit order", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-code-unit-sort-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  const paths = ["src/Z.ts", "src/a.ts", "src/ä.ts"];
+  for (const relPath of paths) {
+    await writeFile(join(cwd, relPath), "export const value = 1;\n", "utf8");
+  }
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const modulePaths = (result.index.modules?.map((mod) => mod.path) ?? []).filter((path) =>
+    paths.includes(path),
+  );
+  const expected = [...paths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  expect(modulePaths).toEqual(expected);
+});
+
 
 test("scan --json surfaces validation issues in machine-readable output", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-validation-json-"));
@@ -2934,7 +3852,7 @@ test("scan --json surfaces validation issues in machine-readable output", async 
   const payload = JSON.parse(result.summary);
   expect(payload.validation.ok).toBe(false);
   expect(payload.validation.issues.some((issue: { message: string }) => issue.message.includes("not a safe relative path"))).toBe(true);
-  expect(result.prompt).toContain("## Codebase index validation");
+  expect(result.prompt).toContain("Validation issues:");
   expect(result.prompt).toContain("not a safe relative path");
 });
 test("research prompt includes map pointer when map artifacts exist", async () => {

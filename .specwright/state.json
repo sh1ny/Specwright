@@ -674,7 +674,7 @@
       "status": "done",
       "step": "handoff",
       "createdAt": "2026-06-12T18:06:12.831Z",
-      "updatedAt": "2026-06-12T23:04:24.429Z",
+      "updatedAt": "2026-06-12T23:09:03.058Z",
       "tasks": {
         "T001": {
           "id": "T001",
@@ -749,8 +749,76 @@
           "updatedAt": "2026-06-12T22:06:11.240Z"
         }
       }
+    },
+    "0016": {
+      "id": "0016",
+      "slug": "proposal-make-scan-build-the-deterministic-codebase-index-itself-reader",
+      "title": "Make scan build the deterministic codebase index itself",
+      "kind": "refactor",
+      "pack": "core",
+      "mode": "lite",
+      "status": "verifying",
+      "step": "verify",
+      "createdAt": "2026-06-13T11:03:16.440Z",
+      "updatedAt": "2026-06-13T23:07:55.714Z",
+      "tasks": {
+        "T001": {
+          "id": "T001",
+          "title": "Move CodebaseIndex ownership into the builder module",
+          "status": "done",
+          "updatedAt": "2026-06-13T14:24:08.039Z"
+        },
+        "T002": {
+          "id": "T002",
+          "title": "Implement deterministic project discovery and classification",
+          "status": "done",
+          "updatedAt": "2026-06-13T14:24:08.039Z"
+        },
+        "T003": {
+          "id": "T003",
+          "title": "Implement fingerprinting, preservation, and changed detection",
+          "status": "done",
+          "updatedAt": "2026-06-13T14:24:08.039Z"
+        },
+        "T004": {
+          "id": "T004",
+          "title": "Replace scan refresh logic with the builder state machine",
+          "status": "done",
+          "updatedAt": "2026-06-13T14:24:08.039Z"
+        },
+        "T005": {
+          "id": "T005",
+          "title": "Rewrite the scan prompt contract",
+          "status": "done",
+          "updatedAt": "2026-06-13T14:24:08.039Z"
+        },
+        "T006": {
+          "id": "T006",
+          "title": "Update command tests for command-owned indexing",
+          "status": "done",
+          "updatedAt": "2026-06-13T14:24:08.039Z"
+        },
+        "T007": {
+          "id": "T007",
+          "title": "Update validator and prompt boundary tests",
+          "status": "done",
+          "updatedAt": "2026-06-13T14:24:08.039Z"
+        },
+        "T008": {
+          "id": "T008",
+          "title": "Run final targeted verification for the change",
+          "status": "done",
+          "updatedAt": "2026-06-13T14:24:08.039Z"
+        },
+        "T009": {
+          "id": "T009",
+          "title": "Address review hardening findings",
+          "status": "done",
+          "updatedAt": "2026-06-13T14:24:08.039Z"
+        }
+      }
     }
   },
-  "updatedAt": "2026-06-12T23:04:24.429Z",
-  "currentChange": "0015"
+  "updatedAt": "2026-06-13T23:07:55.714Z",
+  "currentChange": "0016"
 }

@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultConfig } from "../src/core/state";
-import { renderLifecycleSpawnStrategy, renderScanPrompt, type RoutedLifecycleStep } from "../src/core/prompts";
+import { renderLifecycleSpawnStrategy, renderScanPrompt, type RoutedLifecycleStep, type ScanDeterministicSummary } from "../src/core/prompts";
 import {
   renderOmpLifecycleSpawnStrategy,
   renderOmpDiscussPrompt,
@@ -11,6 +11,18 @@ import {
   renderOmpScanPrompt,
 } from "../src/runtime/omp/prompts";
 import { runSpecwrightCommand } from "../src/core/commands";
+function scanSummary(overrides?: Partial<ScanDeterministicSummary>): ScanDeterministicSummary {
+  return {
+    indexUpdated: true,
+    scannedFiles: 120,
+    indexedFiles: 42,
+    truncated: false,
+    staleFiles: [],
+    validationIssues: [],
+    ...overrides,
+  };
+}
+
 
 test("lifecycle spawn strategy routes each phase to configured agent model", () => {
   const config = defaultConfig("prompt-test");
@@ -355,80 +367,163 @@ test("CLI runtime prompts remain neutral without OMP references through command"
   expect(discussResult.prompt).not.toContain("You are the receiving OMP agent");
 });
 
-test("renderScanPrompt default mode lists all project intelligence files and bounded discovery", () => {
+test("renderScanPrompt default mode lists prose artifacts, deterministic state, and ownership boundary", () => {
   const config = defaultConfig("scan-prompt-test");
-  const prompt = renderScanPrompt({ config, map: false, refresh: false });
+  const prompt = renderScanPrompt({ config, map: false, refresh: false, deterministicSummary: scanSummary() });
   expect(prompt).toContain("# Specwright Scan");
-  expect(prompt).toContain("Inspect the repository and update the project intelligence files:");
+  expect(prompt).toContain("Inspect the repository and update the project intelligence prose files.");
   expect(prompt).toContain(".specwright/project/scan.md");
   expect(prompt).toContain(".specwright/project/tech-stack.md");
   expect(prompt).toContain(".specwright/project/architecture.md");
   expect(prompt).toContain(".specwright/project/codebase-map.md");
-  expect(prompt).toContain(".specwright/project/codebase-index.json");
+  expect(prompt).toContain("Command-owned (do not edit directly): .specwright/project/codebase-index.json and its machine fields");
+  expect(prompt).toContain("Deterministic index state:");
+  expect(prompt).toContain("codebase-index.json updated: true");
+  expect(prompt).toContain("Files scanned: 120");
+  expect(prompt).toContain("Files indexed: 42");
+  expect(prompt).toContain("Stale files: none");
+  expect(prompt).toContain("Truncated/capped: no");
+  expect(prompt).toContain("Ownership boundary:");
+  expect(prompt).toContain("Command-owned (do not edit directly):");
+  expect(prompt).toContain("Agent-owned (edit prose only):");
+  expect(prompt).toContain(
+    "Agent-owned (edit prose only): .specwright/project/scan.md, .specwright/project/tech-stack.md, .specwright/project/architecture.md, .specwright/project/codebase-map.md. You may summarize current index facts in prose",
+  );
+  expect(prompt).toContain("Never author, paste, or hand-edit fingerprints");
   expect(prompt).toContain("Use file discovery (find)");
   expect(prompt).toContain("Use search and LSP when available");
-  expect(prompt).toContain("Preserve existing confirmed facts");
   expect(prompt).toContain("Record uncertainty, assumptions, and gaps in the Open questions section");
   expect(prompt).not.toContain("OMP");
   expect(prompt).not.toContain("scout");
-  expect(prompt).not.toContain("Refresh contract");
-  expect(prompt).toContain("Mapping contract:\n- Preserve existing confirmed facts");
-  expect(prompt).not.toContain("Mapping contract:,- Preserve");
+  expect(prompt).not.toContain("Refresh contract:");
+  expect(prompt).not.toContain("## Current fingerprints");
+  expect(prompt).not.toContain('"mtime": number');
+  expect(prompt).not.toContain("{ \"mtime\": number, \"size\": number, \"checksum\": string }");
   expect(prompt).toContain("Record the retry in .specwright/project/scan.md under Open questions");
-  expect(prompt).toContain("fingerprints");
-  expect(prompt).toContain("{ \"mtime\": number, \"size\": number, \"checksum\": string }");
 });
 
-test("renderScanPrompt map mode focuses only on map artifacts", () => {
+test("renderScanPrompt map mode focuses only on map prose artifact", () => {
   const config = defaultConfig("scan-prompt-test");
-  const prompt = renderScanPrompt({ config, map: true, refresh: false });
-  expect(prompt).toContain("Focus only on codebase mapping for this run");
+  const prompt = renderScanPrompt({ config, map: true, refresh: false, deterministicSummary: scanSummary() });
+  expect(prompt).toContain("Focus only on codebase mapping for this run.");
   expect(prompt).toContain(".specwright/project/codebase-map.md");
-  expect(prompt).toContain(".specwright/project/codebase-index.json");
   expect(prompt).toContain("Record the retry in .specwright/project/codebase-map.md under Open questions");
+  expect(prompt).toContain("Agent-owned (edit prose only): .specwright/project/codebase-map.md. You may summarize current index facts in prose");
   expect(prompt).not.toContain(".specwright/project/scan.md");
   expect(prompt).not.toContain(".specwright/project/tech-stack.md");
   expect(prompt).not.toContain(".specwright/project/architecture.md");
+  expect(prompt).toContain("Command-owned (do not edit directly): .specwright/project/codebase-index.json and its machine fields");
 });
 
-test("renderScanPrompt refresh mode includes patch-stale contract and section", () => {
+test("renderScanPrompt refresh mode shows deterministic stale files and refresh note", () => {
   const config = defaultConfig("scan-prompt-test");
-  const refreshSection = "\n\n## Stale files\n\n- src/core/x.ts (changed)";
-  const prompt = renderScanPrompt({ config, map: false, refresh: true, refreshSection });
-  expect(prompt).toContain("Refresh the project intelligence files by patching stale sections");
-  expect(prompt).toContain("Refresh contract:");
-  expect(prompt).toContain("Compare current files against the recorded fingerprints");
-  expect(prompt).toContain("Update only sections that are stale, incorrect, or missing");
-  expect(prompt).toContain("## Stale files");
+  const summary = scanSummary({ staleFiles: ["src/core/x.ts (changed)"], indexUpdated: true });
+  const prompt = renderScanPrompt({ config, map: false, refresh: true, deterministicSummary: summary });
+  expect(prompt).toContain("Refresh the project intelligence prose by patching stale sections");
+  expect(prompt).toContain("Refresh run:");
+  expect(prompt).toContain("patch stale prose sections");
+  expect(prompt).toContain("fill any newly created or empty agent-owned prose sections");
+  expect(prompt).toContain("Do not rewrite unaffected sections");
+  expect(prompt).toContain("Stale files: 1");
   expect(prompt).toContain("src/core/x.ts (changed)");
+  expect(prompt).not.toContain("Refresh contract:");
+  expect(prompt).not.toContain("Compare current files against the recorded fingerprints");
+  expect(prompt).not.toContain("## Current fingerprints");
 });
 
-test("renderScanPrompt map+refresh mode focuses map artifacts and refresh contract", () => {
+test("renderScanPrompt map+refresh mode focuses map artifact and refresh note", () => {
   const config = defaultConfig("scan-prompt-test");
-  const prompt = renderScanPrompt({ config, map: true, refresh: true });
-  expect(prompt).toContain("Refresh the codebase map by patching stale sections");
-  expect(prompt).toContain("Focus only on these map artifacts");
+  const prompt = renderScanPrompt({ config, map: true, refresh: true, deterministicSummary: scanSummary() });
+  expect(prompt).toContain("Refresh the codebase map by patching stale prose sections");
   expect(prompt).toContain(".specwright/project/codebase-map.md");
   expect(prompt).toContain("Record the retry in .specwright/project/codebase-map.md under Open questions");
   expect(prompt).not.toContain(".specwright/project/scan.md");
-  expect(prompt).toContain("Refresh contract:");
+  expect(prompt).toContain("Refresh run:");
+  expect(prompt).not.toContain("Refresh contract:");
+  expect(prompt).toContain("Command-owned (do not edit directly): .specwright/project/codebase-index.json and its machine fields");
+  expect(prompt).toContain("Agent-owned (edit prose only): .specwright/project/codebase-map.md. You may summarize current index facts in prose");
+});
+
+test("renderScanPrompt renders non-default deterministic summary state", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const summary = scanSummary({ indexUpdated: false, truncated: true, staleFiles: ["src/core/y.ts (changed)"] });
+  const prompt = renderScanPrompt({ config, map: false, refresh: false, deterministicSummary: summary });
+  expect(prompt).toContain("codebase-index.json updated: false");
+  expect(prompt).toContain("Truncated/capped: yes");
+  expect(prompt).toContain("Stale files: 1");
+  expect(prompt).toContain("src/core/y.ts (changed)");
+});
+
+test("renderScanPrompt caps stale file list and summarizes remaining count outside refresh mode", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const staleFiles = Array.from({ length: 25 }, (_, i) => `src/f${i}.ts (changed)`);
+  const summary = scanSummary({ staleFiles });
+  const prompt = renderScanPrompt({ config, map: false, refresh: false, deterministicSummary: summary });
+  expect(prompt).toContain("Stale files: 25");
+  for (let i = 0; i < 20; i += 1) {
+    expect(prompt).toContain(`src/f${i}.ts (changed)`);
+  }
+  expect(prompt).toContain("... and 5 more stale files not listed here");
+  expect(prompt).not.toContain("src/f20.ts (changed)");
+});
+
+test("renderScanPrompt renders every stale file in refresh mode", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const staleFiles = Array.from({ length: 25 }, (_, i) => `src/f${i}.ts (changed)`);
+  const summary = scanSummary({ staleFiles });
+  const prompt = renderScanPrompt({ config, map: false, refresh: true, deterministicSummary: summary });
+  expect(prompt).toContain("Stale files: 25");
+  for (let i = 0; i < 25; i += 1) {
+    expect(prompt).toContain(`src/f${i}.ts (changed)`);
+  }
+  expect(prompt).not.toContain("not listed here");
 });
 
 test("renderScanPrompt is runtime-neutral and avoids OMP-specific scout wording", () => {
   const config = defaultConfig("scan-prompt-test");
-  const prompt = renderScanPrompt({ config, map: false, refresh: false });
+  const prompt = renderScanPrompt({ config, map: false, refresh: false, deterministicSummary: scanSummary() });
   expect(prompt).not.toContain("OMP");
   expect(prompt).not.toContain("Oh My Pi");
   expect(prompt).not.toContain("task tool");
   expect(prompt).not.toContain("evidence.md");
+  expect(prompt).not.toContain("scout");
   expect(prompt).toContain(".specwright/project/scan.md");
   expect(prompt).toContain("Subagent fallback");
   expect(prompt).toContain("retry the same assignment once");
 });
 
+test("renderScanPrompt surfaces validation issues and scratch-rebuild status", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const summary = scanSummary({
+    validationIssues: [{ level: "error", code: "SW100", message: "version must be 1" }],
+    rebuiltFromValidationErrors: true,
+  });
+  const prompt = renderScanPrompt({ config, map: false, refresh: false, deterministicSummary: summary });
+  expect(prompt).toContain("Validation issues: 1");
+  expect(prompt).toContain("ERROR SW100: version must be 1");
+  expect(prompt).toContain("Hard validation errors in the existing codebase-index.json caused a scratch rebuild");
+});
+test("renderScanPrompt never requests manual fingerprint edits in any mode", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const modes: Array<{ map: boolean; refresh: boolean }> = [
+    { map: false, refresh: false },
+    { map: true, refresh: false },
+    { map: false, refresh: true },
+    { map: true, refresh: true },
+  ];
+
+  for (const { map, refresh } of modes) {
+    const prompt = renderScanPrompt({ config, map, refresh, deterministicSummary: scanSummary() });
+    expect(prompt).not.toContain("## Current fingerprints");
+    expect(prompt).not.toContain('"mtime": number');
+    expect(prompt).not.toContain('{ "mtime": number, "size": number, "checksum": string }');
+    expect(prompt).toContain("Never author, paste, or hand-edit fingerprints");
+  }
+});
+
 test("renderOmpScanPrompt includes parallel scout guidance for mapping subsystems", () => {
   const config = defaultConfig("omp-scan-prompt-test");
-  const prompt = renderOmpScanPrompt({ config, map: true, refresh: false });
+  const prompt = renderOmpScanPrompt({ config, map: true, refresh: false, deterministicSummary: scanSummary() });
   expect(prompt).toContain("# Specwright Scan");
   expect(prompt).toContain("OMP map guidance");
   expect(prompt).toContain("parallel read-only scouts");
@@ -437,14 +532,41 @@ test("renderOmpScanPrompt includes parallel scout guidance for mapping subsystem
   expect(prompt).toContain("runtime adapters");
   expect(prompt).toContain("packs, templates, and agents");
   expect(prompt).toContain("fall back to sequential mapping");
+  expect(prompt).toContain(
+    "Give each scout the Context budget, Deterministic index state, Ownership boundary, and Discovery instructions sections",
+  );
+  expect(prompt).toContain(
+    "Do not give scouts the Agent contract or `Update these files` sections; scouts report findings only.",
+  );
+  expect(prompt).toContain(
+    "The parent agent merges scout findings into agent-owned prose artifacts only; read `codebase-index.json` for confirmed facts and record uncertainty in Open questions.",
+  );
+  expect(prompt).not.toContain("Give each scout the Ownership boundary and Agent contract sections");
+  expect(prompt).not.toContain("bounded discovery and mapping contract");
+  expect(prompt).not.toContain("Merge scout findings into `codebase-map.md` and `codebase-index.json`");
+  expect(prompt).not.toContain("Merge scout findings into agent-owned prose artifacts only; read `codebase-index.json` and `codebase-index.json`");
 });
 
-test("renderOmpScanPrompt preserves refresh section and contract in refresh mode", () => {
+test("renderOmpScanPrompt preserves deterministic state and OMP guidance in refresh mode", () => {
   const config = defaultConfig("omp-scan-refresh-test");
-  const refreshSection = "\n\n## Stale files\n\n- src/core/x.ts (changed)";
-  const prompt = renderOmpScanPrompt({ config, map: false, refresh: true, refreshSection });
-  expect(prompt).toContain("Refresh contract:");
-  expect(prompt).toContain("## Stale files");
+  const summary = scanSummary({ staleFiles: ["src/core/x.ts (changed)"] });
+  const prompt = renderOmpScanPrompt({ config, map: false, refresh: true, deterministicSummary: summary });
+  expect(prompt).toContain("Refresh run:");
+  expect(prompt).toContain("Stale files: 1");
   expect(prompt).toContain("src/core/x.ts (changed)");
   expect(prompt).toContain("OMP map guidance");
+  expect(prompt).not.toContain("Refresh contract:");
+  expect(prompt).not.toContain("## Current fingerprints");
+  expect(prompt).toContain("The parent agent merges scout findings into agent-owned prose artifacts only; read `codebase-index.json` for confirmed facts");
+  expect(prompt).not.toContain("Merge scout findings into `codebase-map.md` and `codebase-index.json`");
+});
+
+test("renderOmpScanPrompt keeps scouts read-only while parent owns prose edits", () => {
+  const config = defaultConfig("omp-scan-prompt-test");
+  const prompt = renderOmpScanPrompt({ config, map: true, refresh: false, deterministicSummary: scanSummary() });
+  expect(prompt).toContain("Update the agent-owned prose artifacts based on current code.");
+  expect(prompt).toContain(
+    "Do not give scouts the Agent contract or `Update these files` sections; scouts report findings only.",
+  );
+  expect(prompt).toContain("The parent agent merges scout findings into agent-owned prose artifacts only");
 });

@@ -1,0 +1,358 @@
+{
+  "version": 1,
+  "entrypoints": [
+    {
+      "path": "bin/specwright.mjs",
+      "kind": "bin",
+      "summary": "Node wrapper that invokes Bun against src/cli.ts."
+    },
+    {
+      "path": "package.json",
+      "kind": "package",
+      "summary": "Defines the specwright bin and Bun-based scripts."
+    },
+    {
+      "path": "src/cli.ts",
+      "kind": "cli",
+      "summary": "Bun command-line entrypoint delegating to runSpecwrightCommand."
+    }
+  ],
+  "modules": [
+    {
+      "path": "bin/specwright.mjs",
+      "kind": "bin"
+    },
+    {
+      "path": "src/cli.ts",
+      "kind": "cli"
+    },
+    {
+      "path": "src/core/codebase-index.ts",
+      "kind": "core"
+    },
+    {
+      "path": "src/core/commands.ts",
+      "kind": "core",
+      "summary": "Command kernel, scan/index refresh, config registry, prompt routing, publish/complete flows.",
+      "tests": [
+        "test/core-commands.test.ts",
+        "test/core-init.test.ts",
+        "test/core-prompts.test.ts"
+      ]
+    },
+    {
+      "path": "src/core/git.ts",
+      "kind": "core",
+      "summary": "Git and GitHub process helpers for branch, commit, push, PR, and merge flows.",
+      "tests": [
+        "test/core-commands.test.ts",
+        "test/core-new.test.ts"
+      ]
+    },
+    {
+      "path": "src/core/json.ts",
+      "kind": "core",
+      "summary": "JSON read/write helpers and file fingerprint computation.",
+      "tests": [
+        "test/core-commands.test.ts"
+      ]
+    },
+    {
+      "path": "src/core/paths.ts",
+      "kind": "core",
+      "summary": "Pure path helpers for .specwright and .omp layouts."
+    },
+    {
+      "path": "src/core/prompts.ts",
+      "kind": "core",
+      "summary": "Runtime-neutral lifecycle, scan, discuss, checkpoint, and handoff prompt fragments.",
+      "tests": [
+        "test/core-commands.test.ts",
+        "test/core-prompts.test.ts"
+      ]
+    },
+    {
+      "path": "src/core/slug.ts",
+      "kind": "core",
+      "summary": "Slug generation and next change id helper.",
+      "tests": [
+        "test/core-new.test.ts"
+      ]
+    },
+    {
+      "path": "src/core/state.ts",
+      "kind": "core",
+      "summary": "Default config/state, task artifact parsing, task sync, drift detection, config/state persistence.",
+      "tests": [
+        "test/core-commands.test.ts",
+        "test/core-validators.test.ts"
+      ]
+    },
+    {
+      "path": "src/core/types.ts",
+      "kind": "core",
+      "summary": "Lifecycle, config, state, task, command, pack, workflow, and agent types."
+    },
+    {
+      "path": "src/core/validators.ts",
+      "kind": "core",
+      "summary": "Config, change, observed-output, and codebase-index validators.",
+      "tests": [
+        "test/core-commands.test.ts",
+        "test/core-validators.test.ts",
+        "test/omp-extension.test.ts"
+      ]
+    },
+    {
+      "path": "src/runtime/omp/args.ts",
+      "kind": "runtime-adapter",
+      "summary": "Shell-style argument splitter for /specwright command input.",
+      "tests": [
+        "test/omp-extension.test.ts"
+      ]
+    },
+    {
+      "path": "src/runtime/omp/extension.ts",
+      "kind": "runtime-adapter",
+      "summary": "OMP command/tool registration, prompt injection, notifications, and lifecycle task-tool guard.",
+      "tests": [
+        "test/omp-extension.test.ts"
+      ]
+    },
+    {
+      "path": "src/runtime/omp/install.ts",
+      "kind": "runtime-adapter",
+      "summary": "Project-local OMP adapter, rule, and agent installation/regeneration.",
+      "tests": [
+        "test/core-commands.test.ts",
+        "test/omp-extension.test.ts"
+      ]
+    },
+    {
+      "path": "src/runtime/omp/prompts.ts",
+      "kind": "runtime-adapter",
+      "summary": "OMP-specific prompt overlays for lifecycle delegation, scan scouts, and discuss ask workflow.",
+      "tests": [
+        "test/core-prompts.test.ts"
+      ]
+    },
+    {
+      "path": "src/runtime/omp/status.ts",
+      "kind": "runtime-adapter",
+      "summary": "Read-only OMP status refresh, cache, task sync preview, and validation summary.",
+      "tests": [
+        "test/omp-extension.test.ts"
+      ]
+    },
+    {
+      "path": "src/runtime/omp/types.ts",
+      "kind": "runtime-adapter",
+      "summary": "Structural OMP API interfaces used by the adapter and tests.",
+      "tests": [
+        "test/omp-extension.test.ts"
+      ]
+    },
+    {
+      "path": "test/core-commands.test.ts",
+      "kind": "test"
+    },
+    {
+      "path": "test/core-init.test.ts",
+      "kind": "test"
+    },
+    {
+      "path": "test/core-new.test.ts",
+      "kind": "test"
+    },
+    {
+      "path": "test/core-prompts.test.ts",
+      "kind": "test"
+    },
+    {
+      "path": "test/core-validators.test.ts",
+      "kind": "test"
+    },
+    {
+      "path": "test/omp-extension.test.ts",
+      "kind": "test"
+    }
+  ],
+  "commands": [
+    {
+      "name": "check",
+      "summary": "package script: check"
+    },
+    {
+      "name": "specwright",
+      "summary": "package script: specwright"
+    },
+    {
+      "name": "test",
+      "summary": "package script: test"
+    },
+    {
+      "name": "typecheck",
+      "summary": "package script: typecheck"
+    }
+  ],
+  "verification": [
+    {
+      "command": "bun test",
+      "purpose": "Run the full Bun test suite."
+    },
+    {
+      "command": "bun test && tsc --noEmit",
+      "purpose": "Run check"
+    },
+    {
+      "command": "tsc --noEmit",
+      "purpose": "Run typecheck"
+    }
+  ],
+  "risks": [
+    {
+      "area": "codebase index completeness",
+      "summary": "Index validation checks shape/path/fingerprint integrity, not semantic completeness."
+    },
+    {
+      "area": "generated OMP surface",
+      "summary": "Generated .omp files can drift; adapter regeneration preserves user-owned files unless forced or targeted."
+    },
+    {
+      "area": "pack validator manifest",
+      "summary": "packs/core/validators/core.json lists SW001-SW008, while src/core/validators.ts emits SW009 for task drift."
+    },
+    {
+      "area": "runtime portability",
+      "summary": "Published bin requires Bun on PATH; no dist Node build exists yet."
+    }
+  ],
+  "fingerprints": {
+    "bin/specwright.mjs": {
+      "mtime": 0,
+      "size": 681,
+      "checksum": "acc895450d6f0357c63026ab210d7c8afce1b5f6311505e7b7341c8a53a3912d"
+    },
+    "package.json": {
+      "mtime": 0,
+      "size": 471,
+      "checksum": "9b50471d92a9713c3f58488e2af1a9d0f1dbbe55b16228a42e219975fb10f9c9"
+    },
+    "src/cli.ts": {
+      "mtime": 0,
+      "size": 575,
+      "checksum": "81242d991f68c9ba7c48f189180fbf603cbde1cbd94e698a04d8f417b2cc8928"
+    },
+    "src/core/codebase-index.ts": {
+      "mtime": 0,
+      "size": 29827,
+      "checksum": "e6bcbe31d54d76ff39cf0e5e8ddbe162099c43caea9b6e45a659cba62feb26de"
+    },
+    "src/core/commands.ts": {
+      "mtime": 0,
+      "size": 64126,
+      "checksum": "b48e5473f8bd6c6d1d6fc84748f73a9f2583af9b404db785a03e73afe818779e"
+    },
+    "src/core/git.ts": {
+      "mtime": 0,
+      "size": 14205,
+      "checksum": "d779af0fca78e5841a37f7221dd900a400b1146d615b66d088039a9c3febfea4"
+    },
+    "src/core/json.ts": {
+      "mtime": 0,
+      "size": 1787,
+      "checksum": "0fd9a8d5bd0e50f82785973689d69561758b09debbf0d75cdfbda39ec4a7217f"
+    },
+    "src/core/paths.ts": {
+      "mtime": 0,
+      "size": 1114,
+      "checksum": "e74aa67565084548a457865d9cbfe1076905f07c7c8db91011aceadb6ece12be"
+    },
+    "src/core/prompts.ts": {
+      "mtime": 0,
+      "size": 11385,
+      "checksum": "b53e7691bb7dcd557ba7adf01dfe8edcc99a20814db257b77fb222c07d78c094"
+    },
+    "src/core/slug.ts": {
+      "mtime": 0,
+      "size": 587,
+      "checksum": "e4d60c2ba52826413095ffd49438da90a1265297938efe546af677657d07060e"
+    },
+    "src/core/state.ts": {
+      "mtime": 0,
+      "size": 13347,
+      "checksum": "80911d8c296625c849ef16f2f2f1cd37282f78bc77ac6814171c5d7904f14de3"
+    },
+    "src/core/types.ts": {
+      "mtime": 0,
+      "size": 3802,
+      "checksum": "d143e7c37058bdacd752bc004d580e158a7f14b0a6abec0bbffd970fdb5254fd"
+    },
+    "src/core/validators.ts": {
+      "mtime": 0,
+      "size": 18282,
+      "checksum": "bc52f79028fb6a0baf33c07da6978d435565913caf0f4ef66184e246caf6ffde"
+    },
+    "src/runtime/omp/args.ts": {
+      "mtime": 0,
+      "size": 1021,
+      "checksum": "03b5b1c8ded746a99f20cdc63b9831c333bb2ab67894958c8f9d9a103d1cdef4"
+    },
+    "src/runtime/omp/extension.ts": {
+      "mtime": 0,
+      "size": 7951,
+      "checksum": "d535f1849c33f1e56708a019b4d95fafbcc5c1ac5d1294ef7ad96cc780a2a4ba"
+    },
+    "src/runtime/omp/install.ts": {
+      "mtime": 0,
+      "size": 7122,
+      "checksum": "2e8186fa8d8eb12aa928f7284aeab96e7eaf4ce4abae3b33a5a78f12b8f7a70f"
+    },
+    "src/runtime/omp/prompts.ts": {
+      "mtime": 0,
+      "size": 5551,
+      "checksum": "0f4e86132f4fb4e0a89c92872ec57051dd0484348bf38759e550347436348b3b"
+    },
+    "src/runtime/omp/status.ts": {
+      "mtime": 0,
+      "size": 8605,
+      "checksum": "11964ad886488ff034499409feedde0702b780f1990e1852b36933517870f084"
+    },
+    "src/runtime/omp/types.ts": {
+      "mtime": 0,
+      "size": 2580,
+      "checksum": "b703f3e12f87c2c987c4ed48adbccd0e8a9c74c947c35d22bb4b1ba53fda3d25"
+    },
+    "test/core-commands.test.ts": {
+      "mtime": 0,
+      "size": 189394,
+      "checksum": "00114cb62607e385ea589168e4619334ed25d7b0fcdb98aaf66a833392b010e8"
+    },
+    "test/core-init.test.ts": {
+      "mtime": 0,
+      "size": 1308,
+      "checksum": "8ec6d9d36f95288797633bf1cd18ebcbb1ba366c65e232c6454b42ddca21fb72"
+    },
+    "test/core-new.test.ts": {
+      "mtime": 0,
+      "size": 7344,
+      "checksum": "998e6539b64cd57ed2551556515a275f56cab83fc1ce19a098c6e88c38080511"
+    },
+    "test/core-prompts.test.ts": {
+      "mtime": 0,
+      "size": 34877,
+      "checksum": "fdf1522867c823ec76fb080fb2e49e2a1bc37e7669f81358b20bafffa8c80880"
+    },
+    "test/core-validators.test.ts": {
+      "mtime": 0,
+      "size": 19684,
+      "checksum": "7827279ae1a594bece984d6c27568dea5f9c7a81e3f9a54d23446e758d1180d2"
+    },
+    "test/omp-extension.test.ts": {
+      "mtime": 0,
+      "size": 75188,
+      "checksum": "9a831f8b192aecddc66d6a84dff3593ad7e0ca6e355f60e8e56e8c03e5964f6d"
+    }
+  },
+  "generatedAt": "2026-06-13T22:52:58.230Z"
+}

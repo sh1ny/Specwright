@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { CodebaseIndex } from "../src/core/codebase-index";
 import { runSpecwrightCommand } from "../src/core/commands";
 import { defaultConfig, findCurrentChange, upsertChange } from "../src/core/state";
 import { hasObservedOutput, validateChange, validateCodebaseIndex, validateSpecwrightConfig } from "../src/core/validators";
@@ -229,6 +230,57 @@ test("validateCodebaseIndex reports missing required fields", async () => {
   expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW104", message: expect.stringContaining("risks[0]") }));
   await rm(cwd, { recursive: true, force: true });
 });
+test("validateCodebaseIndex reports non-string optional semantic fields", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-optional-fields-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "entry.ts"), "export default 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "module.ts"), "export const m = 1;\n", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [{ path: "src/entry.ts", kind: 123, summary: false }],
+    modules: [{ path: "src/module.ts", kind: [], summary: {} }],
+    commands: [{ name: "test", summary: 123 }],
+    verification: [{ command: "bun test", purpose: false }],
+    risks: [{ area: "custom risk", summary: 123 }],
+    fingerprints: {},
+  });
+
+  expect(report.ok).toBe(false);
+  const messages = report.issues.filter((issue) => issue.code === "SW104").map((issue) => issue.message);
+  expect(messages).toContain("entrypoints[0] field kind must be a string.");
+  expect(messages).toContain("entrypoints[0] field summary must be a string.");
+  expect(messages).toContain("modules[0] field kind must be a string.");
+  expect(messages).toContain("modules[0] field summary must be a string.");
+  expect(messages).toContain("commands[0] field summary must be a string.");
+  expect(messages).toContain("verification[0] field purpose must be a string.");
+  expect(messages).toContain("risks[0] field summary must be a string.");
+  await rm(cwd, { recursive: true, force: true });
+});
+test("validateCodebaseIndex reports SW102 generatedAt type drift as a warning", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-generated-at-warning-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "entry.ts"), "export default 1;\n", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    generatedAt: 123,
+    entrypoints: [{ path: "src/entry.ts" }],
+    modules: [],
+    commands: [],
+    verification: [],
+    risks: [],
+  });
+
+  expect(report.ok).toBe(true);
+  expect(report.issues).toContainEqual(
+    expect.objectContaining({ level: "warning", code: "SW102", message: expect.stringContaining("generatedAt must be a string") }),
+  );
+  expect(report.issues.some((issue) => issue.level === "error" && issue.code === "SW102")).toBe(false);
+  await rm(cwd, { recursive: true, force: true });
+});
+
+
 
 test("validateCodebaseIndex warns when listed paths do not exist", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-index-missing-"));
@@ -328,5 +380,48 @@ test("validateCodebaseIndex rejects malformed fingerprints", async () => {
   expect(report.ok).toBe(false);
   expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW109" }));
   expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW105", message: expect.stringContaining("../escape.ts") }));
+  await rm(cwd, { recursive: true, force: true });
+});
+test("validateCodebaseIndex treats SW106 missing-file warnings as non-blocking but hard errors as blocking", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-blocking-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "module.ts"), "", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    entrypoints: [{ path: "src/missing.ts" }],
+    modules: [{ path: "src/module.ts" }],
+    commands: [],
+    verification: [],
+    risks: [],
+    fingerprints: {
+      "src/module.ts": { mtime: "now", size: 1, checksum: "x" } as unknown as NonNullable<CodebaseIndex["fingerprints"]> extends Record<string, infer V> ? V : never,
+    },
+  });
+
+  expect(report.ok).toBe(false);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "warning", code: "SW106", message: expect.stringContaining("src/missing.ts") }));
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW109" }));
+  await rm(cwd, { recursive: true, force: true });
+});
+test("validateCodebaseIndex accepts a CodebaseIndex-typed object from the shared module", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-shared-type-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "entry.ts"), "export default 1;\n", "utf8");
+
+  const index: CodebaseIndex = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    entrypoints: [{ path: "src/entry.ts", kind: "cli", summary: "entry" }],
+    modules: [],
+    commands: [],
+    verification: [],
+    risks: [],
+    fingerprints: {},
+  };
+
+  const report = await validateCodebaseIndex(cwd, index);
+  expect(report.ok).toBe(true);
+  expect(report.issues).toEqual([]);
   await rm(cwd, { recursive: true, force: true });
 });
