@@ -296,13 +296,9 @@ async function discoverFiles(
     return gitDiscovery;
   }
 
-  const files: DiscoveredFile[] = [];
-  let truncated = false;
+  const candidates: DiscoveredFile[] = [];
 
   async function walk(dir: string): Promise<void> {
-    if (truncated) {
-      return;
-    }
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });
@@ -311,9 +307,6 @@ async function discoverFiles(
     }
     const sorted = entries.slice().sort((a, b) => compareCodeUnit(a.name, b.name));
     for (const entry of sorted) {
-      if (truncated) {
-        break;
-      }
       const absolute = join(dir, entry.name);
       const relPath = normalizePath(relative(cwd, absolute));
       if (shouldExclude(relPath)) {
@@ -332,11 +325,7 @@ async function discoverFiles(
       } else if (entry.isFile()) {
         try {
           const st = await stat(absolute);
-          if (files.length >= maxFilesScanned) {
-            truncated = true;
-            break;
-          }
-          files.push({ relPath, absolute, size: st.size });
+          candidates.push({ relPath, absolute, size: st.size });
         } catch {
           // Ignore files that disappeared during the walk.
         }
@@ -345,6 +334,10 @@ async function discoverFiles(
   }
 
   await walk(cwd);
+  candidates.sort((a, b) => compareCodeUnit(a.relPath, b.relPath));
+
+  const truncated = candidates.length > maxFilesScanned;
+  const files = candidates.slice(0, maxFilesScanned);
   const result: DiscoveryResult = { files, scannedFiles: files.length };
   if (truncated) {
     result.truncationReason = "file-cap";
@@ -603,12 +596,20 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   const entrypointPaths = new Set<string>();
   const modulesByPath = new Map<string, ModuleRecord>();
 
+  let indexedCapRiskRecorded = false;
   function reserveIndexedPath(path: string): boolean {
     if (countedIndexedPaths.has(path)) {
       return true;
     }
     if (countedIndexedPaths.size >= limits.maxIndexedFiles) {
       indexedTruncated = true;
+      if (!indexedCapRiskRecorded) {
+        indexedCapRiskRecorded = true;
+        recordRisk({
+          area: "scan coverage",
+          summary: `Indexed file cap of ${limits.maxIndexedFiles} exceeded; candidate list truncated.`,
+        });
+      }
       return false;
     }
     countedIndexedPaths.add(path);
@@ -688,12 +689,6 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     }
   }
 
-  if (indexedTruncated) {
-    recordRisk({
-      area: "scan coverage",
-      summary: `Indexed file cap of ${limits.maxIndexedFiles} exceeded; candidate list truncated.`,
-    });
-  }
 
   entrypoints.sort((a, b) => compareCodeUnit(a.path, b.path));
   modules.sort((a, b) => compareCodeUnit(a.path, b.path));

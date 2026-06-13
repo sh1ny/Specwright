@@ -18,10 +18,20 @@ None.
 - `src/core/validators.ts:102-308` — `validateCodebaseIndex()` shape/path/fingerprint validation for existing and generated indexes.
 - `src/core/prompts.ts:125-200` — `renderScanPrompt()` deterministic summary and command-owned/agent-owned scan boundary.
 - `src/runtime/omp/prompts.ts:34-49` — `renderOmpScanPrompt()` OMP scout overlay with prose-only merge guidance.
-- `test/core-commands.test.ts:2571-2596` — malformed index rebuild test asserts non-force parse recovery, `SW100`, and regenerated package/module data.
-- `test/core-commands.test.ts:2987-3531` — `buildCodebaseIndex()` regression block covers discovery, caps, unsafe paths, fingerprints, association, and Git.
-- `test/core-commands.test.ts:3576-3590` — `buildCodebaseIndex()` sort-order regression test asserts code-unit path ordering.
-- `test/core-prompts.test.ts:370-570` — prompt ownership, stale-file rendering, and OMP prose-only merge regression tests.
-- `test/core-validators.test.ts:156-377` — codebase-index validation tests.
+- `test/core-commands.test.ts:2571-2623,2812-2864` — invalid-index rebuild tests cover malformed JSON, falsy roots, and invalid-shape rebuilds from scratch.
+- `test/core-commands.test.ts:3004-3745` — `buildCodebaseIndex()` regression block covering non-Git discovery, caps, unsafe paths, fingerprints, test association, Git discovery/output-cap/unsafe, symlink bounds, oversized files, and sort order.
+- `test/core-commands.test.ts:3172-3195` — stale file detection refreshes fingerprints when source files change.
+- `test/core-commands.test.ts:3303-3335` — package entrypoint filtering rejects unsafe and excluded paths.
+- `test/core-commands.test.ts:3444-3491` — test association prefers nearest paths and avoids ambiguous basename fallback.
+- `test/core-commands.test.ts:3494-3559,3599-3617` — large-file risk tests cover oversized files, stale oversized transitions, non-repeated reporting, and indexed-only oversized filtering.
+- `test/core-commands.test.ts:3560-3582` — root test directories are classified as tests and linked to source modules.
+- `test/core-commands.test.ts:3584-3597` — exact scan cap does not mark `truncated` when the count equals the cap.
+- `test/core-commands.test.ts:3640-3659` — Git discovery includes tracked and untracked files while respecting `.gitignore`.
+- `test/core-commands.test.ts:3661-3686` — Git discovery keeps results and records a scan-coverage risk when the Git output byte cap is exceeded.
+- `test/core-commands.test.ts:3688-3703` — Git discovery skips unsafe paths before indexing.
+- `test/core-commands.test.ts:3705-3729` — ignored root `package.json` is excluded from Git-derived package metadata.
+- `test/core-commands.test.ts:3731-3745` — `buildCodebaseIndex()` sorts paths by code-unit order.
+- `test/core-prompts.test.ts:370-572` — prompt ownership, stale-file rendering, and OMP prose-only merge regression tests.
+- `test/core-validators.test.ts:156-404` — codebase-index validation tests.
 - `package.json:9-13` — project scripts for targeted verification commands.
 

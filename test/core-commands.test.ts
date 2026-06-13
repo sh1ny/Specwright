@@ -3073,6 +3073,25 @@ test("buildCodebaseIndex records deterministic scan coverage risk when scanned f
   const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
   expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 1 exceeded"));
 });
+test("buildCodebaseIndex filesystem fallback applies scan cap in global path order", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fs-global-cap-"));
+  await mkdir(join(cwd, "a"), { recursive: true });
+  await writeFile(join(cwd, "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "a", "nested.ts"), "export const nested = 1;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFilesScanned: 1 },
+  });
+
+  expect(result.truncated).toBe(true);
+  expect(result.scannedFiles).toBe(1);
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  expect(modulePaths).toEqual(["a.ts"]);
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 1 exceeded"));
+});
 test("buildCodebaseIndex bounds repeated symlink risks", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-symlink-risks-"));
   await mkdir(join(cwd, "src"), { recursive: true });
@@ -3417,6 +3436,8 @@ test("buildCodebaseIndex counts preserved tests against the indexed file cap", a
   expect(sourceModule).toBeDefined();
   expect(sourceModule?.tests).toBeUndefined();
   expect(result.index.fingerprints?.["src/legacy.test.ts"]).toBeUndefined();
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Indexed file cap of 1 exceeded"));
 });
 
 

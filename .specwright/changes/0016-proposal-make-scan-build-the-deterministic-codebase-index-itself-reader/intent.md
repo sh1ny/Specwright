@@ -5,9 +5,20 @@
 <frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
 ## Goal
 
+Make plain `specwright scan` command-owned for mechanical deterministic codebase indexing, while keeping semantic project prose artifacts agent-owned. The command creates and refreshes `.specwright/project/codebase-index.json` (file inventory, fingerprints, package scripts, entrypoints, modules, tests, commands, verification, cap/truncation risks) without requiring agents to author, paste, or hand-edit checksum JSON. Plain scan decides whether the index is missing, stale, or current; `--refresh` remains a compatibility spelling for the same deterministic path.
+
 ## Users
 
+Internal Specwright maintainers implementing the next scan/index increment; end users running `specwright scan` who need an up-to-date deterministic index; and agents/scouts that consume the index as read-only evidence while editing only prose artifacts.
+
 ## Non-goals
+
+- Adding a new required `--index` subcommand.
+- Making agents paste or hand-edit fingerprint JSON in `codebase-index.json`.
+- Preserving semantic fields from an existing index that has hard validation errors (`SW100`-`SW105`, `SW107`-`SW109`).
+- Classifying every file in a tree (binary, vendor, generated, symlinked, and oversized files are skipped).
+- Requiring Git for correctness (non-Git projects use deterministic filesystem fallback).
+- Moving OMP-specific parallel scout wording into core scan prompts.
 
 </frozen-after-approval>
 

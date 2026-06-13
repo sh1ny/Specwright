@@ -18,8 +18,9 @@
 - `src/core/commands.ts:517-627` runs the builder on scan, validates the generated index before writing, fails closed on generated validation errors, and exposes both existing-index and generated-index validation in JSON output.
 - `src/core/prompts.ts:125-200` renders deterministic scan state, keeps `.specwright/project/codebase-index.json` command-owned, and renders every stale file in refresh mode.
 - `src/runtime/omp/prompts.ts:34-49` keeps OMP scout guidance but restricts merging to agent-owned prose artifacts while reading the index for confirmed facts.
-- `test/core-commands.test.ts:2757-2814` covers invalid-index rebuilds with live data; `test/core-commands.test.ts:2949-3491` covers discovery, caps, unsafe paths, fingerprints, association, Git, and sort order.
-- `test/core-prompts.test.ts:370-570` covers default/map ownership lines, stale-file rendering, and OMP prose-only merge guidance.
+- `test/core-commands.test.ts:2571-2623,2812-2864` covers invalid-index rebuilds (malformed JSON, falsy roots, and invalid-shape rebuilds) with live data.
+- `test/core-commands.test.ts:3004-3745` covers `buildCodebaseIndex()` discovery, caps, unsafe paths, fingerprints, test association, Git discovery/output-cap/unsafe, symlink bounds, oversized files, root test directories, exact-scan-cap semantics, ignored package metadata, and sort order.
+- `test/core-prompts.test.ts:370-572` covers prompt ownership, stale-file rendering, and OMP prose-only merge guidance.
 ## External findings
 
 None. All evidence is local; no online research was required.
