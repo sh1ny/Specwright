@@ -4,6 +4,7 @@ import { changeDir } from "./paths";
 import { loadConfig, unreconciledTaskDriftIssues } from "./state";
 import { SPECWRIGHT_AGENT_NAMES } from "./types";
 import type { ChangeState, LifecycleStep, OnlineResearchMode, SpecwrightAgentName, SpecwrightConfig, SpecwrightMode, WorkflowPublishMode } from "./types";
+import type { CodebaseIndex } from "./codebase-index";
 
 export interface ValidationIssue {
   level: "error" | "warning";
@@ -96,16 +97,6 @@ export function validateSpecwrightConfig(config: SpecwrightConfig): void {
     validateGitName(config.workflow.baseBranch, "workflow.baseBranch", GIT_BRANCH_PATTERN);
   }
   validateGitName(config.workflow.remote, "workflow.remote", GIT_REMOTE_PATTERN);
-}
-export interface CodebaseIndex {
-  version: number;
-  generatedAt?: string;
-  entrypoints?: Array<{ path: string; kind?: string; summary?: string }>;
-  modules?: Array<{ path: string; kind?: string; summary?: string; tests?: string[] }>;
-  commands?: Array<{ name: string; summary?: string }>;
-  verification?: Array<{ command: string; purpose?: string }>;
-  risks?: Array<{ area: string; summary?: string }>;
-  fingerprints?: Record<string, unknown>;
 }
 
 export async function validateCodebaseIndex(

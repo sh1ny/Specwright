@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adapterNeedsRegeneration, installOmpAdapter } from "../runtime/omp/install";
 import { computeFileFingerprint, readJsonFile, writeJsonFile, type FileFingerprint } from "./json";
+import type { CodebaseIndex } from "./codebase-index";
 import {
   changeDir,
   changesDir,
@@ -425,17 +426,6 @@ async function mapPointerSection(cwd: string): Promise<string> {
   return lines.join("\n");
 }
 
-
-interface CodebaseIndex {
-  version: number;
-  generatedAt?: string;
-  entrypoints?: Array<{ path: string }>;
-  modules?: Array<{ path: string; tests?: string[] }>;
-  commands?: unknown[];
-  verification?: unknown[];
-  risks?: unknown[];
-  fingerprints?: Record<string, FileFingerprint>;
-}
 
 function trackedPaths(index: CodebaseIndex): Set<string> {
   const paths = new Set<string>();
