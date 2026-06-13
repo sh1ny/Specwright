@@ -49,3 +49,4 @@
   - `.omp/agents/specwright-*.md`
   - `.omp/rules/specwright-workflow.md`
 - OMP adapter surface uses structural local types, not imported OMP runtime types (`src/runtime/omp/types.ts`).
+- Default lifecycle agent models are `researcher=pi/task`, `planner=pi/plan`, `executor=pi/task`, and `verifier=pi/task` (`src/core/state.ts:68-73`).

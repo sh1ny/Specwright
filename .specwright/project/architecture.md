@@ -38,7 +38,7 @@ discuss -> research -> plan -> execute -> verify -> handoff
 
 Commands update state/artifacts and return prompts:
 
-- `init` creates `.specwright`, copies the built-in core pack, creates project stubs, and installs the OMP adapter.
+- `init` creates `.specwright`, copies the built-in core pack, creates baseline project stubs such as `tech-stack.md` and `architecture.md`, and installs the OMP adapter; scan/map/index files are created by `scan`.
 - `status` renders current change/task status and performs passive task sync where safe.
 - `scan` prepares project-level scan docs, regenerates the command-owned codebase index, validates generated index data, and emits a bounded repo-inspection prompt.
 - `new` creates a numbered change folder from core templates.
@@ -56,24 +56,24 @@ Commands update state/artifacts and return prompts:
 ## Pack model
 
 - Packs are local directories with `pack.json`.
-- The built-in `core` pack exposes one `feature` workflow (`packs/core/pack.json:21-23`).
-- Workflows define artifact sets for `lite` and `full` modes (`packs/core/workflows/feature.json:13-48`).
+- The built-in `core` pack exposes 13 templates, four lifecycle agent briefs, one validator manifest, and one `feature` workflow (`packs/core/pack.json:1-25`).
+- The feature workflow defines 6 lifecycle steps; `lite` mode uses 10 artifacts with a 6-file/1200-word budget, and `full` mode uses 14 artifacts with a 12-file/3000-word budget (`packs/core/workflows/feature.json:13-48`).
 - Templates are Markdown skeletons; machine-readable manifests are JSON.
 
 ## OMP integration
 
-- `installOmpAdapter` writes project-local OMP extension files, four lifecycle agent cards, and an always-on workflow rule (`src/runtime/omp/install.ts:40-187`).
-- The OMP extension registers `/specwright`, dispatches to `runSpecwrightCommand`, updates OMP UI status/notifications, and injects generated prompts as user messages (`src/runtime/omp/extension.ts:24-61`).
-- The extension registers structured tools for status, checkpoint, and validation (`src/runtime/omp/extension.ts:64-133`).
-- A `tool_call` hook blocks lifecycle work unless the next `task` call targets the expected `specwright-{researcher,planner,executor,verifier}` agent (`src/runtime/omp/extension.ts:135-149`).
-- Passive status refresh reads state/tasks, computes an artifact fingerprint, validates in memory, and never writes (`src/runtime/omp/status.ts:61-150`).
+- `installOmpAdapter` writes project-local OMP extension files, four lifecycle agent cards, and an always-on workflow rule; the adapter version marker is the literal string `"1"` (`src/runtime/omp/install.ts:37-186`).
+- The OMP extension registers `/specwright`, dispatches to `runSpecwrightCommand`, updates OMP UI status/notifications, and injects generated prompts as user messages (`src/runtime/omp/extension.ts:10-50`).
+- The extension registers structured tools for status, checkpoint, and validation (`src/runtime/omp/extension.ts:55-112`).
+- A `tool_call` hook blocks lifecycle work unless the next `task` call targets the expected `specwright-{researcher,planner,executor,verifier}` agent (`src/runtime/omp/extension.ts:114-129`).
+- Passive status refresh reads state/tasks, computes an artifact fingerprint, validates in memory, and never writes (`src/runtime/omp/status.ts:15-118`).
 - The OMP adapter uses local structural types instead of importing OMP runtime types.
 
 ## Validation
 
 - Validators are deterministic and local.
-- Change/state validators emit `SW001` through `SW009`; `SW009` covers unreconciled task drift (`src/core/validators.ts:408-493`).
-- `validateCodebaseIndex()` emits `SW100` through `SW109` for codebase-index shape, safe relative paths, missing files, and fingerprint shape (`src/core/validators.ts:100-308`).
+- Change/state validators emit `SW001` through `SW009`; the bundled pack validator manifest lists `SW001` through `SW008`, while `SW009` covers unreconciled task drift in code (`src/core/validators.ts:408-493`, `packs/core/validators/core.json:1-9`).
+- `validateCodebaseIndex()` emits `SW100` through `SW109` for codebase-index shape, safe relative paths, missing files, and fingerprint shape; `SW102` and `SW106` are warning-only (`src/core/validators.ts:100-308`).
 - Validation report format is Markdown with result, issues, and observed output sections (`src/core/validators.ts:480-489`).
 
 ## Boundaries
