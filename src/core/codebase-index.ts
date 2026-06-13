@@ -798,6 +798,22 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
       }
     }
   }
+  const previousIndexedPaths = new Set<string>();
+  for (const entry of options.existing?.entrypoints ?? []) {
+    if (typeof entry.path === "string") {
+      previousIndexedPaths.add(entry.path);
+    }
+  }
+  for (const mod of options.existing?.modules ?? []) {
+    if (typeof mod.path === "string") {
+      previousIndexedPaths.add(mod.path);
+    }
+    for (const testPath of mod.tests ?? []) {
+      if (typeof testPath === "string") {
+        previousIndexedPaths.add(testPath);
+      }
+    }
+  }
 
   const fingerprints: Record<string, FileFingerprint> = {};
   const staleFiles: string[] = [];
@@ -810,7 +826,7 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
       recordRisk({ area: "large file skipped", summary: `Skipped fingerprint for large file: ${relPath}` });
       if (isFileFingerprint(previous)) {
         staleFiles.push(`${relPath} (changed)`);
-      } else if (hasExistingIndex && previous === undefined) {
+      } else if (hasExistingIndex && !previousIndexedPaths.has(relPath)) {
         staleFiles.push(`${relPath} (added)`);
       }
       continue;

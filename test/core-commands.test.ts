@@ -3512,6 +3512,30 @@ test("buildCodebaseIndex reports stale when a fingerprinted file becomes oversiz
   expect(second.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
   expect(second.index.risks?.some((risk) => risk.area === "large file skipped")).toBe(true);
 });
+
+test("buildCodebaseIndex does not re-report unchanged oversized indexed files as added", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-oversized-repeat-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "huge.ts"), "x".repeat(64), "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({
+    cwd,
+    now,
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  expect(first.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
+
+  const second = await buildCodebaseIndex({
+    cwd,
+    now,
+    existing: first.index,
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  expect(second.staleFiles).not.toContain("src/huge.ts (added)");
+  expect(second.staleFiles).toEqual([]);
+  expect(second.changed).toBe(false);
+});
 test("buildCodebaseIndex treats root test directories as tests", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-root-tests-"));
   await mkdir(join(cwd, "src"), { recursive: true });

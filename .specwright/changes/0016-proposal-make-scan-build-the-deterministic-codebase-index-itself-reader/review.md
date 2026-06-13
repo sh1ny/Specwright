@@ -80,7 +80,7 @@ No open findings remain from the previous review snapshot; the entries below are
 
 **Issue**: OMP scan guidance tells scouts to use the "bounded discovery and mapping contract", a stale phrase that no longer names the exact core prompt sections scouts must obey.
 
-**Required fix**: Point scouts at the `Ownership boundary` and `Agent contract` sections and assert the stale phrase is absent.
+**Required fix**: Point scouts at the read-only context, deterministic index state, ownership boundary, and discovery instructions while explicitly withholding the `Agent contract` and `Update these files` sections.
 
 ### [MEDIUM] Change planning artifacts still describe Git discovery as future work
 

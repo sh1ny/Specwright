@@ -73,7 +73,7 @@ Commands update state/artifacts and return prompts:
 
 - Validators are deterministic and local.
 - Change/state validators emit `SW001` through `SW009`; `SW009` covers unreconciled task drift (`src/core/validators.ts:408-493`).
-- `validateCodebaseIndex()` emits `SW100` through `SW109` for codebase-index shape, safe relative paths, missing files, duplicate entries, and fingerprint shape (`src/core/validators.ts:100-308`).
+- `validateCodebaseIndex()` emits `SW100` through `SW109` for codebase-index shape, safe relative paths, missing files, and fingerprint shape (`src/core/validators.ts:100-308`).
 - Validation report format is Markdown with result, issues, and observed output sections (`src/core/validators.ts:480-489`).
 
 ## Boundaries

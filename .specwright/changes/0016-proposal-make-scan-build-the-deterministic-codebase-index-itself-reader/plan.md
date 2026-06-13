@@ -8,7 +8,7 @@ Plain `specwright scan` is the command-owned path for deterministic `codebase-in
 
 Pre-change evidence (pre-change historical ranges): `evidence.md` records that `commandScan()` wrote an empty default index and refreshed only under `--refresh` (`src/core/commands.ts:598-686` at research time), that the old refresh could not discover new files because it only checked already-indexed paths (`src/core/commands.ts:440-509` at research time), and that the original prompt asked agents to paste fingerprint JSON (`src/core/commands.ts:651-662` at research time).
 
-Hard validation errors (`SW100`-`SW105`, `SW107`-`SW109`) mean rebuild from scratch without preserving semantic fields from the invalid object; `SW106` missing-file warnings remain non-blocking for preservation. Evidence: `evidence.md` notes `validateCodebaseIndex()` distinguishes those classes (`src/core/validators.ts:100-308`).
+Hard validation errors (`SW100`, `SW101`, `SW103`-`SW105`, `SW107`-`SW109`) mean rebuild from scratch without preserving semantic fields from the invalid object; warning-only issues such as `SW102` generatedAt type drift and `SW106` missing-file warnings remain non-blocking for preservation. Evidence: `evidence.md` notes `validateCodebaseIndex()` distinguishes those classes (`src/core/validators.ts:100-308`).
 
 ## Implementation plan
 
