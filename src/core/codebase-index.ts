@@ -23,6 +23,7 @@ export interface BuildCodebaseIndexOptions {
   existing?: CodebaseIndex;
   limits?: Partial<{
     maxFilesScanned: number;
+    maxGitLsFilesBytes: number;
     maxIndexedFiles: number;
     maxFingerprintBytesPerFile: number;
   }>;
@@ -51,6 +52,7 @@ export const RESERVED_DETERMINISTIC_RISK_AREAS: Record<string, true> = {
 
 const DEFAULT_LIMITS = {
   maxFilesScanned: MAX_FILES_SCANNED,
+  maxGitLsFilesBytes: MAX_GIT_LS_FILES_BYTES,
   maxIndexedFiles: MAX_INDEXED_FILES,
   maxFingerprintBytesPerFile: MAX_FINGERPRINT_BYTES_PER_FILE,
 } as const;
@@ -205,6 +207,7 @@ function inferKind(relPath: string): string {
 async function tryGitDiscoverFiles(
   cwd: string,
   maxFilesScanned: number,
+  maxGitLsFilesBytes: number,
   risks: Array<{ area: string; summary?: string }>,
 ): Promise<{ files: DiscoveredFile[]; scannedFiles: number; truncated: boolean } | undefined> {
   const files: DiscoveredFile[] = [];
@@ -241,7 +244,7 @@ async function tryGitDiscoverFiles(
       }
       return true;
     },
-    { env: { GIT_TERMINAL_PROMPT: "0" }, maxStdoutBytes: MAX_GIT_LS_FILES_BYTES },
+    { env: { GIT_TERMINAL_PROMPT: "0" }, maxStdoutBytes: maxGitLsFilesBytes },
   );
 
   if (hitFileCap) {
@@ -251,9 +254,10 @@ async function tryGitDiscoverFiles(
   if (result.truncated) {
     risks.push({
       area: "scan coverage",
-      summary: `git ls-files output exceeded ${MAX_GIT_LS_FILES_BYTES} bytes; falling back to filesystem discovery.`,
+      summary: `git ls-files output exceeded ${maxGitLsFilesBytes} bytes; discovery stopped before filesystem fallback.`,
     });
-    return undefined;
+    files.sort((a, b) => compareCodeUnit(a.relPath, b.relPath));
+    return { files, scannedFiles: files.length, truncated: true };
   }
   if (result.exitCode !== 0) {
     return undefined;
@@ -265,9 +269,10 @@ async function tryGitDiscoverFiles(
 async function discoverFiles(
   cwd: string,
   maxFilesScanned: number,
+  maxGitLsFilesBytes: number,
   risks: Array<{ area: string; summary?: string }>,
 ): Promise<{ files: DiscoveredFile[]; scannedFiles: number; truncated: boolean }> {
-  const gitDiscovery = await tryGitDiscoverFiles(cwd, maxFilesScanned, risks);
+  const gitDiscovery = await tryGitDiscoverFiles(cwd, maxFilesScanned, maxGitLsFilesBytes, risks);
   if (gitDiscovery !== undefined) {
     return gitDiscovery;
   }
@@ -334,7 +339,8 @@ interface PackageInfo {
 async function readPackageInfo(cwd: string): Promise<PackageInfo | undefined> {
   try {
     const content = await readFile(join(cwd, "package.json"), "utf8");
-    return JSON.parse(content) as PackageInfo;
+    const parsed: unknown = JSON.parse(content);
+    return isRecord(parsed) ? parsed as PackageInfo : undefined;
   } catch {
     return undefined;
   }
@@ -360,9 +366,7 @@ function packageEntrypointCandidates(
   pkg: PackageInfo,
   filePaths: ReadonlySet<string>,
 ): Array<{ path: string; kind?: string; summary?: string }> {
-  const entrypoints: Array<{ path: string; kind?: string; summary?: string }> = filePaths.has("package.json")
-    ? [{ path: "package.json", kind: "package" }]
-    : [];
+  const entrypoints: Array<{ path: string; kind?: string; summary?: string }> = [];
   if (typeof pkg.main === "string") {
     const path = normalizePackageEntrypointPath(pkg.main, filePaths);
     if (path !== undefined) {
@@ -509,6 +513,7 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   const { files, scannedFiles, truncated: scanTruncated } = await discoverFiles(
     options.cwd,
     limits.maxFilesScanned,
+    limits.maxGitLsFilesBytes,
     risks,
   );
   if (scanTruncated) {
@@ -519,7 +524,8 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   }
 
   const filePaths = new Set(files.map((file) => file.relPath));
-  const pkg = filePaths.has("package.json") ? await readPackageInfo(options.cwd) : undefined;
+  const hasPackageJson = filePaths.has("package.json");
+  const pkg = hasPackageJson ? await readPackageInfo(options.cwd) : undefined;
 
   const entrypoints: Array<{ path: string; kind?: string; summary?: string }> = [];
   const modules: Array<{ path: string; kind?: string; summary?: string; tests?: string[] }> = [];
@@ -553,6 +559,9 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     }
     entrypoints.push(entry);
     entrypointPaths.add(entry.path);
+  }
+  if (hasPackageJson) {
+    addEntrypoint({ path: "package.json", kind: "package" });
   }
 
   function addModule(mod: ModuleRecord): ModuleRecord | undefined {

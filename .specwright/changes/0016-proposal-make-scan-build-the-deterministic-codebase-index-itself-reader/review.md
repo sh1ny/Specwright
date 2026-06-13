@@ -128,3 +128,6 @@ No open findings remain from the previous review snapshot; the entries below are
 - [x] Verify/review consistency.
 - [x] Decisions ready state.
 - [x] Research invalid-index wording.
+- [x] Malformed package manifests remain indexed and fingerprinted.
+- [x] Git output byte-cap truncation preserves Git ignore semantics.
+- [x] Default scan and `scan --map` prose contract clarified.

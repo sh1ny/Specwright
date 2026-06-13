@@ -3192,6 +3192,34 @@ test("buildCodebaseIndex filters unsafe and excluded package entrypoints", async
   expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
 });
 
+test("buildCodebaseIndex fingerprints malformed package.json without package-derived metadata", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-malformed-package-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" }, main: "./src/cli.ts" }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+  const first = await buildCodebaseIndex({ cwd, now });
+  expect(first.index.fingerprints?.["package.json"]).toBeDefined();
+
+  await writeFile(join(cwd, "package.json"), "{ not valid json", "utf8");
+  const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  const entrypointPaths = second.index.entrypoints?.map((entry) => entry.path) ?? [];
+  const commandNames = second.index.commands?.map((command) => command.name) ?? [];
+  const verificationCommands = second.index.verification?.map((item) => item.command) ?? [];
+
+  expect(entrypointPaths).toContain("package.json");
+  expect(entrypointPaths).toContain("src/cli.ts");
+  expect(second.index.fingerprints?.["package.json"]).toBeDefined();
+  expect(second.staleFiles).toContain("package.json (changed)");
+  expect(commandNames).not.toContain("test");
+  expect(verificationCommands).not.toContain("bun test");
+  expect((await validateCodebaseIndex(cwd, second.index)).ok).toBe(true);
+});
+
 test("buildCodebaseIndex skips unsafe filesystem fallback paths before indexing", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fs-unsafe-"));
   await mkdir(join(cwd, "src"), { recursive: true });
@@ -3428,6 +3456,28 @@ test("buildCodebaseIndex uses Git discovery for tracked and untracked files whil
   expect(modulePaths).not.toContain("ignored.ts");
   expect(result.index.fingerprints?.["src/tracked.ts"]).toBeDefined();
   expect(result.index.fingerprints?.["src/untracked.ts"]).toBeDefined();
+  expect(result.index.fingerprints?.["ignored.ts"]).toBeUndefined();
+});
+
+test("buildCodebaseIndex keeps Git discovery results when git output byte cap is exceeded", async () => {
+  const cwd = await initGitRepo("specwright-build-index-git-output-cap-");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, ".gitignore"), "ignored.ts\n", "utf8");
+  await writeFile(join(cwd, "src", "tracked.ts"), "export const tracked = 1;\n", "utf8");
+  await writeFile(join(cwd, "ignored.ts"), "export const ignored = 1;\n", "utf8");
+  await expectGit(cwd, ["add", ".gitignore", "src/tracked.ts"]);
+  await expectGit(cwd, ["commit", "-m", "seed"]);
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxGitLsFilesBytes: 1 },
+  });
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+
+  expect(result.truncated).toBe(true);
+  expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(true);
+  expect(modulePaths).not.toContain("ignored.ts");
   expect(result.index.fingerprints?.["ignored.ts"]).toBeUndefined();
 });
 

@@ -176,3 +176,134 @@ Output:
 ```
 
 Exit status: 0.
+
+### Final review-fix checks
+
+Command:
+```
+bun test test/core-commands.test.ts -t "buildCodebaseIndex fingerprints malformed package.json without package-derived metadata"
+```
+
+Output:
+```
+Test Results:
+   PASS: 1 passed
+```
+
+Exit status: 0.
+
+Command:
+```
+bun test test/core-commands.test.ts -t "buildCodebaseIndex keeps Git discovery results when git output byte cap is exceeded"
+```
+
+Output:
+```
+Test Results:
+   PASS: 1 passed
+```
+
+Exit status: 0.
+
+Command:
+```
+bun test test/core-commands.test.ts -t "buildCodebaseIndex uses Git discovery for tracked and untracked files while ignoring ignored files"
+```
+
+Output:
+```
+Test Results:
+   PASS: 1 passed
+```
+
+Exit status: 0.
+
+Command:
+```
+bun test test/core-commands.test.ts -t "scan --map ensures only map artifacts"
+```
+
+Output:
+```
+Test Results:
+   PASS: 1 passed
+```
+
+Exit status: 0.
+
+Command:
+```
+bun test test/core-commands.test.ts
+```
+
+Output:
+```
+Test Results:
+   PASS: 164 passed
+```
+
+Exit status: 0.
+
+Command:
+```
+bun run typecheck
+```
+
+Output:
+```
+$ tsc --noEmit
+```
+
+Exit status: 0.
+
+Command:
+```
+bun src/cli.ts scan --json
+```
+
+Output:
+```json
+{
+  "generatedValidation": {
+    "ok": true,
+    "issues": []
+  },
+  "summary": "Prepared project scan prompt.",
+  "map": false,
+  "refresh": false,
+  "indexUpdated": true,
+  "staleFiles": [
+    "src/core/codebase-index.ts (changed)",
+    "test/core-commands.test.ts (changed)"
+  ],
+  "scannedFiles": 287,
+  "indexedFiles": 25,
+  "truncated": false,
+  "filesCreated": [],
+  "filesUpdated": [
+    "/home/bgshi/Development/AI/Specwright/.specwright/project/codebase-index.json"
+  ],
+  "validation": {
+    "ok": true,
+    "issues": []
+  },
+  "prompt": "# Specwright Scan\n..."
+}
+```
+
+Exit status: 0.
+
+Command:
+```
+bun src/cli.ts verify --json
+```
+
+Output:
+```json
+{
+  "ok": true,
+  "issues": []
+}
+```
+
+Exit status: 0.
