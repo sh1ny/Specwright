@@ -674,7 +674,7 @@
       "status": "done",
       "step": "handoff",
       "createdAt": "2026-06-12T18:06:12.831Z",
-      "updatedAt": "2026-06-12T23:04:24.429Z",
+      "updatedAt": "2026-06-12T23:09:03.058Z",
       "tasks": {
         "T001": {
           "id": "T001",
@@ -749,8 +749,21 @@
           "updatedAt": "2026-06-12T22:06:11.240Z"
         }
       }
+    },
+    "0016": {
+      "id": "0016",
+      "slug": "proposal-make-scan-build-the-deterministic-codebase-index-itself-reader",
+      "title": "# Proposal: Make scan build the deterministic codebase index itself ## Reader",
+      "kind": "refactor",
+      "pack": "core",
+      "mode": "lite",
+      "status": "discussing",
+      "step": "discuss",
+      "createdAt": "2026-06-13T11:03:16.440Z",
+      "updatedAt": "2026-06-13T11:03:16.440Z",
+      "tasks": {}
     }
   },
-  "updatedAt": "2026-06-12T23:04:24.429Z",
-  "currentChange": "0015"
+  "updatedAt": "2026-06-13T11:03:16.440Z",
+  "currentChange": "0016"
 }
