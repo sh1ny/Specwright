@@ -611,10 +611,8 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
       fingerprints[relPath] = fp;
       const previous = previousFingerprints[relPath];
       if (
-        !isFileFingerprint(previous) ||
-        previous.mtime !== fp.mtime ||
-        previous.size !== fp.size ||
-        previous.checksum !== fp.checksum
+        isFileFingerprint(previous) &&
+        (previous.mtime !== fp.mtime || previous.size !== fp.size || previous.checksum !== fp.checksum)
       ) {
         staleFiles.push(`${relPath} (changed)`);
       }

@@ -3,8 +3,8 @@ import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adapterNeedsRegeneration, installOmpAdapter } from "../runtime/omp/install";
-import { computeFileFingerprint, readJsonFile, writeJsonFile, type FileFingerprint } from "./json";
-import type { CodebaseIndex } from "./codebase-index";
+import { readJsonFile, writeJsonFile } from "./json";
+import { buildCodebaseIndex, type CodebaseIndex } from "./codebase-index";
 import {
   changeDir,
   changesDir,
@@ -427,77 +427,6 @@ async function mapPointerSection(cwd: string): Promise<string> {
 }
 
 
-function trackedPaths(index: CodebaseIndex): Set<string> {
-  const paths = new Set<string>();
-  const addPath = (value: unknown): void => {
-    if (typeof value === "string" && isSafeRelativePath(value)) {
-      paths.add(value);
-    }
-  };
-  if (Array.isArray(index.entrypoints)) {
-    for (const entry of index.entrypoints) {
-      if (entry !== null && typeof entry === "object") {
-        addPath((entry as Record<string, unknown>).path);
-      }
-    }
-  }
-  if (Array.isArray(index.modules)) {
-    for (const mod of index.modules) {
-      if (mod === null || typeof mod !== "object") {
-        continue;
-      }
-      const record = mod as Record<string, unknown>;
-      addPath(record.path);
-      if (Array.isArray(record.tests)) {
-        for (const testPath of record.tests) {
-          addPath(testPath);
-        }
-      }
-    }
-  }
-  return paths;
-}
-
-function isFileFingerprint(value: unknown): value is FileFingerprint {
-  return value !== null
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && Number.isFinite((value as Record<string, unknown>).mtime)
-    && Number.isFinite((value as Record<string, unknown>).size)
-    && typeof (value as Record<string, unknown>).checksum === "string";
-}
-
-async function compareRefreshFingerprints(
-  cwd: string,
-  index: CodebaseIndex,
-): Promise<{ stale: string[]; current: Record<string, FileFingerprint> }> {
-  const paths = trackedPaths(index);
-  const stored = index.fingerprints ?? {};
-  const current: Record<string, FileFingerprint> = {};
-  const stale: string[] = [];
-  for (const rel of Array.from(paths).sort((a, b) => a.localeCompare(b))) {
-    const absolute = resolve(cwd, rel);
-    const computed = await computeFileFingerprint(absolute);
-    const previous = stored[rel];
-    if (computed === undefined) {
-      current[rel] = { mtime: 0, size: 0, checksum: "" };
-      if (previous !== undefined) {
-        stale.push(`${rel} (missing)`);
-      }
-    } else {
-      current[rel] = computed;
-      if (
-        !isFileFingerprint(previous) ||
-        previous.mtime !== computed.mtime ||
-        previous.size !== computed.size ||
-        previous.checksum !== computed.checksum
-      ) {
-        stale.push(`${rel} (changed)`);
-      }
-    }
-  }
-  return { stale, current };
-}
 
 function packageRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -613,50 +542,61 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   }
 
   const indexPath = join(project, "codebase-index.json");
-  const defaultIndex: CodebaseIndex = {
-    version: 1,
-    generatedAt: ctx.now().toISOString(),
-    entrypoints: [],
-    modules: [],
-    commands: [],
-    verification: [],
-    risks: [],
-    fingerprints: {},
-  };
   const indexExists = await exists(indexPath);
-  if (args.force || !indexExists) {
-    await writeJsonFile(indexPath, defaultIndex);
-    if (args.force && indexExists) {
+
+  let existing: CodebaseIndex | undefined;
+  let rebuiltFromValidationErrors = false;
+  let validationReport = { ok: true, issues: [] as import("./validators").ValidationIssue[] };
+  if (indexExists) {
+    const existingRead = await readJsonFile<CodebaseIndex>(indexPath);
+    if (existingRead) {
+      validationReport = await validateCodebaseIndex(ctx.cwd, existingRead);
+      const hasHardErrors = validationReport.issues.some((issue) => issue.level === "error");
+      if (hasHardErrors) {
+        rebuiltFromValidationErrors = true;
+      } else {
+        existing = existingRead;
+      }
+    }
+  }
+
+  const buildOptions: import("./codebase-index").BuildCodebaseIndexOptions = { cwd: ctx.cwd, now: ctx.now() };
+  if (existing) {
+    buildOptions.existing = existing;
+  }
+  const buildResult = await buildCodebaseIndex(buildOptions);
+
+  if (args.force && !buildResult.changed) {
+    buildResult.index.generatedAt = ctx.now().toISOString();
+  }
+
+  const shouldWriteIndex = args.force || !indexExists || buildResult.changed;
+  if (shouldWriteIndex) {
+    await writeJsonFile(indexPath, buildResult.index);
+    if (indexExists) {
       updated.push(indexPath);
     } else {
       created.push(indexPath);
     }
   }
 
-  const index = (await readJsonFile<CodebaseIndex>(indexPath)) ?? defaultIndex;
-
-  const config = await loadConfig(ctx.cwd);
-  const validationReport = await validateCodebaseIndex(ctx.cwd, index);
-
   let refreshSection = "";
-  let refreshResult: { skipped: boolean; staleFiles: string[]; currentFingerprints: Record<string, FileFingerprint> } | undefined;
-  if (args.refresh && !validationReport.ok) {
-    refreshSection = "\n\n## Refresh status\n\nRefresh fingerprint comparison skipped because codebase-index.json has validation errors. Fix the Codebase index validation issues, then rerun `specwright scan --refresh`.";
-    refreshResult = { skipped: true, staleFiles: [], currentFingerprints: {} };
-  } else if (args.refresh) {
-    const { stale, current } = await compareRefreshFingerprints(ctx.cwd, index);
-    refreshResult = { skipped: false, staleFiles: stale, currentFingerprints: current };
-    if (stale.length === 0) {
-      refreshSection = "\n\n## Refresh status\n\nNo tracked files are stale; all recorded fingerprints match the current working tree.";
-    } else {
-      refreshSection = `\n\n## Stale files\n\nThe following tracked files changed or are missing since the last refresh:\n${stale.map((line) => `- ${line}`).join("\n")}\n\n## Current fingerprints\n\nAfter updating the stale map sections, update .specwright/project/codebase-index.json fingerprints to this exact JSON object:\n\n\`\`\`json\n${JSON.stringify(current, null, 2)}\n\`\`\``;
-    }
+  if (buildResult.staleFiles.length > 0) {
+    refreshSection = "\n\n## Stale files\n\nThe following indexed files changed or are missing since the last refresh:\n" + buildResult.staleFiles.map((line) => `- ${line}`).join("\n");
+  } else if (buildResult.changed) {
+    refreshSection = "\n\n## Refresh status\n\nThe deterministic index was created or refreshed.";
+  } else {
+    refreshSection = "\n\n## Refresh status\n\nNo indexed files are stale; the deterministic index is already current.";
+  }
+  if (rebuiltFromValidationErrors) {
+    refreshSection += "\n\nHard validation errors in the existing codebase-index.json caused a scratch rebuild; semantic fields from the invalid index were not preserved.";
   }
 
   const validationSection = validationReport.issues.length > 0
     ? "\n\n## Codebase index validation\n\n" + validationReport.issues.map((issue) => `- ${issue.level.toUpperCase()} ${issue.code}: ${issue.message}`).join("\n")
     : "";
 
+  const config = await loadConfig(ctx.cwd);
   const prompt = ctx.runtime === "omp"
     ? renderOmpScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection })
     : renderScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection });
@@ -666,10 +606,14 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
         summary: humanSummary,
         map: args.map,
         refresh: args.refresh,
+        indexUpdated: shouldWriteIndex,
+        staleFiles: buildResult.staleFiles,
+        scannedFiles: buildResult.scannedFiles,
+        indexedFiles: buildResult.indexedFiles,
+        truncated: buildResult.truncated,
         filesCreated: created,
         filesUpdated: updated,
         validation: validationReport,
-        ...(args.refresh ? { refreshResult } : {}),
         prompt,
       }, null, 2)
     : humanSummary;

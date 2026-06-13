@@ -2,7 +2,6 @@ import { test, expect } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { computeFileFingerprint } from "../src/core/json";
 import { buildCodebaseIndex } from "../src/core/codebase-index";
 import { runSpecwrightCommand, renderHelp } from "../src/core/commands";
 import {
@@ -2628,79 +2627,135 @@ test("scan --json returns accurate result shape", async () => {
   expect(payload.prompt).toContain(".specwright/project/codebase-map.md");
 });
 
-test("scan --refresh reports no stale files when fingerprints match", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-fresh-"));
+test("scan creates a deterministic index for a non-Git TypeScript project", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-first-"));
   const ctx = testContext(cwd);
-  await mkdir(join(cwd, "src", "core"), { recursive: true });
+  await mkdir(join(cwd, "src"), { recursive: true });
   await mkdir(join(cwd, "test"), { recursive: true });
-  await writeFile(join(cwd, "src", "core", "sample.ts"), "export const sample = 1;\n", "utf8");
-  await writeFile(join(cwd, "test", "sample.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test", build: "bun run build" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
-  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json"]);
+  expect(result.ok).toBe(true);
+
+  const payload = JSON.parse(result.summary);
+  expect(payload.indexUpdated).toBe(true);
+  expect(payload.staleFiles).toEqual([]);
+  expect(payload.scannedFiles).toBeGreaterThan(0);
+  expect(payload.indexedFiles).toBeGreaterThan(0);
+  expect(payload.truncated).toBe(false);
 
   const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
-  const sampleFp = await computeFileFingerprint(join(cwd, "src", "core", "sample.ts"));
-  const testFp = await computeFileFingerprint(join(cwd, "test", "sample.test.ts"));
-  if (!sampleFp || !testFp) throw new Error("Expected fingerprints for sample files");
-  const originalIndex = JSON.stringify(
-    {
-      version: 1,
-      generatedAt: ctx.now().toISOString(),
-      entrypoints: [{ path: "src/core/sample.ts", kind: "module" }],
-      modules: [{ path: "src/core/sample.ts", kind: "core", tests: ["test/sample.test.ts"] }],
-      commands: [],
-      verification: [],
-      risks: [],
-      fingerprints: {
-        "src/core/sample.ts": sampleFp,
-        "test/sample.test.ts": testFp,
-      },
-    },
-    null,
-    2,
-  );
-  await writeFile(indexPath, originalIndex, "utf8");
+  const index = JSON.parse(await readFile(indexPath, "utf8"));
+  const entryPaths = index.entrypoints.map((entry: { path: string }) => entry.path);
+  expect(entryPaths).toContain("package.json");
+  expect(entryPaths).toContain("src/cli.ts");
 
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh"]);
-  expect(result.ok).toBe(true);
-  expect(result.summary).toBe("Prepared project scan prompt.");
-  expect(result.prompt).toContain("## Refresh status");
-  expect(result.prompt).toContain("No tracked files are stale; all recorded fingerprints match the current working tree.");
-  expect(result.prompt).not.toContain("## Stale files");
-  expect(result.filesUpdated).not.toContain(indexPath);
-  expect(await readFile(indexPath, "utf8")).toBe(originalIndex);
+  const cliModule = index.modules.find((mod: { path: string }) => mod.path === "src/cli.ts");
+  expect(cliModule).toBeDefined();
+  expect(cliModule.tests).toContain("test/cli.test.ts");
+
+  const verificationCommands = index.verification.map((v: { command: string }) => v.command);
+  expect(verificationCommands).toContain("bun test");
+
+  expect(typeof index.fingerprints["src/cli.ts"]).toBe("object");
+  expect(typeof index.fingerprints["test/cli.test.ts"]).toBe("object");
 });
 
-test("scan --refresh reports deterministic stale warnings for changed and missing files", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-stale-"));
+test("scan is a no-op when the deterministic index is already current", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-idempotent-"));
   const ctx = testContext(cwd);
-  await mkdir(join(cwd, "src", "core"), { recursive: true });
+  await mkdir(join(cwd, "src"), { recursive: true });
   await mkdir(join(cwd, "test"), { recursive: true });
-  await writeFile(join(cwd, "src", "core", "stale.ts"), "export const stale = 1;\n", "utf8");
-  await writeFile(join(cwd, "test", "stale.test.ts"), "import { test } from 'bun:test';\n", "utf8");
-  await writeFile(join(cwd, "src", "core", "new.ts"), "export const fresh = 1;\n", "utf8");
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
   expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
 
   const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
-  const staleFp = await computeFileFingerprint(join(cwd, "src", "core", "stale.ts"));
-  const staleTestFp = await computeFileFingerprint(join(cwd, "test", "stale.test.ts"));
-  if (!staleFp || !staleTestFp) throw new Error("Expected fingerprints for stale files");
+  const before = await readFile(indexPath, "utf8");
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json"]);
+  expect(result.ok).toBe(true);
+
+  const payload = JSON.parse(result.summary);
+  expect(payload.indexUpdated).toBe(false);
+  expect(payload.staleFiles).toEqual([]);
+  expect(await readFile(indexPath, "utf8")).toBe(before);
+});
+
+test("scan refreshes fingerprints for changed indexed files", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-changed-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  const before = JSON.parse(await readFile(indexPath, "utf8"));
+  const originalCliFingerprint = before.fingerprints["src/cli.ts"];
+  expect(originalCliFingerprint).toBeDefined();
+
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hello');\n", "utf8");
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json"]);
+  expect(result.ok).toBe(true);
+
+  const payload = JSON.parse(result.summary);
+  expect(payload.indexUpdated).toBe(true);
+  expect(payload.staleFiles).toContain("src/cli.ts (changed)");
+
+  const after = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(after.fingerprints["src/cli.ts"]).not.toEqual(originalCliFingerprint);
+  expect(after.fingerprints["test/cli.test.ts"]).toEqual(before.fingerprints["test/cli.test.ts"]);
+});
+
+test("scan rebuilds an invalid codebase-index.json from scratch", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-invalid-rebuild-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
   await writeFile(
     indexPath,
     JSON.stringify(
       {
         version: 1,
-        generatedAt: ctx.now().toISOString(),
-        entrypoints: [{ path: "src/core/new.ts", kind: "module" }],
-        modules: [{ path: "src/core/stale.ts", kind: "core", tests: ["test/stale.test.ts"] }],
-        commands: [],
+        generatedAt: "2020-01-01T00:00:00.000Z",
+        entrypoints: [{ path: "../escape.ts" }],
+        modules: [{ path: "src/missing.ts" }],
+        commands: [{}],
         verification: [],
-        risks: [],
-        fingerprints: {
-          "src/core/stale.ts": staleFp,
-          "test/stale.test.ts": staleTestFp,
-        },
+        risks: [{ area: "custom risk", summary: "preserved" }],
+        fingerprints: { "src/missing.ts": { mtime: 1, size: 1, checksum: "abc" } },
       },
       null,
       2,
@@ -2708,36 +2763,60 @@ test("scan --refresh reports deterministic stale warnings for changed and missin
     "utf8",
   );
 
-  await writeFile(join(cwd, "src", "core", "stale.ts"), "export const stale = 2;\n", "utf8");
-  await rm(join(cwd, "test", "stale.test.ts"));
-
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--json"]);
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json", "--print-prompt"]);
   expect(result.ok).toBe(true);
   const payload = JSON.parse(result.summary);
-  expect(payload.refreshResult.skipped).toBe(false);
-  expect(payload.refreshResult.staleFiles).toEqual([
-    "src/core/new.ts (changed)",
-    "src/core/stale.ts (changed)",
-    "test/stale.test.ts (missing)",
-  ]);
-  expect(result.prompt).toContain("## Stale files");
-  expect(result.prompt).toContain("- src/core/new.ts (changed)");
-  expect(result.prompt).toContain("- src/core/stale.ts (changed)");
-  expect(result.prompt).toContain("- test/stale.test.ts (missing)");
-  expect(result.prompt).toContain("## Current fingerprints");
-  expect(result.prompt).toContain("\"src/core/new.ts\"");
-  expect(result.filesUpdated).not.toContain(indexPath);
+  expect(payload.validation.ok).toBe(false);
+  expect(payload.indexUpdated).toBe(true);
+  expect(result.prompt).toContain("## Codebase index validation");
+  expect(result.prompt).toContain("not a safe relative path");
+  expect(result.prompt).toContain("Hard validation errors");
 
-  const refreshed = JSON.parse(await readFile(indexPath, "utf8"));
-  expect(refreshed.fingerprints["src/core/stale.ts"]).toEqual(staleFp);
-  expect(refreshed.fingerprints["test/stale.test.ts"]).toEqual(staleTestFp);
-  expect(refreshed.fingerprints["src/core/new.ts"]).toBeUndefined();
+  const rebuilt = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(rebuilt.entrypoints.every((entry: { path: string }) => entry.path !== "../escape.ts")).toBe(true);
+  expect(rebuilt.modules.every((mod: { path: string }) => mod.path !== "src/missing.ts")).toBe(true);
+  expect(rebuilt.fingerprints["../escape.ts"]).toBeUndefined();
+  expect(rebuilt.fingerprints["src/missing.ts"]).toBeUndefined();
+  expect(rebuilt.risks.some((risk: { area: string }) => risk.area === "custom risk")).toBe(false);
 });
 
-test("scan --refresh skips unsafe index paths before fingerprinting", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-unsafe-"));
+test("scan --refresh follows the same command-owned refresh path", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-compat-"));
   const ctx = testContext(cwd);
-  await writeFile(join(cwd, "..", "escape.ts"), "export const escape = true;\n", "utf8");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const first = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--json"]);
+  expect(first.ok).toBe(true);
+  const firstPayload = JSON.parse(first.summary);
+  expect(firstPayload.indexUpdated).toBe(true);
+  expect(firstPayload.staleFiles).toEqual([]);
+
+  const second = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--json"]);
+  expect(second.ok).toBe(true);
+  const secondPayload = JSON.parse(second.summary);
+  expect(secondPayload.indexUpdated).toBe(false);
+  expect(secondPayload.staleFiles).toEqual([]);
+});
+
+test("scan preserves SW106 warnings while rebuilding deterministic data", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-sw106-warning-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src", "dir"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
   expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
 
@@ -2745,90 +2824,17 @@ test("scan --refresh skips unsafe index paths before fingerprinting", async () =
   await writeFile(
     indexPath,
     JSON.stringify(
-      {
-        version: 1,
-        entrypoints: [{ path: "../escape.ts" }],
-        modules: [],
-        commands: [],
-        verification: [],
-        risks: [],
-        fingerprints: {},
-      },
+      { version: 1, generatedAt: ctx.now().toISOString(), entrypoints: [], modules: [{ path: "src/dir" }], commands: [], verification: [], risks: [], fingerprints: {} },
       null,
       2,
     ),
     "utf8",
   );
 
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
-  expect(result.ok).toBe(true);
-  expect(result.prompt).toContain("## Codebase index validation");
-  expect(result.prompt).toContain("not a safe relative path");
-  expect(result.prompt).toContain("Refresh fingerprint comparison skipped because codebase-index.json has validation errors");
-
-  const refreshed = JSON.parse(await readFile(indexPath, "utf8"));
-  expect(refreshed.fingerprints["../escape.ts"]).toBeUndefined();
-});
-
-test("scan --refresh reports malformed index shape without throwing", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-shape-"));
-  const ctx = testContext(cwd);
-  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
-  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
-
-  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
-  await writeFile(
-    indexPath,
-    JSON.stringify({ version: 1, entrypoints: [], modules: [null], commands: [], verification: [], risks: [], fingerprints: {} }, null, 2),
-    "utf8",
-  );
-
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
-  expect(result.ok).toBe(true);
-  expect(result.prompt).toContain("modules[0] must be an object");
-  expect(result.prompt).toContain("Refresh fingerprint comparison skipped because codebase-index.json has validation errors");
-});
-
-test("scan --refresh reports malformed fingerprints without throwing", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-fingerprint-"));
-  const ctx = testContext(cwd);
-  await mkdir(join(cwd, "src", "core"), { recursive: true });
-  await writeFile(join(cwd, "src", "core", "sample.ts"), "export const sample = 1;\n", "utf8");
-  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
-  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
-
-  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
-  await writeFile(
-    indexPath,
-    JSON.stringify({ version: 1, entrypoints: [], modules: [{ path: "src/core/sample.ts" }], commands: [], verification: [], risks: [], fingerprints: { "src/core/sample.ts": null } }, null, 2),
-    "utf8",
-  );
-
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
-  expect(result.ok).toBe(true);
-  expect(result.prompt).toContain("SW109");
-  expect(result.prompt).toContain("Refresh fingerprint comparison skipped because codebase-index.json has validation errors");
-});
-
-test("scan --refresh treats directory paths as validation warnings", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-directory-"));
-  const ctx = testContext(cwd);
-  await mkdir(join(cwd, "src", "dir"), { recursive: true });
-  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
-  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
-
-  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
-  await writeFile(
-    indexPath,
-    JSON.stringify({ version: 1, entrypoints: [], modules: [{ path: "src/dir" }], commands: [], verification: [], risks: [], fingerprints: {} }, null, 2),
-    "utf8",
-  );
-
-  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
+  const result = await runSpecwrightCommand(ctx, ["scan", "--print-prompt"]);
   expect(result.ok).toBe(true);
   expect(result.prompt).toContain("references non-file path: src/dir");
 });
-
 test("scan --map prompt focuses only on map artifacts", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-map-prompt-"));
   const ctx = testContext(cwd);
