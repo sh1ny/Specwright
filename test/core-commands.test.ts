@@ -2977,6 +2977,99 @@ test("buildCodebaseIndex records deterministic scan coverage risk when scanned f
   expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(true);
 });
 
+test("buildCodebaseIndex fingerprints indexed files and is idempotent on unchanged source", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fingerprint-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({ cwd, now });
+  expect(first.changed).toBe(true);
+  expect(first.staleFiles).toEqual([]);
+  expect(first.index.fingerprints).toBeDefined();
+  expect(first.index.fingerprints?.["package.json"]).toBeDefined();
+  expect(first.index.fingerprints?.["src/cli.ts"]).toBeDefined();
+  expect(first.index.fingerprints?.["test/cli.test.ts"]).toBeDefined();
+  expect(first.index.generatedAt).toBe(now.toISOString());
+
+  const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  expect(second.changed).toBe(false);
+  expect(second.staleFiles).toEqual([]);
+  expect(second.index.generatedAt).toBe(first.index.generatedAt);
+  expect(second.index.fingerprints).toEqual(first.index.fingerprints);
+});
+
+test("buildCodebaseIndex reports stale files and refreshes fingerprints when a source file changes", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-stale-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({ cwd, now });
+  const originalCliFingerprint = first.index.fingerprints?.["src/cli.ts"];
+  expect(originalCliFingerprint).toBeDefined();
+
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hello');\n", "utf8");
+  const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  expect(second.changed).toBe(true);
+  expect(second.staleFiles).toContain("src/cli.ts (changed)");
+  expect(second.index.fingerprints?.["src/cli.ts"]).not.toEqual(originalCliFingerprint);
+  expect(second.index.fingerprints?.["test/cli.test.ts"]).toEqual(first.index.fingerprints?.["test/cli.test.ts"]);
+});
+
+test("buildCodebaseIndex removes fingerprints for paths no longer indexed", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-removed-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "drop.ts"), "export const drop = 1;\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({ cwd, now });
+  expect(first.index.fingerprints?.["src/drop.ts"]).toBeDefined();
+
+  await rm(join(cwd, "src", "drop.ts"));
+  const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  expect(second.changed).toBe(true);
+  expect(second.index.fingerprints?.["src/drop.ts"]).toBeUndefined();
+  expect(second.index.fingerprints?.["src/keep.ts"]).toEqual(first.index.fingerprints?.["src/keep.ts"]);
+});
+
+test("buildCodebaseIndex skips oversized files and records a large file skipped risk", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-oversized-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
+  await writeFile(join(cwd, "src", "small.ts"), "export const small = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "huge.ts"), "x".repeat(64), "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  expect(result.index.risks?.some((risk) => risk.area === "large file skipped")).toBe(true);
+  expect(result.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
+  expect(result.index.fingerprints?.["src/small.ts"]).toBeDefined();
+});
+
 test("scan --json surfaces validation issues in machine-readable output", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-validation-json-"));
   const ctx = testContext(cwd);

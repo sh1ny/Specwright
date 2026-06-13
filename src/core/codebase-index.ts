@@ -1,3 +1,5 @@
+import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
 import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type { FileFingerprint } from "./json";
@@ -88,6 +90,37 @@ const ENTRYPOINT_BASE_NAMES: Record<string, true> = {
   app: true,
 };
 
+function isFileFingerprint(value: unknown): value is FileFingerprint {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Number.isFinite((value as Record<string, unknown>).mtime) &&
+    Number.isFinite((value as Record<string, unknown>).size) &&
+    typeof (value as Record<string, unknown>).checksum === "string"
+  );
+}
+
+async function streamFileFingerprint(
+  absolutePath: string,
+  maxBytes: number,
+): Promise<FileFingerprint | undefined> {
+  let stats;
+  try {
+    stats = await stat(absolutePath);
+  } catch {
+    return undefined;
+  }
+  if (!stats.isFile() || stats.size > maxBytes) {
+    return undefined;
+  }
+  const hash = createHash("sha256");
+  const stream = createReadStream(absolutePath);
+  for await (const chunk of stream) {
+    hash.update(chunk as Buffer);
+  }
+  return { mtime: stats.mtimeMs, size: stats.size, checksum: hash.digest("hex") };
+}
 interface DiscoveredFile {
   relPath: string;
   absolute: string;
@@ -316,6 +349,7 @@ interface NormalizedIndexPart {
   commands: Array<{ name: string; summary?: string }>;
   verification: Array<{ command: string; purpose?: string }>;
   risks: Array<{ area: string; summary?: string }>;
+  fingerprints: Array<[string, { mtime: number; size: number; checksum: string }]>;
 }
 
 function normalizeIndexPart(index: CodebaseIndex): NormalizedIndexPart {
@@ -353,7 +387,11 @@ function normalizeIndexPart(index: CodebaseIndex): NormalizedIndexPart {
     const bKey = `${b.area}:${b.summary ?? ""}`;
     return aKey.localeCompare(bKey);
   });
-  return { entrypoints, modules, commands, verification, risks };
+  const fingerprints = Object.entries(index.fingerprints ?? {})
+    .filter((entry): entry is [string, FileFingerprint] => isFileFingerprint(entry[1]))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([path, fp]) => [path, { mtime: fp.mtime, size: fp.size, checksum: fp.checksum }] as [string, { mtime: number; size: number; checksum: string }]);
+  return { entrypoints, modules, commands, verification, risks, fingerprints };
 }
 
 export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Promise<BuildCodebaseIndexResult> {
@@ -545,25 +583,73 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     });
   }
 
-  const index: CodebaseIndex = {
+  const fileByPath = new Map(files.map((file) => [file.relPath, file]));
+  const indexedPaths = new Set<string>();
+  for (const entry of entrypoints) {
+    indexedPaths.add(entry.path);
+  }
+  for (const mod of modules) {
+    indexedPaths.add(mod.path);
+    if (mod.tests) {
+      for (const testPath of mod.tests) {
+        indexedPaths.add(testPath);
+      }
+    }
+  }
+
+  const fingerprints: Record<string, FileFingerprint> = {};
+  const staleFiles: string[] = [];
+  const previousFingerprints = options.existing?.fingerprints ?? {};
+  for (const relPath of Array.from(indexedPaths).sort((a, b) => a.localeCompare(b))) {
+    const file = fileByPath.get(relPath);
+    if (file && file.size > limits.maxFingerprintBytesPerFile) {
+      continue;
+    }
+    const absolute = resolve(options.cwd, relPath);
+    const fp = await streamFileFingerprint(absolute, limits.maxFingerprintBytesPerFile);
+    if (fp) {
+      fingerprints[relPath] = fp;
+      const previous = previousFingerprints[relPath];
+      if (
+        !isFileFingerprint(previous) ||
+        previous.mtime !== fp.mtime ||
+        previous.size !== fp.size ||
+        previous.checksum !== fp.checksum
+      ) {
+        staleFiles.push(`${relPath} (changed)`);
+      }
+    } else {
+      const previous = previousFingerprints[relPath];
+      if (previous !== undefined) {
+        staleFiles.push(`${relPath} (missing)`);
+      }
+    }
+  }
+
+  const candidate: CodebaseIndex = {
     version: 1,
-    generatedAt: options.now.toISOString(),
     entrypoints,
     modules,
     commands,
     verification,
     risks,
-    fingerprints: {},
+    fingerprints,
   };
 
   const changed =
     options.existing === undefined ||
-    JSON.stringify(normalizeIndexPart(options.existing)) !== JSON.stringify(normalizeIndexPart(index));
+    JSON.stringify(normalizeIndexPart(options.existing)) !== JSON.stringify(normalizeIndexPart(candidate));
+
+  const generatedAt = changed
+    ? options.now.toISOString()
+    : options.existing?.generatedAt ?? options.now.toISOString();
+
+  const index: CodebaseIndex = { ...candidate, generatedAt };
 
   return {
     index,
     changed,
-    staleFiles: [],
+    staleFiles,
     scannedFiles,
     indexedFiles,
     truncated: scanTruncated || indexedTruncated,
