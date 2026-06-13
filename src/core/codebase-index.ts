@@ -4,7 +4,7 @@ import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type { FileFingerprint } from "./json";
 import { isSafeRelativePath } from "./validators";
-import { runGit } from "./git";
+import { runGitNulSeparated } from "./git";
 
 export interface CodebaseIndex {
   version: number;
@@ -38,6 +38,7 @@ export interface BuildCodebaseIndexResult {
 }
 
 export const MAX_FILES_SCANNED = 50000;
+export const MAX_GIT_LS_FILES_BYTES = 64 * 1024 * 1024;
 export const MAX_INDEXED_FILES = 5000;
 export const MAX_FINGERPRINT_BYTES_PER_FILE = 1048576;
 
@@ -45,6 +46,7 @@ export const RESERVED_DETERMINISTIC_RISK_AREAS: Record<string, true> = {
   "scan coverage": true,
   "large file skipped": true,
   "symlink skipped": true,
+  "unsafe path skipped": true,
 };
 
 const DEFAULT_LIMITS = {
@@ -200,44 +202,74 @@ function inferKind(relPath: string): string {
   return "module";
 }
 
-async function tryGitFileList(cwd: string): Promise<string[] | undefined> {
-  const result = await runGit(cwd, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
-  if (result.exitCode !== 0) {
-    return undefined;
-  }
-  return result.stdout.split("\0").filter((line) => line.length > 0);
-}
-
-async function discoverFiles(
+async function tryGitDiscoverFiles(
   cwd: string,
   maxFilesScanned: number,
   risks: Array<{ area: string; summary?: string }>,
-): Promise<{ files: DiscoveredFile[]; scannedFiles: number; truncated: boolean }> {
-  const gitFiles = await tryGitFileList(cwd);
-  if (gitFiles !== undefined) {
-    const files: DiscoveredFile[] = [];
-    for (const relPath of gitFiles.sort(compareCodeUnit)) {
+): Promise<{ files: DiscoveredFile[]; scannedFiles: number; truncated: boolean } | undefined> {
+  const files: DiscoveredFile[] = [];
+  let hitFileCap = false;
+
+  const result = await runGitNulSeparated(
+    cwd,
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    async (rawPath) => {
+      const relPath = normalizePath(rawPath);
       if (shouldExclude(relPath)) {
-        continue;
+        return true;
+      }
+      if (!isSafeRelativePath(relPath)) {
+        risks.push({ area: "unsafe path skipped", summary: `Skipped unsafe path: ${relPath}` });
+        return true;
       }
       const absolute = resolve(cwd, relPath);
       try {
         const st = await lstat(absolute);
         if (st.isSymbolicLink()) {
           risks.push({ area: "symlink skipped", summary: `Skipped symlinked path: ${relPath}` });
-          continue;
+          return true;
         }
         if (st.isFile()) {
           if (files.length >= maxFilesScanned) {
-            return { files, scannedFiles: files.length, truncated: true };
+            hitFileCap = true;
+            return false;
           }
           files.push({ relPath, absolute, size: st.size });
         }
       } catch {
         // Ignore paths that disappeared or are inaccessible.
       }
-    }
-    return { files, scannedFiles: files.length, truncated: false };
+      return true;
+    },
+    { env: { GIT_TERMINAL_PROMPT: "0" }, maxStdoutBytes: MAX_GIT_LS_FILES_BYTES },
+  );
+
+  if (hitFileCap) {
+    files.sort((a, b) => compareCodeUnit(a.relPath, b.relPath));
+    return { files, scannedFiles: files.length, truncated: true };
+  }
+  if (result.truncated) {
+    risks.push({
+      area: "scan coverage",
+      summary: `git ls-files output exceeded ${MAX_GIT_LS_FILES_BYTES} bytes; falling back to filesystem discovery.`,
+    });
+    return undefined;
+  }
+  if (result.exitCode !== 0) {
+    return undefined;
+  }
+
+  files.sort((a, b) => compareCodeUnit(a.relPath, b.relPath));
+  return { files, scannedFiles: files.length, truncated: false };
+}
+async function discoverFiles(
+  cwd: string,
+  maxFilesScanned: number,
+  risks: Array<{ area: string; summary?: string }>,
+): Promise<{ files: DiscoveredFile[]; scannedFiles: number; truncated: boolean }> {
+  const gitDiscovery = await tryGitDiscoverFiles(cwd, maxFilesScanned, risks);
+  if (gitDiscovery !== undefined) {
+    return gitDiscovery;
   }
 
   const files: DiscoveredFile[] = [];
@@ -261,6 +293,10 @@ async function discoverFiles(
       const absolute = join(dir, entry.name);
       const relPath = normalizePath(relative(cwd, absolute));
       if (shouldExclude(relPath)) {
+        continue;
+      }
+      if (!isSafeRelativePath(relPath)) {
+        risks.push({ area: "unsafe path skipped", summary: `Skipped unsafe path: ${relPath}` });
         continue;
       }
       if (entry.isSymbolicLink()) {

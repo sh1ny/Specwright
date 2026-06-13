@@ -245,8 +245,8 @@
     },
     "src/core/codebase-index.ts": {
       "mtime": 0,
-      "size": 23382,
-      "checksum": "c83974a77183b7886c5f410fe9149d7c70d408f143e5b94326b0d4e48e3d70f0"
+      "size": 24550,
+      "checksum": "38d7ec98f580a9eca9a95ec478ea47bdb10b12dd922b810f41f9a90312f93fce"
     },
     "src/core/commands.ts": {
       "mtime": 0,
@@ -255,8 +255,8 @@
     },
     "src/core/git.ts": {
       "mtime": 0,
-      "size": 10977,
-      "checksum": "c848c3b6aa37cdbdfd5fe5e0319b27447dbbc167eee604e27e3c8e48770af7e4"
+      "size": 13915,
+      "checksum": "4ac407993755fa38cf63174b4a5c07e11be7b8346109bbc63026c3516bd0fb68"
     },
     "src/core/json.ts": {
       "mtime": 0,
@@ -270,8 +270,8 @@
     },
     "src/core/prompts.ts": {
       "mtime": 0,
-      "size": 11297,
-      "checksum": "1a56de6a1f4bfc895dd5a8d9609a6d2cb56db6d6c2f97a2ef694271848ac2af7"
+      "size": 11385,
+      "checksum": "b53e7691bb7dcd557ba7adf01dfe8edcc99a20814db257b77fb222c07d78c094"
     },
     "src/core/slug.ts": {
       "mtime": 0,
@@ -325,8 +325,8 @@
     },
     "test/core-commands.test.ts": {
       "mtime": 0,
-      "size": 169061,
-      "checksum": "45b082befb9f2d48b605839f62a028cba56ca5de270640eca2834defa4013875"
+      "size": 171989,
+      "checksum": "09605a67bd09945a4399a6f6687972ab8ce6f0957c530ca9d6bc8690c5169a7e"
     },
     "test/core-init.test.ts": {
       "mtime": 0,
@@ -340,8 +340,8 @@
     },
     "test/core-prompts.test.ts": {
       "mtime": 0,
-      "size": 34294,
-      "checksum": "65a46209bf12bef8a8733c285302c3488280b76909c5293869d9e30e826eb572"
+      "size": 34877,
+      "checksum": "fdf1522867c823ec76fb080fb2e49e2a1bc37e7669f81358b20bafffa8c80880"
     },
     "test/core-validators.test.ts": {
       "mtime": 0,
@@ -354,5 +354,5 @@
       "checksum": "9a831f8b192aecddc66d6a84dff3593ad7e0ca6e355f60e8e56e8c03e5964f6d"
     }
   },
-  "generatedAt": "2026-06-13T17:04:37.388Z"
+  "generatedAt": "2026-06-13T17:53:39.313Z"
 }

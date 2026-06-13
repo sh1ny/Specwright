@@ -6,7 +6,9 @@ Verdict: **READY FOR RE-REVIEW** after follow-up remediation; merge still requir
 
 Reviewed the current PR scope via 8 parallel reviewer agents. This artifact supersedes the earlier 21-file review snapshot.
 
-## Findings
+## Historical findings resolved in this branch
+
+No open findings remain from the previous review snapshot; the entries below are retained only as resolved history.
 
 ### [MEDIUM] Deterministic ordering depends on host locale
 

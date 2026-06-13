@@ -6,7 +6,7 @@
 
 Plain `specwright scan` is the command-owned path for deterministic `codebase-index.json` creation and refresh. It must run the deterministic builder after ensuring project prose artifacts, write the index only when missing, changed, or forced, and report `indexUpdated`, `staleFiles`, `scannedFiles`, `indexedFiles`, and `truncated`. `scan --refresh` is compatibility spelling for the same path; `--map` may affect prompt focus but must not preserve a separate index-ownership path.
 
-Pre-change evidence (current at research time): `evidence.md` records that `commandScan()` wrote an empty default index and refreshed only under `--refresh` (`src/core/commands.ts:598-686`), that the old refresh could not discover new files because it only checked already-indexed paths (`src/core/commands.ts:440-509`), and that the original prompt asked agents to paste fingerprint JSON (`src/core/commands.ts:651-662`).
+Pre-change evidence (pre-change historical ranges): `evidence.md` records that `commandScan()` wrote an empty default index and refreshed only under `--refresh` (`src/core/commands.ts:598-686` at research time), that the old refresh could not discover new files because it only checked already-indexed paths (`src/core/commands.ts:440-509` at research time), and that the original prompt asked agents to paste fingerprint JSON (`src/core/commands.ts:651-662` at research time).
 
 Hard validation errors (`SW100`-`SW105`, `SW107`-`SW109`) mean rebuild from scratch without preserving semantic fields from the invalid object; `SW106` missing-file warnings remain non-blocking for preservation. Evidence: `evidence.md` notes `validateCodebaseIndex()` distinguishes those classes (`src/core/validators.ts:100-308`).
 
@@ -30,7 +30,7 @@ Update scan prompt inputs and `renderScanPrompt()` so core prompt text shows a c
 
 ### Wave 3: Tests and verification
 
-Update command tests for first non-Git scan, idempotent second scan, edited-file refresh through plain scan, hard-invalid index rebuild, cap/truncation risk, and `--refresh` no longer showing `## Current fingerprints`. Add a Git-worktree discovery case that proves tracked and untracked files are indexed while ignored files are excluded. Update prompt tests so core never asks for manual fingerprint JSON and OMP-only scout guidance remains isolated. Evidence: `evidence.md` records current tests that lock in old refresh behavior (`test/core-commands.test.ts:2630-2734`) and prompt boundary tests (`test/core-prompts.test.ts:358-440`).
+Update command tests for first non-Git scan, idempotent second scan, edited-file refresh through plain scan, hard-invalid index rebuild, cap/truncation risk, and `--refresh` no longer showing `## Current fingerprints`. Add a Git-worktree discovery case that proves tracked and untracked files are indexed while ignored files are excluded. Update prompt tests so core never asks for manual fingerprint JSON and OMP-only scout guidance remains isolated. Evidence: `evidence.md` records pre-change historical ranges that locked in old refresh behavior (`test/core-commands.test.ts:2630-2734` at research time) and prompt boundary tests (`test/core-prompts.test.ts:358-440` at research time).
 
 ## Risks
 

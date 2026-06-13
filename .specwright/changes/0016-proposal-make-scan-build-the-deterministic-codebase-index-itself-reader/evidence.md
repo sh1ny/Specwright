@@ -13,11 +13,12 @@
 
 ### Implemented branch evidence
 
-- `buildCodebaseIndex()` in `src/core/codebase-index.ts:454-715` now builds the deterministic index from Git-assisted or filesystem discovery, filters unsafe/excluded package entrypoints, enforces caps for associated tests, and reports deleted indexed files as stale.
-- `commandScan()` in `src/core/commands.ts:517-624` calls the builder every scan, validates generated output before writing, and exposes generated validation separately from existing-index validation.
-- `renderScanPrompt()` in `src/core/prompts.ts:125-192` makes `codebase-index.json` command-owned and derives the editable prose artifact list from the scan mode.
-- `renderOmpScanPrompt()` in `src/runtime/omp/prompts.ts:34-47` keeps OMP scout instructions but restricts scout merges to agent-owned prose artifacts.
-- Regression coverage in `test/core-commands.test.ts:2732-3137` and `test/core-prompts.test.ts:370-512` covers invalid rebuilds, stale deletions, package path filtering, associated-test caps, ambiguous basename fallback, and prompt ownership.
+- `buildCodebaseIndex()` in `src/core/codebase-index.ts:505-776` builds the deterministic index from Git-assisted streaming or filesystem discovery, filters unsafe/excluded paths, enforces caps for associated tests, and reports deleted indexed files as stale.
+- Discovery in `src/core/codebase-index.ts:205-325` rejects unsafe Git and filesystem paths before indexing and records deterministic `unsafe path skipped` risks.
+- `commandScan()` in `src/core/commands.ts:517-627` calls the builder every scan, validates generated output before writing, and exposes generated validation separately from existing-index validation.
+- `renderScanPrompt()` in `src/core/prompts.ts:125-200` makes `codebase-index.json` command-owned, derives the editable prose artifact list from scan mode, and renders all stale files during refresh.
+- `renderOmpScanPrompt()` in `src/runtime/omp/prompts.ts:34-49` keeps OMP scout instructions but restricts scout merges to agent-owned prose artifacts.
+- Regression coverage in `test/core-commands.test.ts:2757-2814`, `test/core-commands.test.ts:2949-3491`, and `test/core-prompts.test.ts:370-570` covers invalid rebuilds, stale deletions, package path filtering, unsafe discovered paths, Git discovery caps, associated-test caps, ambiguous basename fallback, and prompt ownership.
 ## Research attempts
 
 No external or scout research was required; local code and tests provide enough evidence. The `specwright-researcher` attempted to update the research artifacts directly, but its environment did not expose a file-write/edit tool, so it returned proposed contents for the lifecycle orchestrator to apply.

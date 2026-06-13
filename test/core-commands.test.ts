@@ -3018,6 +3018,25 @@ test("buildCodebaseIndex records deterministic scan coverage risk when scanned f
   expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(true);
 });
 
+test("buildCodebaseIndex Git discovery stops deterministically when scanned file cap is exceeded", async () => {
+  const cwd = await initGitRepo("specwright-build-index-git-scan-cap-");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "b.ts"), "export const b = 2;\n", "utf8");
+  await writeFile(join(cwd, "src", "c.ts"), "export const c = 3;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFilesScanned: 2 },
+  });
+
+  expect(result.truncated).toBe(true);
+  expect(result.scannedFiles).toBe(2);
+  expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(true);
+  expect(result.index.modules?.map((mod) => mod.path)).toEqual(["src/a.ts", "src/b.ts"]);
+});
+
 test("buildCodebaseIndex fingerprints indexed files and is idempotent on unchanged source", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fingerprint-"));
   await mkdir(join(cwd, "src"), { recursive: true });
@@ -3171,6 +3190,21 @@ test("buildCodebaseIndex filters unsafe and excluded package entrypoints", async
   expect(entrypointPaths).not.toContain("../escape.js");
   expect(entrypointPaths).not.toContain("/tmp/escape.js");
   expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
+});
+
+test("buildCodebaseIndex skips unsafe filesystem fallback paths before indexing", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fs-unsafe-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "bad\nname.ts"), "export const bad = 1;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+
+  expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
+  expect(result.index.entrypoints?.some((entry) => entry.path.includes("bad\nname.ts"))).toBe(false);
+  expect(result.index.modules?.some((mod) => mod.path.includes("bad\nname.ts"))).toBe(false);
+  expect(Object.keys(result.index.fingerprints ?? {}).some((path) => path.includes("bad\nname.ts"))).toBe(false);
+  expect(result.index.risks?.some((risk) => risk.area === "unsafe path skipped")).toBe(true);
 });
 test("buildCodebaseIndex excludes nested build and vendor directories", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-nested-excludes-"));
@@ -3395,6 +3429,23 @@ test("buildCodebaseIndex uses Git discovery for tracked and untracked files whil
   expect(result.index.fingerprints?.["src/tracked.ts"]).toBeDefined();
   expect(result.index.fingerprints?.["src/untracked.ts"]).toBeDefined();
   expect(result.index.fingerprints?.["ignored.ts"]).toBeUndefined();
+});
+
+test("buildCodebaseIndex Git discovery skips unsafe paths before indexing", async () => {
+  const cwd = await initGitRepo("specwright-build-index-git-unsafe-");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+  await expectGit(cwd, ["add", "src/keep.ts"]);
+  await expectGit(cwd, ["commit", "-m", "seed"]);
+  await writeFile(join(cwd, "src", "bad\nname.ts"), "export const bad = 1;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+
+  expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
+  expect(result.index.entrypoints?.some((entry) => entry.path.includes("bad\nname.ts"))).toBe(false);
+  expect(result.index.modules?.some((mod) => mod.path.includes("bad\nname.ts"))).toBe(false);
+  expect(Object.keys(result.index.fingerprints ?? {}).some((path) => path.includes("bad\nname.ts"))).toBe(false);
+  expect(result.index.risks?.some((risk) => risk.area === "unsafe path skipped")).toBe(true);
 });
 
 test("buildCodebaseIndex ignores root package metadata excluded by Git discovery", async () => {

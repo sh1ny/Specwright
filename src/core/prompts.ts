@@ -152,9 +152,10 @@ export function renderScanPrompt(input: ScanPromptInput): string {
   ];
   const MAX_STALE_FILES_RENDER = 20;
   if (summary.staleFiles.length > 0) {
-    const rendered = summary.staleFiles.slice(0, MAX_STALE_FILES_RENDER).map((line) => `  - ${line}`);
+    const filesToRender = isRefresh ? summary.staleFiles : summary.staleFiles.slice(0, MAX_STALE_FILES_RENDER);
+    const rendered = filesToRender.map((line) => `  - ${line}`);
     const remaining = summary.staleFiles.length - rendered.length;
-    if (remaining > 0) {
+    if (!isRefresh && remaining > 0) {
       rendered.push(`  - ... and ${remaining} more stale file${remaining === 1 ? "" : "s"} not listed here`);
     }
     deterministicState.push(`- Stale files: ${summary.staleFiles.length}\n${rendered.join("\n")}`);

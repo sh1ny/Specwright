@@ -17,6 +17,16 @@ export interface ProcessRunOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+export interface GitStreamResult {
+  command: "git";
+  args: readonly string[];
+  exitCode: number;
+  stderr: string;
+  stopped: boolean;
+  truncated: boolean;
+  bytesRead: number;
+}
+
 function mergeEnv(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return overrides ? { ...process.env, ...overrides } : process.env;
 }
@@ -61,6 +71,110 @@ function throwIfFailed(result: ProcessRunResult, action: string): void {
 
 export async function runGit(cwd: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<ProcessRunResult> {
   return await runProcess("git", args, env ? { cwd, env } : { cwd });
+}
+
+export async function runGitNulSeparated(
+  cwd: string,
+  args: readonly string[],
+  onItem: (item: string) => boolean | Promise<boolean>,
+  options?: { env?: NodeJS.ProcessEnv; maxStdoutBytes?: number },
+): Promise<GitStreamResult> {
+  return await new Promise<GitStreamResult>((resolve) => {
+    const child = spawn("git", args, {
+      cwd,
+      env: mergeEnv(options?.env),
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+    let leftover: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+    let stopped = false;
+    let truncated = false;
+    let bytesRead = 0;
+    let settled = false;
+    let pending = Promise.resolve();
+
+    function terminate(): void {
+      if (!child.killed) {
+        child.kill();
+      }
+    }
+
+    function finish(exitCode: number): void {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve({ command: "git", args, exitCode, stderr, stopped, truncated, bytesRead });
+    }
+
+    async function processChunk(chunk: Buffer<ArrayBufferLike>): Promise<void> {
+      if (stopped || truncated) {
+        return;
+      }
+      bytesRead += chunk.length;
+      if (options?.maxStdoutBytes !== undefined && bytesRead > options.maxStdoutBytes) {
+        truncated = true;
+        terminate();
+        return;
+      }
+
+      const data = leftover.length === 0 ? chunk : Buffer.concat([leftover, chunk]);
+      let start = 0;
+      for (let index = 0; index < data.length; index += 1) {
+        if (data[index] !== 0) {
+          continue;
+        }
+        const item = data.subarray(start, index).toString("utf8");
+        start = index + 1;
+        if (item.length === 0) {
+          continue;
+        }
+        if ((await onItem(item)) === false) {
+          stopped = true;
+          terminate();
+          leftover = Buffer.alloc(0);
+          return;
+        }
+      }
+      leftover = data.subarray(start);
+    }
+
+    child.stdout.on("data", (chunk: Buffer<ArrayBufferLike>) => {
+      child.stdout.pause();
+      pending = pending
+        .then(async () => {
+          await processChunk(chunk);
+        })
+        .catch((error: unknown) => {
+          stderr += `${error instanceof Error ? error.message : String(error)}\n`;
+          stopped = true;
+          terminate();
+        })
+        .finally(() => {
+          if (!stopped && !truncated) {
+            child.stdout.resume();
+          }
+        });
+    });
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.on("error", (error) => {
+      stderr = error.message;
+      finish(127);
+    });
+
+    child.on("close", (code) => {
+      void pending.finally(() => {
+        finish(code ?? 1);
+      });
+    });
+  });
 }
 
 export async function runGh(cwd: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<ProcessRunResult> {

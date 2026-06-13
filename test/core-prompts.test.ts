@@ -454,7 +454,7 @@ test("renderScanPrompt renders non-default deterministic summary state", () => {
   expect(prompt).toContain("src/core/y.ts (changed)");
 });
 
-test("renderScanPrompt caps stale file list and summarizes remaining count", () => {
+test("renderScanPrompt caps stale file list and summarizes remaining count outside refresh mode", () => {
   const config = defaultConfig("scan-prompt-test");
   const staleFiles = Array.from({ length: 25 }, (_, i) => `src/f${i}.ts (changed)`);
   const summary = scanSummary({ staleFiles });
@@ -465,6 +465,18 @@ test("renderScanPrompt caps stale file list and summarizes remaining count", () 
   }
   expect(prompt).toContain("... and 5 more stale files not listed here");
   expect(prompt).not.toContain("src/f20.ts (changed)");
+});
+
+test("renderScanPrompt renders every stale file in refresh mode", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const staleFiles = Array.from({ length: 25 }, (_, i) => `src/f${i}.ts (changed)`);
+  const summary = scanSummary({ staleFiles });
+  const prompt = renderScanPrompt({ config, map: false, refresh: true, deterministicSummary: summary });
+  expect(prompt).toContain("Stale files: 25");
+  for (let i = 0; i < 25; i += 1) {
+    expect(prompt).toContain(`src/f${i}.ts (changed)`);
+  }
+  expect(prompt).not.toContain("not listed here");
 });
 
 test("renderScanPrompt is runtime-neutral and avoids OMP-specific scout wording", () => {

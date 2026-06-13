@@ -2,11 +2,11 @@
 
 ## Result
 
-PASS — targeted suites, typecheck, and deterministic index regeneration passed after review remediation.
+PASS
 
 ## Issues
 
-No observed issues.
+No issues.
 
 ## Observed output
 

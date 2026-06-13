@@ -9,11 +9,11 @@
 - `package.json:1-21` — package metadata, Bun scripts, CLI bin, dev dependencies.
 - `tsconfig.json:1-18` — ES2022/Bundler strict TypeScript compiler settings.
 - `bin/specwright.mjs:1-23`, `src/cli.ts:1-26` — published wrapper and Bun CLI entrypoint.
-- `src/core/commands.ts:48-80,263-371,429-509,598-686,1513-1548` — argument model, config keys, scan/index refresh support, dispatcher, command help.
+- `src/core/commands.ts:48-77,264-374,517-627,1451-1486` — argument model, config keys, scan/index refresh support, dispatcher, command help.
 - `src/core/codebase-index.ts` — command-owned deterministic codebase map builder; discovers files through Git or filesystem fallback, classifies entrypoints/modules/tests, derives package scripts, records risks, and fingerprints indexed files.
 - `src/core/state.ts:57-87,124-279,299-421`, `src/core/types.ts:1-132`, `src/core/paths.ts:1-42` — defaults, lifecycle/domain types, task sync, config/state loading, path layout.
 - `src/core/validators.ts:73-99,100-308,408-493` — config validation, codebase-index validation, change validation, validation report rendering.
-- `src/runtime/omp/extension.ts:1-222`, `src/runtime/omp/install.ts:39-187`, `src/runtime/omp/status.ts:61-232` — OMP command/tools/hooks, generated adapter files, passive status behavior.
+- `src/runtime/omp/extension.ts:1-161`, `src/runtime/omp/install.ts:39-187`, `src/runtime/omp/status.ts:61-232` — OMP command/tools/hooks, generated adapter files, passive status behavior.
 - `packs/core/pack.json:1-33`, `packs/core/workflows/feature.json:1-50`, `packs/core/validators/core.json:1-13` — built-in pack manifest, workflow modes, validator manifest.
 - `test/*.test.ts` — bounded search of test names and scout summaries for covered behavior.
 - LSP: TypeScript server available; `symbols` on `src/core/commands.ts` confirmed exported dispatcher and command handler locations.
@@ -21,15 +21,15 @@
 
 ## Patterns found
 
-- Specwright remains a small file-based workflow kernel. The CLI owns deterministic artifact/state operations and prompt generation; it does not call models directly (`src/cli.ts:10-13`, `src/core/commands.ts:1513-1540`).
+- Specwright remains a small file-based workflow kernel. The CLI owns deterministic artifact/state operations and prompt generation; it does not call models directly (`src/cli.ts:10-13`, `src/core/commands.ts:1451-1486`).
 - The fixed lifecycle is `discuss -> research -> plan -> execute -> verify -> handoff` (`src/core/types.ts:4`, `packs/core/workflows/feature.json:5-12`).
 - Machine state lives in `.specwright/config.json` and `.specwright/state.json`; change artifacts live under `.specwright/changes/<id>-<slug>/` (`src/core/paths.ts:4-25`).
 - Task truth is Markdown checklist syntax in `tasks.md`; sync detects malformed lines, duplicate IDs, title drift, and cached tasks missing from artifacts (`src/core/state.ts:124-279`).
-- `scan` now ensures project prose artifacts, regenerates command-owned `codebase-index.json` through the deterministic builder, validates generated index data, and emits a bounded prose-update prompt (`src/core/commands.ts:598-686`, `src/core/codebase-index.ts`, `src/core/validators.ts:100-308`).
+- `scan` now ensures project prose artifacts, regenerates command-owned `codebase-index.json` through the deterministic builder, validates generated index data, and emits a bounded prose-update prompt (`src/core/commands.ts:517-627`, `src/core/codebase-index.ts`, `src/core/validators.ts:100-308`).
 - OMP is the only runtime integration. Runtime-specific code stays under `src/runtime/omp/*` and wraps the core command engine (`src/runtime/omp/extension.ts:24-61`).
 - The OMP extension registers `/specwright`, tools (`specwright_status`, `specwright_checkpoint`, `specwright_validate`), passive status hooks, and a `tool_call` guard for lifecycle subagent routing (`src/runtime/omp/extension.ts:64-160`).
 - Packs are local file trees. The built-in `core` pack defines 13 artifacts, one `feature` workflow, four lifecycle agent cards, and one validator set (`packs/core/pack.json:1-33`).
-- Release-oriented commands include `publish` with `none|push|pr` and `complete` with `none|push|pr|merge` (`src/core/commands.ts:68-73,1513-1540`).
+- Release-oriented commands include `publish` with `none|push|pr` and `complete` with `none|push|pr|merge` (`src/core/commands.ts:68-73,1451-1486`).
 - Tests use `bun:test`, temporary directories, real file reads/writes, and direct calls to `runSpecwrightCommand`; coverage includes CLI commands, prompt rendering, validators, scan/index refresh, and OMP extension behavior.
 
 ## Constraints
