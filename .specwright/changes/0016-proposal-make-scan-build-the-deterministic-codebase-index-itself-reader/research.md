@@ -4,23 +4,29 @@
 
 ## Local findings
 
-- `specwright scan` is implemented in `commandScan()` (`src/core/commands.ts:598-686`). It ensures prose project artifacts, writes a default empty `codebase-index.json`, validates the existing index, and only compares fingerprints when `--refresh` is supplied.
-- The `--refresh` path uses `compareRefreshFingerprints()` (`src/core/commands.ts:440-509`), which only checks paths already listed in `entrypoints`/`modules`/`tests` and recomputes fingerprints with `computeFileFingerprint()` (`src/core/json.ts:11-19`). That helper currently reads the whole file into memory before hashing.
-- When stale files exist, the prompt asks the agent to paste the exact fingerprint JSON object into `codebase-index.json` (`src/core/commands.ts:651-662`), which is the ownership boundary this change removes.
-- `validateCodebaseIndex()` (`src/core/validators.ts:100-308`) checks version, required arrays, safe relative paths, missing-file warnings, and fingerprint shape (`SW100`-`SW109`). Hard shape/path/fingerprint errors can be distinguished from non-blocking `SW106` missing-file warnings.
-- `renderScanPrompt()` (`src/core/prompts.ts:118-160`) currently instructs the agent to update `codebase-index.json` arrays and fingerprints, so the prompt contract must change.
-- The `CodebaseIndex` type is duplicated locally in both `src/core/commands.ts` and `src/core/validators.ts`; there is no shared builder module today.
-- Existing tests assume `--refresh` does not write the index and that the prompt contains `## Current fingerprints` (`test/core-commands.test.ts:2630-2734`). Prompt tests assert core scan prompts stay runtime-neutral and that OMP scout wording remains in `src/runtime/omp/prompts.ts` (`test/core-prompts.test.ts:358-440`).
-- The `--map --force` test expects only map artifacts to be regenerated (`test/core-commands.test.ts:2583-2618`), but the current command always writes `codebase-index.json`, so this boundary will need to be clarified.
+### Pre-change baseline
 
+- Before this change, `specwright scan` ensured prose project artifacts and created an object-shaped `codebase-index.json`; refresh behavior only considered paths already recorded in the existing index.
+- The old refresh prompt made `codebase-index.json` partly agent-owned by asking the agent to copy checksum JSON into the artifact.
+- Existing validation already separated hard shape/path/fingerprint errors from missing-file warnings, which allowed scan to rebuild from scratch on poisoned indexes while preserving valid semantic fields.
+- Prompt tests already protected the core/OMP boundary, so OMP scout wording had to remain in `src/runtime/omp/prompts.ts`.
+
+### Implemented branch evidence
+
+- `src/core/codebase-index.ts:293-454` now owns path-safe package entrypoint filtering, nearest-path test association, cap accounting, resilient fingerprinting, and `buildCodebaseIndex()`.
+- `src/core/commands.ts:567-620` runs the builder on scan, validates the generated index before writing, fails closed on generated validation errors, and exposes both existing-index and generated-index validation in JSON output.
+- `src/core/prompts.ts:125-192` renders deterministic scan state, keeps `.specwright/project/codebase-index.json` command-owned, and derives the agent-owned prose list from scan mode.
+- `src/runtime/omp/prompts.ts:34-47` keeps OMP scout guidance but restricts merging to agent-owned prose artifacts while reading the index for confirmed facts.
+- `test/core-commands.test.ts:2732-2784` covers invalid-index rebuilds with live data; `test/core-commands.test.ts:3044-3137` covers stale deletion, safe package entrypoints, associated-test caps, and ambiguous basename fallback.
+- `test/core-prompts.test.ts:370-512` covers default/map ownership lines and OMP prose-only merge guidance.
 ## External findings
 
 None. All evidence is local; no online research was required.
 
 ## Implications
 
-- A new `src/core/codebase-index.ts` module is needed to own the shared `CodebaseIndex` type, filesystem walker, file classifier, streaming SHA-256 fingerprint helper, and `buildCodebaseIndex()`.
-- `commandScan()` should call the builder on every scan and write the index only when `changed`, missing, or `--force`.
-- The scan prompt must drop the agent fingerprint JSON contract and instead surface a deterministic summary.
-- Tests must be updated to expect command-owned fingerprints and no `## Current fingerprints` block.
+- `specwright scan` is the sole writer for deterministic index data; agents only edit prose artifacts.
+- Generated indexes are validated before persistence, so unsafe builder output is rejected instead of written.
+- `--map` remains focused for prose artifacts but shares the same command-owned deterministic index path as plain scan.
+- Tests now cover path safety, cap accounting, deleted-file stale reporting, prompt ownership, and generated-index validation boundaries.
 

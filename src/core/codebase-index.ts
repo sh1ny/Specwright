@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type { FileFingerprint } from "./json";
+import { isSafeRelativePath } from "./validators";
 import { runGit } from "./git";
 
 export interface CodebaseIndex {
@@ -105,21 +106,20 @@ async function streamFileFingerprint(
   absolutePath: string,
   maxBytes: number,
 ): Promise<FileFingerprint | undefined> {
-  let stats;
   try {
-    stats = await stat(absolutePath);
+    const stats = await stat(absolutePath);
+    if (!stats.isFile() || stats.size > maxBytes) {
+      return undefined;
+    }
+    const hash = createHash("sha256");
+    const stream = createReadStream(absolutePath);
+    for await (const chunk of stream) {
+      hash.update(chunk as Buffer);
+    }
+    return { mtime: stats.mtimeMs, size: stats.size, checksum: hash.digest("hex") };
   } catch {
     return undefined;
   }
-  if (!stats.isFile() || stats.size > maxBytes) {
-    return undefined;
-  }
-  const hash = createHash("sha256");
-  const stream = createReadStream(absolutePath);
-  for await (const chunk of stream) {
-    hash.update(chunk as Buffer);
-  }
-  return { mtime: stats.mtimeMs, size: stats.size, checksum: hash.digest("hex") };
 }
 interface DiscoveredFile {
   relPath: string;
@@ -187,10 +187,7 @@ async function tryGitFileList(cwd: string): Promise<string[] | undefined> {
   if (result.exitCode !== 0) {
     return undefined;
   }
-  return result.stdout
-    .split("\0")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+  return result.stdout.split("\0").filter((line) => line.length > 0);
 }
 
 async function discoverFiles(
@@ -293,23 +290,53 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function addPackageEntrypoints(pkg: PackageInfo, entrypoints: Array<{ path: string; kind?: string; summary?: string }>): void {
-  entrypoints.push({ path: "package.json", kind: "package" });
+function normalizePackageEntrypointPath(value: string, filePaths: ReadonlySet<string>): string | undefined {
+  const normalized = normalizePath(value).replace(/^\.\/+/, "");
+  if (
+    !isSafeRelativePath(normalized) ||
+    shouldExclude(normalized) ||
+    !filePaths.has(normalized)
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function packageEntrypointCandidates(
+  pkg: PackageInfo,
+  filePaths: ReadonlySet<string>,
+): Array<{ path: string; kind?: string; summary?: string }> {
+  const entrypoints: Array<{ path: string; kind?: string; summary?: string }> = [
+    { path: "package.json", kind: "package" },
+  ];
   if (typeof pkg.main === "string") {
-    entrypoints.push({ path: pkg.main, kind: "main" });
+    const path = normalizePackageEntrypointPath(pkg.main, filePaths);
+    if (path !== undefined) {
+      entrypoints.push({ path, kind: "main" });
+    }
   }
   if (typeof pkg.module === "string") {
-    entrypoints.push({ path: pkg.module, kind: "module" });
+    const path = normalizePackageEntrypointPath(pkg.module, filePaths);
+    if (path !== undefined) {
+      entrypoints.push({ path, kind: "module" });
+    }
   }
   if (typeof pkg.bin === "string") {
-    entrypoints.push({ path: pkg.bin, kind: "bin" });
+    const path = normalizePackageEntrypointPath(pkg.bin, filePaths);
+    if (path !== undefined) {
+      entrypoints.push({ path, kind: "bin" });
+    }
   } else if (isRecord(pkg.bin)) {
-    for (const [name, path] of Object.entries(pkg.bin).sort(([a], [b]) => a.localeCompare(b))) {
-      if (typeof path === "string") {
-        entrypoints.push({ path, kind: "bin", summary: `bin command: ${name}` });
+    for (const [name, value] of Object.entries(pkg.bin).sort(([a], [b]) => a.localeCompare(b))) {
+      if (typeof value === "string") {
+        const path = normalizePackageEntrypointPath(value, filePaths);
+        if (path !== undefined) {
+          entrypoints.push({ path, kind: "bin", summary: `bin command: ${name}` });
+        }
       }
     }
   }
+  return entrypoints;
 }
 
 function addPackageVerification(pkg: PackageInfo, verification: Array<{ command: string; purpose?: string }>): void {
@@ -341,6 +368,36 @@ function deriveSourceBaseName(testPath: string): string | undefined {
     return undefined;
   }
   return `${match[1]}${match[2]}`;
+}
+
+function findAssociatedModule(
+  testPath: string,
+  modules: Array<{ path: string; kind?: string; summary?: string; tests?: string[] }>,
+): { path: string; kind?: string; summary?: string; tests?: string[] } | undefined {
+  const sourceBase = deriveSourceBaseName(testPath);
+  if (sourceBase === undefined) {
+    return undefined;
+  }
+  const normalizedTestPath = normalizePath(testPath);
+  const testDir = dirname(normalizedTestPath);
+  const exactPath = normalizePath(join(testDir, sourceBase));
+  const exact = modules.find((mod) => mod.path === exactPath);
+  if (exact) {
+    return exact;
+  }
+  const testDirBase = basename(testDir).toLowerCase();
+  if (["__test__", "__tests__", "test", "tests"].includes(testDirBase)) {
+    const parentPath = normalizePath(join(dirname(testDir), sourceBase));
+    const parent = modules.find((mod) => mod.path === parentPath);
+    if (parent) {
+      return parent;
+    }
+  }
+  const matches = modules.filter((mod) => basename(mod.path).toLowerCase() === sourceBase.toLowerCase());
+  if (matches.length === 1) {
+    return matches[0];
+  }
+  return undefined;
 }
 
 interface NormalizedIndexPart {
@@ -429,12 +486,9 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   }
 
   if (pkg) {
-    const before = entrypoints.length;
-    addPackageEntrypoints(pkg, entrypoints);
-    for (const entry of entrypoints.slice(before)) {
-      if (checkIndexedCap()) {
-        entrypoints.pop();
-      } else {
+    for (const entry of packageEntrypointCandidates(pkg, filePaths)) {
+      if (!checkIndexedCap()) {
+        entrypoints.push(entry);
         indexedFiles++;
       }
     }
@@ -477,16 +531,14 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   }
 
   for (const testPath of testPaths.sort()) {
-    const sourceBase = deriveSourceBaseName(testPath);
+    const candidate = findAssociatedModule(testPath, modules);
     let associated = false;
-    if (sourceBase) {
-      const candidate = modules.find(
-        (mod) => basename(mod.path).toLowerCase() === sourceBase.toLowerCase(),
-      );
-      if (candidate) {
+    if (candidate) {
+      associated = true;
+      if (!checkIndexedCap()) {
         candidate.tests = candidate.tests ?? [];
         candidate.tests.push(testPath);
-        associated = true;
+        indexedFiles++;
       }
     }
     if (!associated) {
@@ -623,6 +675,12 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
       }
     }
   }
+  for (const relPath of Object.keys(previousFingerprints).sort((a, b) => a.localeCompare(b))) {
+    if (!indexedPaths.has(relPath) && isSafeRelativePath(relPath) && !filePaths.has(relPath)) {
+      staleFiles.push(`${relPath} (missing)`);
+    }
+  }
+  staleFiles.sort((a, b) => a.localeCompare(b));
 
   const candidate: CodebaseIndex = {
     version: 1,

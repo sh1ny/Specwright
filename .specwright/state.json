@@ -760,59 +760,65 @@
       "status": "verifying",
       "step": "verify",
       "createdAt": "2026-06-13T11:03:16.440Z",
-      "updatedAt": "2026-06-13T12:59:59.278Z",
+      "updatedAt": "2026-06-13T14:24:08.045Z",
       "tasks": {
         "T001": {
           "id": "T001",
           "title": "Move CodebaseIndex ownership into the builder module",
           "status": "done",
-          "updatedAt": "2026-06-13T12:58:13.439Z"
+          "updatedAt": "2026-06-13T14:24:08.039Z"
         },
         "T002": {
           "id": "T002",
           "title": "Implement deterministic project discovery and classification",
           "status": "done",
-          "updatedAt": "2026-06-13T12:58:13.439Z"
+          "updatedAt": "2026-06-13T14:24:08.039Z"
         },
         "T003": {
           "id": "T003",
           "title": "Implement fingerprinting, preservation, and changed detection",
           "status": "done",
-          "updatedAt": "2026-06-13T12:58:13.439Z"
+          "updatedAt": "2026-06-13T14:24:08.039Z"
         },
         "T004": {
           "id": "T004",
           "title": "Replace scan refresh logic with the builder state machine",
           "status": "done",
-          "updatedAt": "2026-06-13T12:58:13.439Z"
+          "updatedAt": "2026-06-13T14:24:08.039Z"
         },
         "T005": {
           "id": "T005",
           "title": "Rewrite the scan prompt contract",
           "status": "done",
-          "updatedAt": "2026-06-13T12:58:13.439Z"
+          "updatedAt": "2026-06-13T14:24:08.039Z"
         },
         "T006": {
           "id": "T006",
           "title": "Update command tests for command-owned indexing",
           "status": "done",
-          "updatedAt": "2026-06-13T12:58:13.439Z"
+          "updatedAt": "2026-06-13T14:24:08.039Z"
         },
         "T007": {
           "id": "T007",
           "title": "Update validator and prompt boundary tests",
           "status": "done",
-          "updatedAt": "2026-06-13T12:58:13.439Z"
+          "updatedAt": "2026-06-13T14:24:08.039Z"
         },
         "T008": {
           "id": "T008",
           "title": "Run final targeted verification for the change",
           "status": "done",
-          "updatedAt": "2026-06-13T12:58:13.439Z"
+          "updatedAt": "2026-06-13T14:24:08.039Z"
+        },
+        "T009": {
+          "id": "T009",
+          "title": "Address review hardening findings",
+          "status": "done",
+          "updatedAt": "2026-06-13T14:24:08.039Z"
         }
       }
     }
   },
-  "updatedAt": "2026-06-13T12:59:59.278Z",
+  "updatedAt": "2026-06-13T14:24:08.045Z",
   "currentChange": "0016"
 }

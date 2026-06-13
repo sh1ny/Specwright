@@ -565,6 +565,15 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
     buildOptions.existing = existing;
   }
   const buildResult = await buildCodebaseIndex(buildOptions);
+  const generatedValidationReport = await validateCodebaseIndex(ctx.cwd, buildResult.index);
+  if (!generatedValidationReport.ok) {
+    const summary = "Generated codebase-index failed validation; refusing to write.";
+    return fail(
+      args.json ? JSON.stringify({ summary, validation: generatedValidationReport }, null, 2) : summary,
+      { filesCreated: created, filesUpdated: updated },
+    );
+  }
+  const validationIssues = [...validationReport.issues, ...generatedValidationReport.issues];
 
   if (args.force && !buildResult.changed) {
     buildResult.index.generatedAt = ctx.now().toISOString();
@@ -586,7 +595,7 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
     indexedFiles: buildResult.indexedFiles,
     truncated: buildResult.truncated,
     staleFiles: buildResult.staleFiles,
-    validationIssues: validationReport.issues,
+    validationIssues,
     rebuiltFromValidationErrors,
   };
 
@@ -597,6 +606,7 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   const humanSummary = "Prepared project scan prompt.";
   const scanSummary = args.json
     ? JSON.stringify({
+        generatedValidation: generatedValidationReport,
         summary: humanSummary,
         map: args.map,
         refresh: args.refresh,

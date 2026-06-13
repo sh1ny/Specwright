@@ -19,6 +19,7 @@ import {
   switchToExistingBranch,
   writePullRequestBodyFile,
 } from "../src/core/git";
+import { validateCodebaseIndex } from "../src/core/validators";
 import { syncChangeTasksFromFileIfPresent, syncChangeTasksFromMarkdown, upsertChange } from "../src/core/state";
 import type { ChangeState, SpecwrightConfig, TaskSyncIssueKind } from "../src/core/types";
 
@@ -2768,11 +2769,14 @@ test("scan rebuilds an invalid codebase-index.json from scratch", async () => {
   const payload = JSON.parse(result.summary);
   expect(payload.validation.ok).toBe(false);
   expect(payload.indexUpdated).toBe(true);
-  expect(result.prompt).toContain("## Codebase index validation");
+  expect(result.prompt).toContain("Validation issues:");
   expect(result.prompt).toContain("not a safe relative path");
   expect(result.prompt).toContain("Hard validation errors");
 
   const rebuilt = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(rebuilt.entrypoints.some((entry: { path: string }) => entry.path === "package.json")).toBe(true);
+  expect(rebuilt.modules.some((mod: { path: string }) => mod.path === "src/keep.ts")).toBe(true);
+  expect(rebuilt.fingerprints["src/keep.ts"]).toBeDefined();
   expect(rebuilt.entrypoints.every((entry: { path: string }) => entry.path !== "../escape.ts")).toBe(true);
   expect(rebuilt.modules.every((mod: { path: string }) => mod.path !== "src/missing.ts")).toBe(true);
   expect(rebuilt.fingerprints["../escape.ts"]).toBeUndefined();
@@ -2866,16 +2870,16 @@ test("scan prompt through CLI is runtime-neutral without OMP references", async 
   expect(result.prompt).toContain("Record uncertainty, assumptions, and gaps");
 });
 
-test("scan --refresh prompt includes refresh contract", async () => {
+test("scan --refresh prompt includes deterministic refresh note", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-refresh-contract-"));
   const ctx = testContext(cwd);
   expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
 
   const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--print-prompt"]);
   expect(result.ok).toBe(true);
-  expect(result.prompt).toContain("Refresh contract:");
-  expect(result.prompt).toContain("Compare current files against the recorded fingerprints");
-  expect(result.prompt).toContain("Update only sections that are stale, incorrect, or missing");
+  expect(result.prompt).toContain("Refresh run:");
+  expect(result.prompt).toContain("use the deterministic index state above to identify changed areas");
+  expect(result.prompt).toContain("patch only the stale prose sections");
 });
 
 test("scan surfaces validation issues for an invalid codebase-index.json", async () => {
@@ -2905,7 +2909,7 @@ test("scan surfaces validation issues for an invalid codebase-index.json", async
 
   const result = await runSpecwrightCommand(ctx, ["scan", "--print-prompt"]);
   expect(result.ok).toBe(true);
-  expect(result.prompt).toContain("## Codebase index validation");
+  expect(result.prompt).toContain("Validation issues:");
   expect(result.prompt).toContain("not a safe relative path");
   expect(result.prompt).toContain("missing required field");
   expect(result.prompt).toContain("missing file");
@@ -3054,9 +3058,82 @@ test("buildCodebaseIndex removes fingerprints for paths no longer indexed", asyn
 
   await rm(join(cwd, "src", "drop.ts"));
   const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  expect(second.staleFiles).toContain("src/drop.ts (missing)");
   expect(second.changed).toBe(true);
   expect(second.index.fingerprints?.["src/drop.ts"]).toBeUndefined();
   expect(second.index.fingerprints?.["src/keep.ts"]).toEqual(first.index.fingerprints?.["src/keep.ts"]);
+});
+
+test("buildCodebaseIndex filters unsafe and excluded package entrypoints", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-package-entrypoints-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "bin"), { recursive: true });
+  await mkdir(join(cwd, "dist"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({
+      name: "demo",
+      main: "./src/cli.ts",
+      module: "dist/ignored.js",
+      bin: {
+        safe: "bin/specwright.mjs",
+        escape: "../escape.js",
+        absolute: "/tmp/escape.js",
+      },
+    }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+  await writeFile(join(cwd, "bin", "specwright.mjs"), "console.log('specwright');\n", "utf8");
+  await writeFile(join(cwd, "dist", "ignored.js"), "console.log('ignored');\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const entrypointPaths = result.index.entrypoints?.map((entry) => entry.path) ?? [];
+  expect(entrypointPaths).toContain("src/cli.ts");
+  expect(entrypointPaths).toContain("bin/specwright.mjs");
+  expect(entrypointPaths).not.toContain("./src/cli.ts");
+  expect(entrypointPaths).not.toContain("dist/ignored.js");
+  expect(entrypointPaths).not.toContain("../escape.js");
+  expect(entrypointPaths).not.toContain("/tmp/escape.js");
+  expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
+});
+
+test("buildCodebaseIndex counts associated tests against the indexed file cap", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-test-cap-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "a.test.ts"), "import './a';\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxIndexedFiles: 1 },
+  });
+  expect(result.truncated).toBe(true);
+  expect(result.indexedFiles).toBeLessThanOrEqual(1);
+  const sourceModule = result.index.modules?.find((mod) => mod.path === "src/a.ts");
+  expect(sourceModule).toBeDefined();
+  expect(sourceModule?.tests).toBeUndefined();
+  expect(result.index.fingerprints?.["src/a.test.ts"]).toBeUndefined();
+});
+
+test("buildCodebaseIndex associates tests by nearest path and avoids ambiguous basename fallback", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-test-association-"));
+  await mkdir(join(cwd, "src", "api"), { recursive: true });
+  await mkdir(join(cwd, "src", "ui"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(join(cwd, "src", "api", "index.ts"), "export const api = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "ui", "index.ts"), "export const ui = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "ui", "index.test.ts"), "import './index';\n", "utf8");
+  await writeFile(join(cwd, "test", "index.test.ts"), "export const ambiguous = true;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const apiModule = result.index.modules?.find((mod) => mod.path === "src/api/index.ts");
+  const uiModule = result.index.modules?.find((mod) => mod.path === "src/ui/index.ts");
+  const standaloneTest = result.index.modules?.find((mod) => mod.path === "test/index.test.ts");
+  expect(uiModule?.tests).toContain("src/ui/index.test.ts");
+  expect(apiModule?.tests).toBeUndefined();
+  expect(standaloneTest?.kind).toBe("test");
 });
 
 test("buildCodebaseIndex skips oversized files and records a large file skipped risk", async () => {
@@ -3106,7 +3183,7 @@ test("scan --json surfaces validation issues in machine-readable output", async 
   const payload = JSON.parse(result.summary);
   expect(payload.validation.ok).toBe(false);
   expect(payload.validation.issues.some((issue: { message: string }) => issue.message.includes("not a safe relative path"))).toBe(true);
-  expect(result.prompt).toContain("## Codebase index validation");
+  expect(result.prompt).toContain("Validation issues:");
   expect(result.prompt).toContain("not a safe relative path");
 });
 test("research prompt includes map pointer when map artifacts exist", async () => {

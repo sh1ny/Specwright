@@ -31,19 +31,19 @@ Make plain `specwright scan` command-owned for mechanical codebase indexing, whi
 
 Fingerprints, file inventory, package scripts, obvious entrypoint candidates, module/test lists, command names, verification commands, and cap/truncation risks are mechanical facts. The command can compute them more reliably than an agent can paste JSON. The agent should spend attention on prose: what the files mean, where risks matter, and which architecture notes are useful for future phases.
 
-The current flow also makes refresh non-seamless. A user has to know when to run `--refresh`, then the prompt asks an agent to copy `## Current fingerprints` into `codebase-index.json`. Plain `specwright scan` should decide whether the index is missing, stale, or current.
+The pre-change flow also made refresh non-seamless. A user had to know when to run `--refresh`, then the prompt asked an agent to copy a fingerprint block into `codebase-index.json`. Plain `specwright scan` should decide whether the index is missing, stale, or current.
 
 ## Evidence from current implementation
 
-Confirmed current behavior:
+Pre-change behavior:
 
-- Scan args already parse `--map` and `--refresh` as first-class flags in `ParsedArgs` (`src/core/commands.ts:48-56`). Help advertises `specwright scan [--map] [--refresh] [--force] [--json] [--print-prompt]` (`src/core/commands.ts:1546-1548`).
-- `commandScan()` ensures `.specwright/project/scan.md`, `tech-stack.md`, `architecture.md`, and `codebase-map.md`; creates a default `codebase-index.json` with empty arrays and empty `fingerprints`; validates the index; then returns a prompt and optional JSON payload (`src/core/commands.ts:598-686`).
-- Refresh only compares files already referenced by `entrypoints`, `modules`, and module `tests`; it computes current fingerprints for those tracked paths and reports stale files (`src/core/commands.ts:440-509`). When stale files exist, the prompt asks the agent to update `codebase-index.json` with an exact fingerprint JSON object; the command does not write those updated fingerprints (`src/core/commands.ts:651-662`).
-- `validateCodebaseIndex()` checks the index object shape: version, required arrays, safe relative paths, missing/non-file warnings, object entries, string fields, test paths, risk areas, and fingerprint object shape (`src/core/validators.ts:100-308`).
-- `computeFileFingerprint()` reads the whole file and hashes SHA-256 (`src/core/json.ts:11-19`). The new deterministic builder must replace or augment this with streaming hashing for indexed files, so large indexed files do not have to be loaded fully into memory.
-- Existing refresh tests assert that `scan --refresh` leaves the index unchanged and prompts with `## Current fingerprints`; those expectations must change (`test/core-commands.test.ts:2630-2734`).
-- Existing prompt tests assert that core scan prompts are runtime-neutral and that OMP-only parallel scout wording lives in the OMP prompt adapter. Preserve that boundary (`test/core-prompts.test.ts:358-440`).
+- Scan args already parsed `--map` and `--refresh` as first-class flags in `ParsedArgs`. Help advertised `specwright scan [--map] [--refresh] [--force] [--json] [--print-prompt]`.
+- `commandScan()` ensured `.specwright/project/scan.md`, `tech-stack.md`, `architecture.md`, and `codebase-map.md`; created a default `codebase-index.json` with empty arrays and empty `fingerprints`; validated the index; then returned a prompt and optional JSON payload.
+- Refresh only compared files already referenced by `entrypoints`, `modules`, and module `tests`; it computed current fingerprints for those tracked paths and reported stale files. When stale files existed, the prompt asked the agent to update `codebase-index.json` with an exact fingerprint JSON object; the command did not write those updated fingerprints.
+- `validateCodebaseIndex()` checked the index object shape: version, required arrays, safe relative paths, missing/non-file warnings, object entries, string fields, test paths, risk areas, and fingerprint object shape.
+- The original fingerprint helper read the whole file and hashed SHA-256. The deterministic builder replaces that with streaming hashing for indexed files, so large indexed files do not have to be loaded fully into memory.
+- Refresh tests that asserted agent-authored fingerprint blocks changed to command-owned index writes.
+- Existing prompt tests assert that core scan prompts are runtime-neutral and that OMP-only parallel scout wording lives in the OMP prompt adapter. Preserve that boundary.
 
 ## Decision
 
@@ -57,7 +57,7 @@ The command decides whether to:
 
 Do not add a required user-facing `--index` command.
 
-Existing `--map`, `--refresh`, `--force`, `--json`, and `--print-prompt` may remain for compatibility and targeted tests. `scan --refresh` becomes compatibility spelling for the same deterministic refresh path used by plain `scan`. It may add refresh-specific wording to the prompt, but it must no longer ask the agent to paste checksum JSON.
+Existing `--map`, `--refresh`, `--force`, `--json`, and `--print-prompt` may remain for compatibility and targeted tests. `scan --refresh` becomes compatibility spelling for the same deterministic refresh path used by plain `scan`. It may add refresh-specific wording to the prompt, but it must never make checksum JSON agent-owned.
 
 Ownership boundary:
 
@@ -81,19 +81,19 @@ Command flow:
 8. Return JSON payload fields that make the state machine observable: `indexUpdated`, `staleFiles`, `scannedFiles`, `indexedFiles`, `truncated`.
 9. Generate the scan prompt with a concise deterministic summary.
 
-If only fingerprints changed, the prompt should say prose docs may need review. It must not ask the agent to paste checksum JSON.
+If only fingerprints changed, the prompt should say prose docs may need review. It must keep checksum JSON command-owned.
 
-`--map` may keep its focused prompt behavior. If retained as artifact-only mode, it should still not require the agent to author fingerprints. If implementation instead makes `codebase-index.json` always command-owned regardless of `--map`, update tests to document that clean cutover.
+`--map` remains a focused prose-artifact compatibility mode, but deterministic index generation is identical to plain scan: command-owned, always rebuilt through `buildCodebaseIndex()`, and never agent-authored.
 
 ## Filesystem discovery policy
 
-Use filesystem discovery as the default implementation.
+Use git-assisted discovery when available, with deterministic filesystem fallback for non-Git projects.
 
 Rules:
 
-- Implement a recursive walker using `node:fs/promises` APIs.
+- Prefer `git ls-files -z --cached --others --exclude-standard` when Git is available, preserving exact NUL-separated paths.
+- Fall back to a recursive walker using `node:fs/promises` APIs.
 - Do not require Git for correctness.
-- Do not use Git discovery in the first implementation. Git can be added later only as an optimization.
 - Default excludes: `.git/`, `node_modules/`, `.specwright/cache/`, `.specwright/tmp/`, generated `.omp/` output, `dist/`, `build/`, `.next/`, `coverage/`, `target/`.
 - Do not follow symlinked directories.
 - Skip symlinked files by default and record a deterministic risk entry with `area: "symlink skipped"`.
@@ -125,6 +125,11 @@ export interface BuildCodebaseIndexOptions {
   cwd: string;
   now: Date;
   existing?: CodebaseIndex;
+  limits?: Partial<{
+    maxFilesScanned: number;
+    maxIndexedFiles: number;
+    maxFingerprintBytesPerFile: number;
+  }>;
 }
 
 export interface BuildCodebaseIndexResult {
@@ -190,13 +195,13 @@ OMP-specific parallel scout guidance remains in `src/runtime/omp/prompts.ts`, no
 
 ## Acceptance criteria
 
-- Running plain `specwright scan --json` in a non-Git temp project with `package.json`, `src/cli.ts`, and `test/cli.test.ts` writes a non-empty `codebase-index.json` with entrypoints/modules/verification/fingerprints.
+- Running plain `specwright scan --json` in a non-Git temp project with `package.json`, `src/cli.ts`, and `test/cli.test.ts` writes a populated `codebase-index.json` with entrypoints/modules/verification/fingerprints.
 - Running plain `specwright scan --json` a second time without file changes reports `indexUpdated: false` and does not rewrite `codebase-index.json`.
 - Editing an indexed source file and running plain `specwright scan --json` updates that file's fingerprint without requiring agent-authored JSON.
 - A project with no `.git/` indexes correctly.
 - A project exceeding caps records a deterministic `scan coverage` risk and marks the result truncated.
 - Existing `--map` behavior still creates only map artifacts when used, unless the implementer deliberately updates tests to document that `codebase-index.json` is always command-owned.
-- Existing `--refresh` tests are updated so refresh no longer instructs the agent to paste `Current fingerprints` into JSON.
+- Existing `--refresh` tests are updated so refresh no longer instructs the agent to paste fingerprint data into JSON.
 - Core scan prompt remains runtime-neutral; OMP-only parallel scout guidance remains in `src/runtime/omp/prompts.ts`.
 
 ## Test plan
@@ -235,7 +240,7 @@ Focused scenarios:
 
 1. Add `src/core/codebase-index.ts` with shared type, filesystem walker, classifier, streaming fingerprint helper, and builder result.
 2. Move `CodebaseIndex` imports in `src/core/commands.ts` and `src/core/validators.ts` to the new module.
-3. Replace `compareRefreshFingerprints()` path-only refresh logic with builder result integration in `commandScan()`.
+3. Replace path-only refresh logic with builder result integration in `commandScan()`.
 4. Update JSON output and prompt construction to report deterministic index state and never request manual fingerprint JSON.
 5. Update tests in `test/core-commands.test.ts`, `test/core-prompts.test.ts`, and `test/core-validators.test.ts`.
 6. Run targeted tests and typecheck.

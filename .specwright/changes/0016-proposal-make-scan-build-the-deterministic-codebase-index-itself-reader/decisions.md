@@ -4,7 +4,7 @@
 
 ## Settled
 
-- Deprecate distinct `--map` semantics. Keep the flag accepted for compatibility, but do not maintain a separate map-only deterministic index path.
+- Keep `--map` as a focused prose-artifact compatibility mode; do not maintain a separate deterministic index path.
 - On hard `codebase-index.json` validation errors, rebuild deterministic index data only and do not preserve semantic fields from the invalid object.
 - Use git-assisted discovery when available, backed by deterministic filesystem fallback for projects without Git.
 - Prompts must never ask agents to author, paste, or hand-edit fingerprints.
@@ -13,7 +13,6 @@
 ## Deferred
 
 - Whether to remove the `--map` flag entirely in a later breaking cleanup.
-- Whether to add Git discovery as a tunable performance mode after the first git-assisted implementation proves stable.
 - Whether to make caps configurable through project config.
 
 ## Ready state

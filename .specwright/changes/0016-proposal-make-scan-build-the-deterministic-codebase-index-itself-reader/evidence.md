@@ -4,24 +4,29 @@
 
 ## Local evidence
 
-- `commandScan()` writes a default empty `codebase-index.json` and only refreshes fingerprints when `--refresh` is supplied (`src/core/commands.ts:598-686`).
-- `compareRefreshFingerprints()` limits fingerprint checks to paths already in `entrypoints`/`modules`/`tests`, so new files are never discovered by refresh (`src/core/commands.ts:440-509`).
-- The current refresh prompt explicitly asks the agent to copy a JSON fingerprint object into `codebase-index.json` (`src/core/commands.ts:651-662`), which is the exact ownership boundary the change must remove.
-- `validateCodebaseIndex()` distinguishes hard shape/path/fingerprint errors (`SW100`-`SW105`, `SW107`-`SW109`) from missing-file warnings (`SW106`) (`src/core/validators.ts:100-308`), supporting the rule that hard errors trigger a scratch rebuild while missing-file warnings are non-blocking.
-- `computeFileFingerprint()` loads the entire file via `readFile()` before hashing (`src/core/json.ts:11-19`), motivating a streaming helper for the builder.
-- `renderScanPrompt()` currently tells the agent to update `codebase-index.json` arrays and fingerprints (`src/core/prompts.ts:118-160`), so the prompt contract must change.
-- Existing tests lock in the current refresh behavior: no index write and an agent-facing `## Current fingerprints` block (`test/core-commands.test.ts:2630-2734`). These expectations must change.
-- Prompt tests assert that core scan prompts avoid OMP/scout wording and that OMP-specific scout guidance remains in `src/runtime/omp/prompts.ts` (`test/core-prompts.test.ts:358-440`).
+### Pre-change baseline
 
+- Before this change, `commandScan()` ensured project prose artifacts, wrote an empty deterministic-index shell, and treated refresh stale detection as an agent-facing prompt concern.
+- The old refresh contract made `codebase-index.json` partly agent-owned by asking the agent to provide checksum JSON.
+- `validateCodebaseIndex()` already distinguished hard shape/path/fingerprint errors from missing-file warnings, which supported scratch rebuilds for poisoned indexes.
+- Prompt tests already enforced runtime-neutral core scan wording and isolated OMP-specific scout guidance.
+
+### Implemented branch evidence
+
+- `buildCodebaseIndex()` in `src/core/codebase-index.ts:454-715` now builds the deterministic index from Git-assisted or filesystem discovery, filters unsafe/excluded package entrypoints, enforces caps for associated tests, and reports deleted indexed files as stale.
+- `commandScan()` in `src/core/commands.ts:517-624` calls the builder every scan, validates generated output before writing, and exposes generated validation separately from existing-index validation.
+- `renderScanPrompt()` in `src/core/prompts.ts:125-192` makes `codebase-index.json` command-owned and derives the editable prose artifact list from the scan mode.
+- `renderOmpScanPrompt()` in `src/runtime/omp/prompts.ts:34-47` keeps OMP scout instructions but restricts scout merges to agent-owned prose artifacts.
+- Regression coverage in `test/core-commands.test.ts:2732-3137` and `test/core-prompts.test.ts:370-512` covers invalid rebuilds, stale deletions, package path filtering, associated-test caps, ambiguous basename fallback, and prompt ownership.
 ## Research attempts
 
 No external or scout research was required; local code and tests provide enough evidence. The `specwright-researcher` attempted to update the research artifacts directly, but its environment did not expose a file-write/edit tool, so it returned proposed contents for the lifecycle orchestrator to apply.
 
 ## Decisions supported
 
-- Add a dedicated `src/core/codebase-index.ts` module for deterministic index building.
-- Make plain `specwright scan` run the builder every time and write the index only when it changes.
-- Remove the agent-facing fingerprint JSON block from the scan prompt.
-- Preserve agent ownership of prose artifacts (`scan.md`, `tech-stack.md`, `architecture.md`, `codebase-map.md`) only.
-- Update refresh and prompt tests to reflect command-owned fingerprints.
+- Keep deterministic index generation command-owned for both plain scan and `--map`.
+- Refuse to write generated indexes that fail validation.
+- Filter package entrypoints before insertion instead of repairing unsafe paths after the fact.
+- Count associated tests against the indexed-file cap and avoid ambiguous basename fallback.
+- Keep OMP scout merges prose-only while allowing scouts to read `codebase-index.json` as evidence.
 

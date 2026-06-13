@@ -33,7 +33,7 @@
 - [x] T005: Rewrite the scan prompt contract
   - Files: `src/core/prompts.ts`, `src/core/commands.ts`, `src/runtime/omp/prompts.ts`, `test/core-prompts.test.ts`
   - Action: Pass deterministic index state into prompt rendering, show concise summary/validation/stale/truncation details, remove all instructions to edit `codebase-index.json` fingerprints, and leave OMP-specific parallel scout wording only in the OMP adapter.
-  - Acceptance: Core prompts ask for semantic prose review only and contain no `## Current fingerprints` or manual checksum instructions; OMP prompt behavior remains isolated.
+  - Acceptance: Core prompts ask for semantic prose review only and contain no legacy fingerprint block or manual checksum instructions; OMP prompt behavior remains isolated.
   - Verification: Add/run focused prompt tests covering no manual fingerprints, runtime-neutral core wording, and preserved OMP scout guidance.
 
 ## Wave 3 - Regression coverage
@@ -55,3 +55,11 @@
    - Action: Execute only the targeted verification suite for this change and fix any failures at the source.
    - Acceptance: The implemented scan flow satisfies all acceptance scenarios from `intent.md` without project-wide unrelated gates.
    - Verification: Run `bun test test/core-commands.test.ts test/core-validators.test.ts test/core-prompts.test.ts` and `bun run typecheck`.
+
+## Wave 4 - Review remediation
+
+- [x] T009: Address review hardening findings
+  - Files: `src/core/codebase-index.ts`, `src/core/commands.ts`, `src/core/prompts.ts`, `src/runtime/omp/prompts.ts`, `test/core-commands.test.ts`, `test/core-prompts.test.ts`, `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/change.md`, `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/intent.md`, `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/discussion.md`, `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/decisions.md`, `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/research.md`, `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/evidence.md`, `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/sources.md`, `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/handoff.md`, `.specwright/changes/0016-proposal-make-scan-build-the-deterministic-codebase-index-itself-reader/verify.md`
+  - Action: Fix review findings around path safety, cap accounting, stale reporting, prompt ownership, and stale source-of-truth artifacts.
+  - Acceptance: Generated indexes validate before write; unsafe/excluded package paths are absent; associated tests obey caps; deleted indexed files are reported stale; prompts never make `codebase-index.json` agent-owned; artifacts match implemented behavior.
+  - Verification: Run `bun test test/core-commands.test.ts test/core-prompts.test.ts test/core-validators.test.ts` and `bun run typecheck`.

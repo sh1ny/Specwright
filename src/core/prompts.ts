@@ -141,6 +141,7 @@ export function renderScanPrompt(input: ScanPromptInput): string {
   ];
   const mapArtifacts = ["- .specwright/project/codebase-map.md"];
   const artifacts = isMap ? mapArtifacts : proseArtifacts;
+  const agentOwnedFiles = artifacts.map((line) => line.replace(/^- /, "")).join(", ");
 
   const deterministicState = [
     "Deterministic index state:",
@@ -166,7 +167,7 @@ export function renderScanPrompt(input: ScanPromptInput): string {
   const ownershipBoundary = [
     "Ownership boundary:",
     "- Command-owned (do not edit): .specwright/project/codebase-index.json, fingerprints, file inventory, package scripts, entrypoints, modules, tests, commands, verification, and cap/truncation risks.",
-    "- Agent-owned (edit these): scan.md, tech-stack.md, architecture.md, codebase-map.md.",
+    `- Agent-owned (edit these): ${agentOwnedFiles}.`,
   ];
 
   const agentContract = [

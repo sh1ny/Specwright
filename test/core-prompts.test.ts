@@ -386,6 +386,9 @@ test("renderScanPrompt default mode lists prose artifacts, deterministic state, 
   expect(prompt).toContain("Ownership boundary:");
   expect(prompt).toContain("Command-owned (do not edit):");
   expect(prompt).toContain("Agent-owned (edit these):");
+  expect(prompt).toContain(
+    "Agent-owned (edit these): .specwright/project/scan.md, .specwright/project/tech-stack.md, .specwright/project/architecture.md, .specwright/project/codebase-map.md.",
+  );
   expect(prompt).toContain("Never author, paste, or hand-edit fingerprints");
   expect(prompt).toContain("Use file discovery (find)");
   expect(prompt).toContain("Use search and LSP when available");
@@ -405,6 +408,7 @@ test("renderScanPrompt map mode focuses only on map prose artifact", () => {
   expect(prompt).toContain("Focus only on codebase mapping for this run.");
   expect(prompt).toContain(".specwright/project/codebase-map.md");
   expect(prompt).toContain("Record the retry in .specwright/project/codebase-map.md under Open questions");
+  expect(prompt).toContain("Agent-owned (edit these): .specwright/project/codebase-map.md.");
   expect(prompt).not.toContain(".specwright/project/scan.md");
   expect(prompt).not.toContain(".specwright/project/tech-stack.md");
   expect(prompt).not.toContain(".specwright/project/architecture.md");
@@ -488,6 +492,9 @@ test("renderOmpScanPrompt includes parallel scout guidance for mapping subsystem
   expect(prompt).toContain("runtime adapters");
   expect(prompt).toContain("packs, templates, and agents");
   expect(prompt).toContain("fall back to sequential mapping");
+  expect(prompt).toContain("Merge scout findings into agent-owned prose artifacts only; read `codebase-index.json` for confirmed facts and record uncertainty in Open questions.");
+  expect(prompt).not.toContain("Merge scout findings into `codebase-map.md` and `codebase-index.json`");
+  expect(prompt).not.toContain("Merge scout findings into agent-owned prose artifacts only; read `codebase-index.json` and `codebase-index.json`");
 });
 
 test("renderOmpScanPrompt preserves deterministic state and OMP guidance in refresh mode", () => {
@@ -500,4 +507,6 @@ test("renderOmpScanPrompt preserves deterministic state and OMP guidance in refr
   expect(prompt).toContain("OMP map guidance");
   expect(prompt).not.toContain("Refresh contract:");
   expect(prompt).not.toContain("## Current fingerprints");
+  expect(prompt).toContain("Merge scout findings into agent-owned prose artifacts only; read `codebase-index.json` for confirmed facts");
+  expect(prompt).not.toContain("Merge scout findings into `codebase-map.md` and `codebase-index.json`");
 });

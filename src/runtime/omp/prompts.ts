@@ -43,7 +43,7 @@ OMP map guidance:
   - packs, templates, and agents
   - tests
 - Give each scout the bounded discovery and mapping contract from this prompt, scoped to its subsystem.
-- Merge scout findings into \`codebase-map.md\` and \`codebase-index.json\`; preserve confirmed facts and record uncertainty in Open questions.
+- Merge scout findings into agent-owned prose artifacts only; read \`codebase-index.json\` for confirmed facts and record uncertainty in Open questions.
 - If the \`task\` tool or scout agents are unavailable, fall back to sequential mapping with the same bounded constraints.`;
 }
 
