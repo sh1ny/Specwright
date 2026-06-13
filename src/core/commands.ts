@@ -32,6 +32,7 @@ import {
 } from "./state";
 import { branchNameForChange, commitStaged, createPullRequest, currentBranch, hasGitIdentity, isGitWorktree, isWorktreeClean, pushBranch, resolveBaseBranch, stageFiles, switchToBranch, switchToExistingBranch, mergeNoFastForward, writePullRequestBodyFile } from "./git";
 import { renderValidationReport, validateChange, validateCodebaseIndex, validateSpecwrightConfig, hasNonHeadingContent, hasObservedOutput, isSafeRelativePath } from "./validators";
+import type { ValidationIssue } from "./validators";
 import type {
   ChangeKind,
   ChangeState,
@@ -514,6 +515,24 @@ async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<Com
   });
 }
 
+function codebaseIndexReadIssue(error: unknown): ValidationIssue | undefined {
+  if (error instanceof SyntaxError) {
+    return {
+      level: "error",
+      code: "SW100",
+      message: `codebase-index.json could not be parsed: ${error.message}`,
+    };
+  }
+  if (error instanceof Error && error.message.startsWith("Invalid JSON:")) {
+    return {
+      level: "error",
+      code: "SW100",
+      message: `codebase-index.json could not be parsed: ${error.message}`,
+    };
+  }
+  return undefined;
+}
+
 async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   await ensureDir(projectDir(ctx.cwd));
   const project = projectDir(ctx.cwd);
@@ -546,9 +565,19 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
 
   let existing: CodebaseIndex | undefined;
   let rebuiltFromValidationErrors = false;
-  let validationReport = { ok: true, issues: [] as import("./validators").ValidationIssue[] };
+  let validationReport = { ok: true, issues: [] as ValidationIssue[] };
   if (indexExists && !args.force) {
-    const existingRead = await readJsonFile<CodebaseIndex>(indexPath);
+    let existingRead: CodebaseIndex | undefined;
+    try {
+      existingRead = await readJsonFile<CodebaseIndex>(indexPath);
+    } catch (error) {
+      const issue = codebaseIndexReadIssue(error);
+      if (issue === undefined) {
+        throw error;
+      }
+      validationReport = { ok: false, issues: [issue] };
+      rebuiltFromValidationErrors = true;
+    }
     if (existingRead) {
       validationReport = await validateCodebaseIndex(ctx.cwd, existingRead);
       const hasHardErrors = validationReport.issues.some((issue) => issue.level === "error");

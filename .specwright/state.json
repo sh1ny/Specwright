@@ -753,7 +753,7 @@
     "0016": {
       "id": "0016",
       "slug": "proposal-make-scan-build-the-deterministic-codebase-index-itself-reader",
-      "title": "# Proposal: Make scan build the deterministic codebase index itself ## Reader",
+      "title": "Make scan build the deterministic codebase index itself",
       "kind": "refactor",
       "pack": "core",
       "mode": "lite",

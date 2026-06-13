@@ -18,8 +18,9 @@ None.
 - `src/core/validators.ts:102-308` — `validateCodebaseIndex()` shape/path/fingerprint validation for existing and generated indexes.
 - `src/core/prompts.ts:125-200` — `renderScanPrompt()` deterministic summary and command-owned/agent-owned scan boundary.
 - `src/runtime/omp/prompts.ts:34-49` — `renderOmpScanPrompt()` OMP scout overlay with prose-only merge guidance.
-- `test/core-commands.test.ts:2757-2814` — invalid index rebuild test asserts live package/module/fingerprint data.
-- `test/core-commands.test.ts:2949-3491` — `buildCodebaseIndex()` regression block covers discovery, caps, unsafe paths, fingerprints, association, Git, and sort order.
+- `test/core-commands.test.ts:2571-2596` — malformed index rebuild test asserts non-force parse recovery, `SW100`, and regenerated package/module data.
+- `test/core-commands.test.ts:2987-3531` — `buildCodebaseIndex()` regression block covers discovery, caps, unsafe paths, fingerprints, association, and Git.
+- `test/core-commands.test.ts:3576-3590` — `buildCodebaseIndex()` sort-order regression test asserts code-unit path ordering.
 - `test/core-prompts.test.ts:370-570` — prompt ownership, stale-file rendering, and OMP prose-only merge regression tests.
 - `test/core-validators.test.ts:156-377` — codebase-index validation tests.
 - `package.json:9-13` — project scripts for targeted verification commands.

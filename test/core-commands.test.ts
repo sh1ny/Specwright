@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { buildCodebaseIndex } from "../src/core/codebase-index";
+import { buildCodebaseIndex, type CodebaseIndex } from "../src/core/codebase-index";
 import { runSpecwrightCommand, renderHelp } from "../src/core/commands";
 import {
   branchNameForChange,
@@ -2568,8 +2568,8 @@ test("scan --force regenerates existing map artifacts", async () => {
   expect(await readFile(mapPath, "utf8")).toContain("# Codebase Map");
   expect(JSON.parse(await readFile(indexPath, "utf8")).generatedAt).toBe(ctx.now().toISOString());
 });
-test("scan --force rebuilds over malformed codebase-index.json", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-force-malformed-index-"));
+test("scan rebuilds over malformed codebase-index.json without --force", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-malformed-index-"));
   const ctx = testContext(cwd);
   await mkdir(join(cwd, "src"), { recursive: true });
   await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
@@ -2581,11 +2581,14 @@ test("scan --force rebuilds over malformed codebase-index.json", async () => {
   const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
   await writeFile(indexPath, "{ not valid json", "utf8");
 
-  const result = await runSpecwrightCommand(ctx, ["scan", "--force", "--json"]);
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json", "--print-prompt"]);
   expect(result.ok).toBe(true);
   const payload = JSON.parse(result.summary);
   expect(payload.indexUpdated).toBe(true);
-  expect(payload.validation.ok).toBe(true);
+  expect(payload.validation.ok).toBe(false);
+  expect(payload.validation.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW100" }));
+  expect(payload.generatedValidation.ok).toBe(true);
+  expect(result.prompt).toContain("Hard validation errors");
 
   const rebuilt = JSON.parse(await readFile(indexPath, "utf8"));
   expect(rebuilt.entrypoints.some((entry: { path: string }) => entry.path === "package.json")).toBe(true);
@@ -3015,7 +3018,8 @@ test("buildCodebaseIndex records deterministic scan coverage risk when scanned f
   });
   expect(result.truncated).toBe(true);
   expect(result.scannedFiles).toBeLessThanOrEqual(1);
-  expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(true);
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 1 exceeded"));
 });
 
 test("buildCodebaseIndex Git discovery stops deterministically when scanned file cap is exceeded", async () => {
@@ -3033,7 +3037,8 @@ test("buildCodebaseIndex Git discovery stops deterministically when scanned file
 
   expect(result.truncated).toBe(true);
   expect(result.scannedFiles).toBe(2);
-  expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(true);
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 2 exceeded"));
   expect(result.index.modules?.map((mod) => mod.path)).toEqual(["src/a.ts", "src/b.ts"]);
 });
 
@@ -3104,6 +3109,45 @@ test("buildCodebaseIndex treats schema version drift as a changed index", async 
   });
   expect(second.changed).toBe(true);
   expect(second.index.version).toBe(1);
+});
+test("buildCodebaseIndex drops non-string preserved semantic fields", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-semantic-fields-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", main: "./src/cli.ts", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const invalidExisting = {
+    version: 1,
+    generatedAt: now.toISOString(),
+    entrypoints: [{ path: "src/cli.ts", kind: 123, summary: false }],
+    modules: [{ path: "src/cli.ts", kind: [], summary: {} }],
+    commands: [{ name: "test", summary: 123 }],
+    verification: [{ command: "bun test", purpose: false }],
+    risks: [{ area: "custom risk", summary: 123 }],
+    fingerprints: {},
+  };
+
+  const result = await buildCodebaseIndex({ cwd, now, existing: invalidExisting as unknown as CodebaseIndex });
+  const entrypoint = result.index.entrypoints?.find((entry) => entry.path === "src/cli.ts");
+  const module = result.index.modules?.find((mod) => mod.path === "src/cli.ts");
+  const command = result.index.commands?.find((cmd) => cmd.name === "test");
+  const verification = result.index.verification?.find((verify) => verify.command === "bun test");
+  const risk = result.index.risks?.find((candidate) => candidate.area === "custom risk");
+
+  expect(entrypoint?.kind).toBe("main");
+  expect(entrypoint?.summary).toBeUndefined();
+  expect(module?.kind).toBe("cli");
+  expect(module?.summary).toBeUndefined();
+  expect(command?.summary).toBe("package script: test");
+  expect(verification?.purpose).toBe("Run test");
+  expect(risk).toEqual({ area: "custom risk" });
+  expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
+  expect(result.changed).toBe(true);
 });
 
 
@@ -3462,23 +3506,28 @@ test("buildCodebaseIndex uses Git discovery for tracked and untracked files whil
 test("buildCodebaseIndex keeps Git discovery results when git output byte cap is exceeded", async () => {
   const cwd = await initGitRepo("specwright-build-index-git-output-cap-");
   await mkdir(join(cwd, "src"), { recursive: true });
-  await writeFile(join(cwd, ".gitignore"), "ignored.ts\n", "utf8");
+  await writeFile(join(cwd, ".git", "info", "exclude"), "ignored.ts\n", "utf8");
   await writeFile(join(cwd, "src", "tracked.ts"), "export const tracked = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "zzz.ts"), "export const zzz = 1;\n", "utf8");
   await writeFile(join(cwd, "ignored.ts"), "export const ignored = 1;\n", "utf8");
-  await expectGit(cwd, ["add", ".gitignore", "src/tracked.ts"]);
+  await expectGit(cwd, ["add", "src/tracked.ts", "src/zzz.ts"]);
   await expectGit(cwd, ["commit", "-m", "seed"]);
 
   const result = await buildCodebaseIndex({
     cwd,
     now: new Date("2026-06-08T00:00:00.000Z"),
-    limits: { maxGitLsFilesBytes: 1 },
+    limits: { maxGitLsFilesBytes: Buffer.byteLength("src/tracked.ts\0") },
   });
   const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
 
   expect(result.truncated).toBe(true);
-  expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(true);
+  expect(modulePaths).toContain("src/tracked.ts");
+  expect(result.index.fingerprints?.["src/tracked.ts"]).toBeDefined();
   expect(modulePaths).not.toContain("ignored.ts");
   expect(result.index.fingerprints?.["ignored.ts"]).toBeUndefined();
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("git ls-files output exceeded"));
+  expect(scanCoverageSummaries).not.toContainEqual(expect.stringContaining("Scanned file cap"));
 });
 
 test("buildCodebaseIndex Git discovery skips unsafe paths before indexing", async () => {

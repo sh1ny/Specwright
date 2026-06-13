@@ -153,6 +153,15 @@ export async function validateCodebaseIndex(
     }
     return value;
   }
+  function requireOptionalString(obj: Record<string, unknown>, key: string, context: string): void {
+    const value = obj[key];
+    if (value === undefined) {
+      return;
+    }
+    if (typeof value !== "string") {
+      issues.push({ level: "error", code: "SW104", message: `${context} field ${key} must be a string.` });
+    }
+  }
 
   function validatePath(value: string, context: string): boolean {
     if (!isSafeRelativePath(value)) {
@@ -193,6 +202,8 @@ export async function validateCodebaseIndex(
       }
       const record = entry as Record<string, unknown>;
       const path = requireString(record, "path", context);
+      requireOptionalString(record, "kind", context);
+      requireOptionalString(record, "summary", context);
       if (path !== undefined && validatePath(path, context)) {
         await warnIfMissing(path, context);
       }
@@ -210,6 +221,8 @@ export async function validateCodebaseIndex(
       }
       const record = mod as Record<string, unknown>;
       const path = requireString(record, "path", context);
+      requireOptionalString(record, "kind", context);
+      requireOptionalString(record, "summary", context);
       if (path !== undefined && validatePath(path, context)) {
         await warnIfMissing(path, context);
       }
@@ -238,7 +251,9 @@ export async function validateCodebaseIndex(
         issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
         continue;
       }
-      requireString(entry as Record<string, unknown>, "name", context);
+      const record = entry as Record<string, unknown>;
+      requireString(record, "name", context);
+      requireOptionalString(record, "summary", context);
     }
   }
 
@@ -250,7 +265,9 @@ export async function validateCodebaseIndex(
         issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
         continue;
       }
-      requireString(entry as Record<string, unknown>, "command", context);
+      const record = entry as Record<string, unknown>;
+      requireString(record, "command", context);
+      requireOptionalString(record, "purpose", context);
     }
   }
 
@@ -262,7 +279,9 @@ export async function validateCodebaseIndex(
         issues.push({ level: "error", code: "SW107", message: `${context} must be an object.` });
         continue;
       }
-      requireString(entry as Record<string, unknown>, "area", context);
+      const record = entry as Record<string, unknown>;
+      requireString(record, "area", context);
+      requireOptionalString(record, "summary", context);
     }
   }
 

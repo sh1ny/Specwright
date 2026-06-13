@@ -113,14 +113,18 @@ export async function runGitNulSeparated(
       if (stopped || truncated) {
         return;
       }
+      const maxStdoutBytes = options?.maxStdoutBytes;
+      const previousBytesRead = bytesRead;
       bytesRead += chunk.length;
-      if (options?.maxStdoutBytes !== undefined && bytesRead > options.maxStdoutBytes) {
+
+      let retainedChunk = chunk;
+      if (maxStdoutBytes !== undefined && bytesRead > maxStdoutBytes) {
         truncated = true;
-        terminate();
-        return;
+        const allowedChunkBytes = Math.max(0, maxStdoutBytes - previousBytesRead);
+        retainedChunk = chunk.subarray(0, allowedChunkBytes);
       }
 
-      const data = leftover.length === 0 ? chunk : Buffer.concat([leftover, chunk]);
+      const data = leftover.length === 0 ? retainedChunk : Buffer.concat([leftover, retainedChunk]);
       let start = 0;
       for (let index = 0; index < data.length; index += 1) {
         if (data[index] !== 0) {
@@ -139,6 +143,9 @@ export async function runGitNulSeparated(
         }
       }
       leftover = data.subarray(start);
+      if (truncated) {
+        terminate();
+      }
     }
 
     child.stdout.on("data", (chunk: Buffer<ArrayBufferLike>) => {

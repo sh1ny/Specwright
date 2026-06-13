@@ -107,6 +107,10 @@ function isFileFingerprint(value: unknown): value is FileFingerprint {
     typeof (value as Record<string, unknown>).checksum === "string"
   );
 }
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 
 async function streamFileFingerprint(
   absolutePath: string,
@@ -133,6 +137,14 @@ interface DiscoveredFile {
   absolute: string;
   size: number;
 }
+type DiscoveryTruncationReason = "file-cap" | "git-output-byte-cap";
+
+interface DiscoveryResult {
+  files: DiscoveredFile[];
+  scannedFiles: number;
+  truncationReason?: DiscoveryTruncationReason;
+}
+
 
 function normalizePath(relPath: string): string {
   return relPath.replace(/\\/g, "/");
@@ -209,7 +221,7 @@ async function tryGitDiscoverFiles(
   maxFilesScanned: number,
   maxGitLsFilesBytes: number,
   risks: Array<{ area: string; summary?: string }>,
-): Promise<{ files: DiscoveredFile[]; scannedFiles: number; truncated: boolean } | undefined> {
+): Promise<DiscoveryResult | undefined> {
   const files: DiscoveredFile[] = [];
   let hitFileCap = false;
 
@@ -249,29 +261,25 @@ async function tryGitDiscoverFiles(
 
   if (hitFileCap) {
     files.sort((a, b) => compareCodeUnit(a.relPath, b.relPath));
-    return { files, scannedFiles: files.length, truncated: true };
+    return { files, scannedFiles: files.length, truncationReason: "file-cap" };
   }
   if (result.truncated) {
-    risks.push({
-      area: "scan coverage",
-      summary: `git ls-files output exceeded ${maxGitLsFilesBytes} bytes; discovery stopped before filesystem fallback.`,
-    });
     files.sort((a, b) => compareCodeUnit(a.relPath, b.relPath));
-    return { files, scannedFiles: files.length, truncated: true };
+    return { files, scannedFiles: files.length, truncationReason: "git-output-byte-cap" };
   }
   if (result.exitCode !== 0) {
     return undefined;
   }
 
   files.sort((a, b) => compareCodeUnit(a.relPath, b.relPath));
-  return { files, scannedFiles: files.length, truncated: false };
+  return { files, scannedFiles: files.length };
 }
 async function discoverFiles(
   cwd: string,
   maxFilesScanned: number,
   maxGitLsFilesBytes: number,
   risks: Array<{ area: string; summary?: string }>,
-): Promise<{ files: DiscoveredFile[]; scannedFiles: number; truncated: boolean }> {
+): Promise<DiscoveryResult> {
   const gitDiscovery = await tryGitDiscoverFiles(cwd, maxFilesScanned, maxGitLsFilesBytes, risks);
   if (gitDiscovery !== undefined) {
     return gitDiscovery;
@@ -326,7 +334,11 @@ async function discoverFiles(
   }
 
   await walk(cwd);
-  return { files, scannedFiles: files.length, truncated };
+  const result: DiscoveryResult = { files, scannedFiles: files.length };
+  if (truncated) {
+    result.truncationReason = "file-cap";
+  }
+  return result;
 }
 
 interface PackageInfo {
@@ -510,16 +522,22 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   const limits = { ...DEFAULT_LIMITS, ...options.limits };
   const risks: Array<{ area: string; summary?: string }> = [];
 
-  const { files, scannedFiles, truncated: scanTruncated } = await discoverFiles(
+  const { files, scannedFiles, truncationReason } = await discoverFiles(
     options.cwd,
     limits.maxFilesScanned,
     limits.maxGitLsFilesBytes,
     risks,
   );
-  if (scanTruncated) {
+  const scanTruncated = truncationReason !== undefined;
+  if (truncationReason === "file-cap") {
     risks.push({
       area: "scan coverage",
       summary: `Scanned file cap of ${limits.maxFilesScanned} exceeded; discovery stopped.`,
+    });
+  } else if (truncationReason === "git-output-byte-cap") {
+    risks.push({
+      area: "scan coverage",
+      summary: `git ls-files output exceeded ${limits.maxGitLsFilesBytes} bytes; discovery stopped before filesystem fallback.`,
     });
   }
 
@@ -644,11 +662,13 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     for (const entry of entrypoints) {
       const previous = existingEntrypoints.get(entry.path);
       if (previous) {
-        if (previous.kind !== undefined) {
-          entry.kind = previous.kind;
+        const kind = stringValue(previous.kind);
+        if (kind !== undefined) {
+          entry.kind = kind;
         }
-        if (previous.summary !== undefined) {
-          entry.summary = previous.summary;
+        const summary = stringValue(previous.summary);
+        if (summary !== undefined) {
+          entry.summary = summary;
         }
       }
     }
@@ -657,11 +677,13 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     for (const mod of modules) {
       const previous = existingModules.get(mod.path);
       if (previous) {
-        if (previous.kind !== undefined) {
-          mod.kind = previous.kind;
+        const kind = stringValue(previous.kind);
+        if (kind !== undefined) {
+          mod.kind = kind;
         }
-        if (previous.summary !== undefined) {
-          mod.summary = previous.summary;
+        const summary = stringValue(previous.summary);
+        if (summary !== undefined) {
+          mod.summary = summary;
         }
         const previousTests = (previous.tests ?? [])
           .filter((testPath) => filePaths.has(testPath))
@@ -681,8 +703,11 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     const existingCommands = new Map((options.existing.commands ?? []).map((cmd) => [cmd.name, cmd]));
     for (const cmd of commands) {
       const previous = existingCommands.get(cmd.name);
-      if (previous && previous.summary !== undefined) {
-        cmd.summary = previous.summary;
+      if (previous) {
+        const summary = stringValue(previous.summary);
+        if (summary !== undefined) {
+          cmd.summary = summary;
+        }
       }
     }
 
@@ -691,14 +716,23 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     );
     for (const verify of verification) {
       const previous = existingVerification.get(verify.command);
-      if (previous && previous.purpose !== undefined) {
-        verify.purpose = previous.purpose;
+      if (previous) {
+        const purpose = stringValue(previous.purpose);
+        if (purpose !== undefined) {
+          verify.purpose = purpose;
+        }
       }
     }
     for (const risk of options.existing.risks ?? []) {
-      if (!RESERVED_DETERMINISTIC_RISK_AREAS[risk.area]) {
-        risks.push(risk);
+      if (typeof risk.area !== "string" || RESERVED_DETERMINISTIC_RISK_AREAS[risk.area]) {
+        continue;
       }
+      const preservedRisk: { area: string; summary?: string } = { area: risk.area };
+      const summary = stringValue(risk.summary);
+      if (summary !== undefined) {
+        preservedRisk.summary = summary;
+      }
+      risks.push(preservedRisk);
     }
 
   }
