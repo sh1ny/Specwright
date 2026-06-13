@@ -245,18 +245,18 @@
     },
     "src/core/codebase-index.ts": {
       "mtime": 0,
-      "size": 24961,
-      "checksum": "079fd34a73e87c1d85f67a2ef5626a155eafae89a3d6061ef247b92ae0a7bc0c"
+      "size": 27602,
+      "checksum": "86fe857c75a32ab840da47c32c973f82d99f37ffbcd38026b4cda63ed9174558"
     },
     "src/core/commands.ts": {
       "mtime": 0,
-      "size": 63221,
-      "checksum": "d31190e3f6aec038f8d1a005085b69a7b8f1d86415de123f9b7bd0a7fdb890f5"
+      "size": 64126,
+      "checksum": "b48e5473f8bd6c6d1d6fc84748f73a9f2583af9b404db785a03e73afe818779e"
     },
     "src/core/git.ts": {
       "mtime": 0,
-      "size": 13915,
-      "checksum": "4ac407993755fa38cf63174b4a5c07e11be7b8346109bbc63026c3516bd0fb68"
+      "size": 14205,
+      "checksum": "d779af0fca78e5841a37f7221dd900a400b1146d615b66d088039a9c3febfea4"
     },
     "src/core/json.ts": {
       "mtime": 0,
@@ -290,8 +290,8 @@
     },
     "src/core/validators.ts": {
       "mtime": 0,
-      "size": 17467,
-      "checksum": "2efe112281ef842981380519ade34c5082206bd0859e150cdd05302a4dbd1f50"
+      "size": 18282,
+      "checksum": "bc52f79028fb6a0baf33c07da6978d435565913caf0f4ef66184e246caf6ffde"
     },
     "src/runtime/omp/args.ts": {
       "mtime": 0,
@@ -325,8 +325,8 @@
     },
     "test/core-commands.test.ts": {
       "mtime": 0,
-      "size": 174563,
-      "checksum": "5187ba644253da149f6e6451134fb0d0702228e5991c57c3f36a069c393e0b76"
+      "size": 183396,
+      "checksum": "21b591ca96cdcfdb6e93d4eebe0b851462b0616b10da9e697d7f614c2009a042"
     },
     "test/core-init.test.ts": {
       "mtime": 0,
@@ -345,8 +345,8 @@
     },
     "test/core-validators.test.ts": {
       "mtime": 0,
-      "size": 17269,
-      "checksum": "1de3438d0e33c0337f3fc7aae671e7968aa5e0333c62862a6a8d01606899ce8b"
+      "size": 18785,
+      "checksum": "fa34782e3c026874a912cb5c8cc4f4a8985af155fd39dfe5f6765ea7c1d4cff9"
     },
     "test/omp-extension.test.ts": {
       "mtime": 0,
@@ -354,5 +354,5 @@
       "checksum": "9a831f8b192aecddc66d6a84dff3593ad7e0ca6e355f60e8e56e8c03e5964f6d"
     }
   },
-  "generatedAt": "2026-06-13T18:49:41.504Z"
+  "generatedAt": "2026-06-13T21:12:28.748Z"
 }

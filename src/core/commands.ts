@@ -567,9 +567,11 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   let rebuiltFromValidationErrors = false;
   let validationReport = { ok: true, issues: [] as ValidationIssue[] };
   if (indexExists && !args.force) {
-    let existingRead: CodebaseIndex | undefined;
+    let existingRead: unknown;
+    let existingReadSucceeded = false;
     try {
-      existingRead = await readJsonFile<CodebaseIndex>(indexPath);
+      existingRead = await readJsonFile<unknown>(indexPath);
+      existingReadSucceeded = true;
     } catch (error) {
       const issue = codebaseIndexReadIssue(error);
       if (issue === undefined) {
@@ -578,13 +580,13 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
       validationReport = { ok: false, issues: [issue] };
       rebuiltFromValidationErrors = true;
     }
-    if (existingRead) {
+    if (existingReadSucceeded) {
       validationReport = await validateCodebaseIndex(ctx.cwd, existingRead);
       const hasHardErrors = validationReport.issues.some((issue) => issue.level === "error");
       if (hasHardErrors) {
         rebuiltFromValidationErrors = true;
       } else {
-        existing = existingRead;
+        existing = existingRead as CodebaseIndex;
       }
     }
   }

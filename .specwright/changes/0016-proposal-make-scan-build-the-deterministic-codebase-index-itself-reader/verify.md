@@ -83,17 +83,32 @@ Test Results:
 
 Exit status: 0.
 
-### Affected suites
+### Prompt boundary suite
 
 Command:
 ```
-bun test test/core-commands.test.ts test/core-validators.test.ts
+bun test test/core-prompts.test.ts
 ```
 
 Output:
 ```
 Test Results:
-   PASS: 184 passed
+   PASS: 27 passed
+```
+
+Exit status: 0.
+
+### Affected suites
+
+Command:
+```
+bun test test/core-commands.test.ts test/core-prompts.test.ts test/core-validators.test.ts
+```
+
+Output:
+```
+Test Results:
+   PASS: 214 passed
 ```
 
 Exit status: 0.
@@ -110,7 +125,7 @@ Output:
 $ tsc --noEmit
 
 
-Wall time: 1.23 seconds
+Wall time: 1.08 seconds
 ```
 
 Exit status: 0.

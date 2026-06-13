@@ -26,6 +26,7 @@ export interface BuildCodebaseIndexOptions {
     maxGitLsFilesBytes: number;
     maxIndexedFiles: number;
     maxFingerprintBytesPerFile: number;
+    maxRisksPerArea: number;
   }>;
 }
 
@@ -42,6 +43,7 @@ export const MAX_FILES_SCANNED = 50000;
 export const MAX_GIT_LS_FILES_BYTES = 64 * 1024 * 1024;
 export const MAX_INDEXED_FILES = 5000;
 export const MAX_FINGERPRINT_BYTES_PER_FILE = 1048576;
+export const MAX_RISKS_PER_AREA = 64;
 
 export const RESERVED_DETERMINISTIC_RISK_AREAS: Record<string, true> = {
   "scan coverage": true,
@@ -55,6 +57,7 @@ const DEFAULT_LIMITS = {
   maxGitLsFilesBytes: MAX_GIT_LS_FILES_BYTES,
   maxIndexedFiles: MAX_INDEXED_FILES,
   maxFingerprintBytesPerFile: MAX_FINGERPRINT_BYTES_PER_FILE,
+  maxRisksPerArea: MAX_RISKS_PER_AREA,
 } as const;
 
 const EXCLUDE_PREFIXES = [
@@ -96,6 +99,11 @@ const ENTRYPOINT_BASE_NAMES: Record<string, true> = {
   server: true,
   app: true,
 };
+type ModuleRecord = NonNullable<CodebaseIndex["modules"]>[number];
+interface ModuleLookup {
+  byPath: ReadonlyMap<string, ModuleRecord>;
+  byBaseLower: ReadonlyMap<string, readonly ModuleRecord[]>;
+}
 
 function isFileFingerprint(value: unknown): value is FileFingerprint {
   return (
@@ -107,6 +115,9 @@ function isFileFingerprint(value: unknown): value is FileFingerprint {
     typeof (value as Record<string, unknown>).checksum === "string"
   );
 }
+
+type CodebaseRisk = NonNullable<CodebaseIndex["risks"]>[number];
+type RiskRecorder = (risk: CodebaseRisk) => void;
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
@@ -220,7 +231,7 @@ async function tryGitDiscoverFiles(
   cwd: string,
   maxFilesScanned: number,
   maxGitLsFilesBytes: number,
-  risks: Array<{ area: string; summary?: string }>,
+  recordRisk: RiskRecorder,
 ): Promise<DiscoveryResult | undefined> {
   const files: DiscoveredFile[] = [];
   let hitFileCap = false;
@@ -234,14 +245,14 @@ async function tryGitDiscoverFiles(
         return true;
       }
       if (!isSafeRelativePath(relPath)) {
-        risks.push({ area: "unsafe path skipped", summary: `Skipped unsafe path: ${relPath}` });
+        recordRisk({ area: "unsafe path skipped", summary: `Skipped unsafe path: ${relPath}` });
         return true;
       }
       const absolute = resolve(cwd, relPath);
       try {
         const st = await lstat(absolute);
         if (st.isSymbolicLink()) {
-          risks.push({ area: "symlink skipped", summary: `Skipped symlinked path: ${relPath}` });
+          recordRisk({ area: "symlink skipped", summary: `Skipped symlinked path: ${relPath}` });
           return true;
         }
         if (st.isFile()) {
@@ -278,9 +289,9 @@ async function discoverFiles(
   cwd: string,
   maxFilesScanned: number,
   maxGitLsFilesBytes: number,
-  risks: Array<{ area: string; summary?: string }>,
+  recordRisk: RiskRecorder,
 ): Promise<DiscoveryResult> {
-  const gitDiscovery = await tryGitDiscoverFiles(cwd, maxFilesScanned, maxGitLsFilesBytes, risks);
+  const gitDiscovery = await tryGitDiscoverFiles(cwd, maxFilesScanned, maxGitLsFilesBytes, recordRisk);
   if (gitDiscovery !== undefined) {
     return gitDiscovery;
   }
@@ -309,11 +320,11 @@ async function discoverFiles(
         continue;
       }
       if (!isSafeRelativePath(relPath)) {
-        risks.push({ area: "unsafe path skipped", summary: `Skipped unsafe path: ${relPath}` });
+        recordRisk({ area: "unsafe path skipped", summary: `Skipped unsafe path: ${relPath}` });
         continue;
       }
       if (entry.isSymbolicLink()) {
-        risks.push({ area: "symlink skipped", summary: `Skipped symlinked path: ${relPath}` });
+        recordRisk({ area: "symlink skipped", summary: `Skipped symlinked path: ${relPath}` });
         continue;
       }
       if (entry.isDirectory()) {
@@ -440,10 +451,22 @@ function deriveSourceBaseName(testPath: string): string | undefined {
   return `${match[1]}${match[2]}`;
 }
 
-function findAssociatedModule(
-  testPath: string,
-  modules: Array<{ path: string; kind?: string; summary?: string; tests?: string[] }>,
-): { path: string; kind?: string; summary?: string; tests?: string[] } | undefined {
+function createModuleLookup(modules: readonly ModuleRecord[], modulesByPath: ReadonlyMap<string, ModuleRecord>): ModuleLookup {
+  const byPath = new Map(modulesByPath);
+  const byBaseLower = new Map<string, ModuleRecord[]>();
+  for (const mod of modules) {
+    const key = basename(mod.path).toLowerCase();
+    const existing = byBaseLower.get(key);
+    if (existing) {
+      existing.push(mod);
+    } else {
+      byBaseLower.set(key, [mod]);
+    }
+  }
+  return { byPath, byBaseLower };
+}
+
+function findAssociatedModule(testPath: string, lookup: ModuleLookup): ModuleRecord | undefined {
   const sourceBase = deriveSourceBaseName(testPath);
   if (sourceBase === undefined) {
     return undefined;
@@ -451,20 +474,20 @@ function findAssociatedModule(
   const normalizedTestPath = normalizePath(testPath);
   const testDir = dirname(normalizedTestPath);
   const exactPath = normalizePath(join(testDir, sourceBase));
-  const exact = modules.find((mod) => mod.path === exactPath);
+  const exact = lookup.byPath.get(exactPath);
   if (exact) {
     return exact;
   }
   const testDirBase = basename(testDir).toLowerCase();
   if (["__test__", "__tests__", "test", "tests"].includes(testDirBase)) {
     const parentPath = normalizePath(join(dirname(testDir), sourceBase));
-    const parent = modules.find((mod) => mod.path === parentPath);
+    const parent = lookup.byPath.get(parentPath);
     if (parent) {
       return parent;
     }
   }
-  const matches = modules.filter((mod) => basename(mod.path).toLowerCase() === sourceBase.toLowerCase());
-  if (matches.length === 1) {
+  const matches = lookup.byBaseLower.get(sourceBase.toLowerCase());
+  if (matches?.length === 1) {
     return matches[0];
   }
   return undefined;
@@ -520,22 +543,47 @@ function normalizeIndexPart(index: CodebaseIndex): NormalizedIndexPart {
 
 export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Promise<BuildCodebaseIndexResult> {
   const limits = { ...DEFAULT_LIMITS, ...options.limits };
-  const risks: Array<{ area: string; summary?: string }> = [];
+  const risks: CodebaseRisk[] = [];
+  const riskKeys = new Set<string>();
+  const riskCountsByArea = new Map<string, number>();
+  const omittedRiskAreas = new Set<string>();
+  let riskTruncated = false;
+  const recordRisk: RiskRecorder = (risk) => {
+    const key = `${risk.area}\u0000${risk.summary ?? ""}`;
+    if (riskKeys.has(key)) {
+      return;
+    }
+    riskKeys.add(key);
+    const count = riskCountsByArea.get(risk.area) ?? 0;
+    if (count < limits.maxRisksPerArea) {
+      risks.push(risk);
+      riskCountsByArea.set(risk.area, count + 1);
+      return;
+    }
+    riskTruncated = true;
+    if (!omittedRiskAreas.has(risk.area)) {
+      omittedRiskAreas.add(risk.area);
+      risks.push({
+        area: risk.area,
+        summary: `Additional ${risk.area} risks omitted after ${limits.maxRisksPerArea} entries.`,
+      });
+    }
+  };
 
   const { files, scannedFiles, truncationReason } = await discoverFiles(
     options.cwd,
     limits.maxFilesScanned,
     limits.maxGitLsFilesBytes,
-    risks,
+    recordRisk,
   );
   const scanTruncated = truncationReason !== undefined;
   if (truncationReason === "file-cap") {
-    risks.push({
+    recordRisk({
       area: "scan coverage",
       summary: `Scanned file cap of ${limits.maxFilesScanned} exceeded; discovery stopped.`,
     });
   } else if (truncationReason === "git-output-byte-cap") {
-    risks.push({
+    recordRisk({
       area: "scan coverage",
       summary: `git ls-files output exceeded ${limits.maxGitLsFilesBytes} bytes; discovery stopped before filesystem fallback.`,
     });
@@ -552,7 +600,6 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   const countedIndexedPaths = new Set<string>();
   let indexedTruncated = false;
   type EntryPointRecord = NonNullable<CodebaseIndex["entrypoints"]>[number];
-  type ModuleRecord = NonNullable<CodebaseIndex["modules"]>[number];
   const entrypointPaths = new Set<string>();
   const modulesByPath = new Map<string, ModuleRecord>();
 
@@ -625,8 +672,9 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     }
   }
 
+  const moduleLookup = createModuleLookup(modules, modulesByPath);
   for (const testPath of testPaths.sort(compareCodeUnit)) {
-    const candidate = findAssociatedModule(testPath, modules);
+    const candidate = findAssociatedModule(testPath, moduleLookup);
     let associated = false;
     if (candidate) {
       associated = true;
@@ -641,7 +689,7 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   }
 
   if (indexedTruncated) {
-    risks.push({
+    recordRisk({
       area: "scan coverage",
       summary: `Indexed file cap of ${limits.maxIndexedFiles} exceeded; candidate list truncated.`,
     });
@@ -754,13 +802,16 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   const fingerprints: Record<string, FileFingerprint> = {};
   const staleFiles: string[] = [];
   const previousFingerprints = options.existing?.fingerprints ?? {};
+  const hasExistingIndex = options.existing !== undefined;
   for (const relPath of Array.from(indexedPaths).sort(compareCodeUnit)) {
     const file = fileByPath.get(relPath);
+    const previous = previousFingerprints[relPath];
     if (file && file.size > limits.maxFingerprintBytesPerFile) {
-      risks.push({ area: "large file skipped", summary: `Skipped fingerprint for large file: ${relPath}` });
-      const previous = previousFingerprints[relPath];
+      recordRisk({ area: "large file skipped", summary: `Skipped fingerprint for large file: ${relPath}` });
       if (isFileFingerprint(previous)) {
         staleFiles.push(`${relPath} (changed)`);
+      } else if (hasExistingIndex && previous === undefined) {
+        staleFiles.push(`${relPath} (added)`);
       }
       continue;
     }
@@ -768,12 +819,12 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     const fp = await streamFileFingerprint(absolute, limits.maxFingerprintBytesPerFile);
     if (fp) {
       fingerprints[relPath] = fp;
-      const previous = previousFingerprints[relPath];
-      if (isFileFingerprint(previous) && (previous.size !== fp.size || previous.checksum !== fp.checksum)) {
+      if (hasExistingIndex && previous === undefined) {
+        staleFiles.push(`${relPath} (added)`);
+      } else if (isFileFingerprint(previous) && (previous.size !== fp.size || previous.checksum !== fp.checksum)) {
         staleFiles.push(`${relPath} (changed)`);
       }
     } else {
-      const previous = previousFingerprints[relPath];
       if (previous !== undefined) {
         staleFiles.push(`${relPath} (missing)`);
       }
@@ -814,6 +865,6 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     staleFiles,
     scannedFiles,
     indexedFiles: countedIndexedPaths.size,
-    truncated: scanTruncated || indexedTruncated,
+    truncated: scanTruncated || indexedTruncated || riskTruncated,
   };
 }
