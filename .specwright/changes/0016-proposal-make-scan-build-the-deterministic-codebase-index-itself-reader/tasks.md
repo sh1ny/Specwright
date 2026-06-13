@@ -4,13 +4,13 @@
 
 ## Wave 1 - Builder and shared type ownership
 
-- [ ] T001: Move CodebaseIndex ownership into the builder module
+- [x] T001: Move CodebaseIndex ownership into the builder module
   - Files: `src/core/codebase-index.ts`, `src/core/commands.ts`, `src/core/validators.ts`
   - Action: Create the new module with `CodebaseIndex`, builder option/result interfaces, cap constants, and reserved deterministic risk areas; remove duplicate local `CodebaseIndex` definitions and import the shared type.
   - Acceptance: There is exactly one `CodebaseIndex` type definition; commands and validators import it; no compatibility alias remains.
   - Verification: Run `bun run typecheck` after this cutover compiles with downstream tasks applied.
 
-- [ ] T002: Implement deterministic project discovery and classification
+- [x] T002: Implement deterministic project discovery and classification
   - Files: `src/core/codebase-index.ts`, `test/core-commands.test.ts`
   - Action: Add Git-assisted discovery with deterministic filesystem fallback, default excludes, symlink skipping with risk recording, stable path sorting, package script extraction, entrypoint/module/test/verification-command classification, and scan/index caps.
   - Acceptance: Non-Git temp projects with `package.json`, `src/cli.ts`, and `test/cli.test.ts` produce non-empty entrypoints, modules, tests, verification commands, and deterministic cap risks when caps are exceeded.

@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { computeFileFingerprint } from "../src/core/json";
+import { buildCodebaseIndex } from "../src/core/codebase-index";
 import { runSpecwrightCommand, renderHelp } from "../src/core/commands";
 import {
   branchNameForChange,
@@ -2902,6 +2903,78 @@ test("scan surfaces validation issues for an invalid codebase-index.json", async
   expect(result.prompt).toContain("not a safe relative path");
   expect(result.prompt).toContain("missing required field");
   expect(result.prompt).toContain("missing file");
+});
+
+test("buildCodebaseIndex discovers and classifies a non-Git TypeScript project", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-nongit-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test", build: "bun run build" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+  await writeFile(join(cwd, "test", "cli.test.ts"), "import { test } from 'bun:test';\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  expect(result.changed).toBe(true);
+  expect(result.truncated).toBe(false);
+  expect(result.scannedFiles).toBeGreaterThan(0);
+  expect(result.indexedFiles).toBeGreaterThan(0);
+  expect(result.staleFiles).toEqual([]);
+
+  const entryPaths = result.index.entrypoints?.map((entry) => entry.path) ?? [];
+  expect(entryPaths).toContain("package.json");
+  expect(entryPaths).toContain("src/cli.ts");
+
+  const cliModule = result.index.modules?.find((mod) => mod.path === "src/cli.ts");
+  expect(cliModule).toBeDefined();
+  expect(cliModule?.tests).toContain("test/cli.test.ts");
+
+  const verificationCommands = result.index.verification?.map((v) => v.command) ?? [];
+  expect(verificationCommands).toContain("bun test");
+
+  const commandNames = result.index.commands?.map((cmd) => cmd.name) ?? [];
+  expect(commandNames.length).toBeGreaterThan(0);
+  expect(commandNames).toContain("test");
+});
+
+test("buildCodebaseIndex records deterministic scan coverage risk when indexed file cap is exceeded", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-indexed-cap-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "b.ts"), "export const b = 2;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxIndexedFiles: 1 },
+  });
+  expect(result.truncated).toBe(true);
+  expect(result.indexedFiles).toBeLessThanOrEqual(1);
+  expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(true);
+});
+
+test("buildCodebaseIndex records deterministic scan coverage risk when scanned file cap is exceeded", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-scan-cap-"));
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
+  await writeFile(join(cwd, "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "b.ts"), "export const b = 2;\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFilesScanned: 1 },
+  });
+  expect(result.truncated).toBe(true);
+  expect(result.scannedFiles).toBeLessThanOrEqual(1);
+  expect(result.index.risks?.some((risk) => risk.area === "scan coverage")).toBe(true);
 });
 
 test("scan --json surfaces validation issues in machine-readable output", async () => {
