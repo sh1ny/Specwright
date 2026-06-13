@@ -760,59 +760,59 @@
       "status": "executing",
       "step": "execute",
       "createdAt": "2026-06-13T11:03:16.440Z",
-      "updatedAt": "2026-06-13T12:06:36.428Z",
+      "updatedAt": "2026-06-13T12:24:00.849Z",
       "tasks": {
         "T001": {
           "id": "T001",
           "title": "Move CodebaseIndex ownership into the builder module",
           "status": "done",
-          "updatedAt": "2026-06-13T12:06:36.428Z"
+          "updatedAt": "2026-06-13T12:24:00.849Z"
         },
         "T002": {
           "id": "T002",
           "title": "Implement deterministic project discovery and classification",
           "status": "done",
-          "updatedAt": "2026-06-13T12:06:36.428Z"
+          "updatedAt": "2026-06-13T12:24:00.849Z"
         },
         "T003": {
           "id": "T003",
           "title": "Implement fingerprinting, preservation, and changed detection",
           "status": "done",
-          "updatedAt": "2026-06-13T12:06:36.428Z"
+          "updatedAt": "2026-06-13T12:24:00.849Z"
         },
         "T004": {
           "id": "T004",
           "title": "Replace scan refresh logic with the builder state machine",
           "status": "done",
-          "updatedAt": "2026-06-13T12:06:36.428Z"
+          "updatedAt": "2026-06-13T12:24:00.849Z"
         },
         "T005": {
           "id": "T005",
           "title": "Rewrite the scan prompt contract",
-          "status": "pending",
-          "updatedAt": "2026-06-13T12:06:36.428Z"
+          "status": "done",
+          "updatedAt": "2026-06-13T12:24:00.849Z"
         },
         "T006": {
           "id": "T006",
           "title": "Update command tests for command-owned indexing",
           "status": "pending",
-          "updatedAt": "2026-06-13T12:06:36.428Z"
+          "updatedAt": "2026-06-13T12:24:00.849Z"
         },
         "T007": {
           "id": "T007",
           "title": "Update validator and prompt boundary tests",
           "status": "pending",
-          "updatedAt": "2026-06-13T12:06:36.428Z"
+          "updatedAt": "2026-06-13T12:24:00.849Z"
         },
         "T008": {
           "id": "T008",
           "title": "Run final targeted verification for the change",
           "status": "pending",
-          "updatedAt": "2026-06-13T12:06:36.428Z"
+          "updatedAt": "2026-06-13T12:24:00.849Z"
         }
       }
     }
   },
-  "updatedAt": "2026-06-13T12:06:36.428Z",
+  "updatedAt": "2026-06-13T12:24:00.849Z",
   "currentChange": "0016"
 }

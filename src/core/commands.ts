@@ -580,26 +580,20 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
     }
   }
 
-  let refreshSection = "";
-  if (buildResult.staleFiles.length > 0) {
-    refreshSection = "\n\n## Stale files\n\nThe following indexed files changed or are missing since the last refresh:\n" + buildResult.staleFiles.map((line) => `- ${line}`).join("\n");
-  } else if (buildResult.changed) {
-    refreshSection = "\n\n## Refresh status\n\nThe deterministic index was created or refreshed.";
-  } else {
-    refreshSection = "\n\n## Refresh status\n\nNo indexed files are stale; the deterministic index is already current.";
-  }
-  if (rebuiltFromValidationErrors) {
-    refreshSection += "\n\nHard validation errors in the existing codebase-index.json caused a scratch rebuild; semantic fields from the invalid index were not preserved.";
-  }
-
-  const validationSection = validationReport.issues.length > 0
-    ? "\n\n## Codebase index validation\n\n" + validationReport.issues.map((issue) => `- ${issue.level.toUpperCase()} ${issue.code}: ${issue.message}`).join("\n")
-    : "";
+  const deterministicSummary = {
+    indexUpdated: shouldWriteIndex,
+    scannedFiles: buildResult.scannedFiles,
+    indexedFiles: buildResult.indexedFiles,
+    truncated: buildResult.truncated,
+    staleFiles: buildResult.staleFiles,
+    validationIssues: validationReport.issues,
+    rebuiltFromValidationErrors,
+  };
 
   const config = await loadConfig(ctx.cwd);
   const prompt = ctx.runtime === "omp"
-    ? renderOmpScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection })
-    : renderScanPrompt({ config, map: args.map, refresh: args.refresh, refreshSection, validationSection });
+    ? renderOmpScanPrompt({ config, map: args.map, refresh: args.refresh, deterministicSummary })
+    : renderScanPrompt({ config, map: args.map, refresh: args.refresh, deterministicSummary });
   const humanSummary = "Prepared project scan prompt.";
   const scanSummary = args.json
     ? JSON.stringify({
