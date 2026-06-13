@@ -150,8 +150,14 @@ export function renderScanPrompt(input: ScanPromptInput): string {
     `- Files indexed: ${summary.indexedFiles}`,
     `- Truncated/capped: ${summary.truncated ? "yes" : "no"}`,
   ];
+  const MAX_STALE_FILES_RENDER = 20;
   if (summary.staleFiles.length > 0) {
-    deterministicState.push(`- Stale files: ${summary.staleFiles.length}\n${summary.staleFiles.map((line) => `  - ${line}`).join("\n")}`);
+    const rendered = summary.staleFiles.slice(0, MAX_STALE_FILES_RENDER).map((line) => `  - ${line}`);
+    const remaining = summary.staleFiles.length - rendered.length;
+    if (remaining > 0) {
+      rendered.push(`  - ... and ${remaining} more stale file${remaining === 1 ? "" : "s"} not listed here`);
+    }
+    deterministicState.push(`- Stale files: ${summary.staleFiles.length}\n${rendered.join("\n")}`);
   } else {
     deterministicState.push("- Stale files: none");
   }
@@ -186,7 +192,7 @@ export function renderScanPrompt(input: ScanPromptInput): string {
   ].join("\n");
 
   const refreshNote = isRefresh
-    ? "\n\nRefresh run: use the deterministic index state above to identify changed areas and patch only the stale prose sections."
+    ? "\n\nRefresh run: use the deterministic index state above to identify changed areas, patch stale prose sections, and fill any newly created or empty agent-owned prose sections. Do not rewrite unaffected sections."
     : "";
 
   const retryArtifact = isMap ? ".specwright/project/codebase-map.md" : ".specwright/project/scan.md";

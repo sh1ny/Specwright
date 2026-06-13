@@ -54,16 +54,18 @@ const DEFAULT_LIMITS = {
 } as const;
 
 const EXCLUDE_PREFIXES = [
-  ".git/",
-  "node_modules/",
   ".specwright/cache/",
   ".specwright/tmp/",
-  ".omp/",
-  "dist/",
-  "build/",
-  ".next/",
-  "coverage/",
-  "target/",
+];
+const EXCLUDE_DIR_NAMES = [
+  ".git",
+  "node_modules",
+  ".omp",
+  "dist",
+  "build",
+  ".next",
+  "coverage",
+  "target",
 ];
 
 const SOURCE_EXTENSIONS: Record<string, true> = {
@@ -145,6 +147,12 @@ function shouldExclude(relPath: string): boolean {
   for (const prefix of EXCLUDE_PREFIXES) {
     const dirName = prefix.slice(0, -1);
     if (normalized === dirName || normalized.startsWith(prefix)) {
+      return true;
+    }
+  }
+  const segments = normalized.split("/");
+  for (const name of EXCLUDE_DIR_NAMES) {
+    if (segments.includes(name)) {
       return true;
     }
   }
@@ -411,6 +419,7 @@ function findAssociatedModule(
 }
 
 interface NormalizedIndexPart {
+  version: number;
   entrypoints: Array<{ path: string; kind?: string; summary?: string }>;
   modules: Array<{ path: string; kind?: string; summary?: string; tests: string[] }>;
   commands: Array<{ name: string; summary?: string }>;
@@ -454,7 +463,7 @@ function normalizeIndexPart(index: CodebaseIndex): NormalizedIndexPart {
     .filter((entry): entry is [string, FileFingerprint] => isFileFingerprint(entry[1]))
     .sort(([a], [b]) => compareCodeUnit(a, b))
     .map(([path, fp]) => [path, { mtime: fp.mtime, size: fp.size, checksum: fp.checksum }] as [string, { mtime: number; size: number; checksum: string }]);
-  return { entrypoints, modules, commands, verification, risks, fingerprints };
+  return { version: index.version ?? 0, entrypoints, modules, commands, verification, risks, fingerprints };
 }
 
 export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Promise<BuildCodebaseIndexResult> {
@@ -609,12 +618,17 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
         if (previous.summary !== undefined) {
           mod.summary = previous.summary;
         }
-        const previousTests = previous.tests ?? [];
-        const merged = Array.from(
-          new Set([...(mod.tests ?? []), ...previousTests.filter((testPath) => filePaths.has(testPath))]),
-        ).sort(compareCodeUnit);
-        if (merged.length > 0) {
-          mod.tests = merged;
+        const previousTests = (previous.tests ?? [])
+          .filter((testPath) => filePaths.has(testPath))
+          .sort(compareCodeUnit);
+        for (const testPath of previousTests) {
+          if (reserveIndexedPath(testPath)) {
+            mod.tests = mod.tests ?? [];
+            mod.tests.push(testPath);
+          }
+        }
+        if (mod.tests) {
+          mod.tests = Array.from(new Set(mod.tests)).sort(compareCodeUnit);
         }
       }
     }

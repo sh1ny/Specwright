@@ -2568,6 +2568,30 @@ test("scan --force regenerates existing map artifacts", async () => {
   expect(await readFile(mapPath, "utf8")).toContain("# Codebase Map");
   expect(JSON.parse(await readFile(indexPath, "utf8")).generatedAt).toBe(ctx.now().toISOString());
 });
+test("scan --force rebuilds over malformed codebase-index.json", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-force-malformed-index-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ name: "demo" }), "utf8");
+  await writeFile(join(cwd, "src", "keep.ts"), "export const keep = 1;\n", "utf8");
+
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["scan"])).ok).toBe(true);
+
+  const indexPath = join(cwd, ".specwright", "project", "codebase-index.json");
+  await writeFile(indexPath, "{ not valid json", "utf8");
+
+  const result = await runSpecwrightCommand(ctx, ["scan", "--force", "--json"]);
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.summary);
+  expect(payload.indexUpdated).toBe(true);
+  expect(payload.validation.ok).toBe(true);
+
+  const rebuilt = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(rebuilt.entrypoints.some((entry: { path: string }) => entry.path === "package.json")).toBe(true);
+  expect(rebuilt.modules.some((mod: { path: string }) => mod.path === "src/keep.ts")).toBe(true);
+});
+
 
 test("scan --map --force regenerates only map artifacts", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-map-force-"));
@@ -2717,8 +2741,8 @@ test("scan refreshes fingerprints for changed indexed files", async () => {
   const originalCliFingerprint = before.fingerprints["src/cli.ts"];
   expect(originalCliFingerprint).toBeDefined();
 
-  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hello');\n", "utf8");
-  const result = await runSpecwrightCommand(ctx, ["scan", "--json"]);
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('yo');\n", "utf8");
+  const result = await runSpecwrightCommand(ctx, ["scan", "--refresh", "--json"]);
   expect(result.ok).toBe(true);
 
   const payload = JSON.parse(result.summary);
@@ -2835,9 +2859,16 @@ test("scan preserves SW106 warnings while rebuilding deterministic data", async 
     "utf8",
   );
 
-  const result = await runSpecwrightCommand(ctx, ["scan", "--print-prompt"]);
+  const result = await runSpecwrightCommand(ctx, ["scan", "--json", "--print-prompt"]);
   expect(result.ok).toBe(true);
   expect(result.prompt).toContain("references non-file path: src/dir");
+  const payload = JSON.parse(result.summary);
+  expect(payload.indexUpdated).toBe(true);
+
+  const rebuilt = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(rebuilt.modules.some((mod: { path: string }) => mod.path === "src/dir")).toBe(false);
+  expect(rebuilt.entrypoints.some((entry: { path: string }) => entry.path === "package.json")).toBe(true);
+
 });
 test("scan --map prompt focuses only on map artifacts", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-map-prompt-"));
@@ -2879,7 +2910,7 @@ test("scan --refresh prompt includes deterministic refresh note", async () => {
   expect(result.ok).toBe(true);
   expect(result.prompt).toContain("Refresh run:");
   expect(result.prompt).toContain("use the deterministic index state above to identify changed areas");
-  expect(result.prompt).toContain("patch only the stale prose sections");
+  expect(result.prompt).toContain("patch stale prose sections");
 });
 
 test("scan surfaces validation issues for an invalid codebase-index.json", async () => {
@@ -3040,6 +3071,22 @@ test("buildCodebaseIndex reports stale files and refreshes fingerprints when a s
   expect(second.index.fingerprints?.["src/cli.ts"]).not.toEqual(originalCliFingerprint);
   expect(second.index.fingerprints?.["test/cli.test.ts"]).toEqual(first.index.fingerprints?.["test/cli.test.ts"]);
 });
+test("buildCodebaseIndex treats schema version drift as a changed index", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-version-drift-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({ cwd, now });
+  const second = await buildCodebaseIndex({
+    cwd,
+    now,
+    existing: { ...first.index, version: 0 },
+  });
+  expect(second.changed).toBe(true);
+  expect(second.index.version).toBe(1);
+});
+
 
 test("buildCodebaseIndex keeps fingerprints stable when only filesystem mtime changes", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-stable-mtime-"));
@@ -3125,6 +3172,25 @@ test("buildCodebaseIndex filters unsafe and excluded package entrypoints", async
   expect(entrypointPaths).not.toContain("/tmp/escape.js");
   expect((await validateCodebaseIndex(cwd, result.index)).ok).toBe(true);
 });
+test("buildCodebaseIndex excludes nested build and vendor directories", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-nested-excludes-"));
+  await mkdir(join(cwd, "packages", "api", "src"), { recursive: true });
+  await mkdir(join(cwd, "packages", "api", "dist"), { recursive: true });
+  await mkdir(join(cwd, "packages", "api", "node_modules", "dep"), { recursive: true });
+  await writeFile(join(cwd, "packages", "api", "src", "index.ts"), "export const kept = 1;\n", "utf8");
+  await writeFile(join(cwd, "packages", "api", "dist", "index.ts"), "export const built = 1;\n", "utf8");
+  await writeFile(join(cwd, "packages", "api", "node_modules", "dep", "index.ts"), "export const dep = 1;\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  expect(modulePaths).toContain("packages/api/src/index.ts");
+  expect(modulePaths).not.toContain("packages/api/dist/index.ts");
+  expect(modulePaths).not.toContain("packages/api/node_modules/dep/index.ts");
+  expect(result.index.fingerprints?.["packages/api/src/index.ts"]).toBeDefined();
+  expect(result.index.fingerprints?.["packages/api/dist/index.ts"]).toBeUndefined();
+  expect(result.index.fingerprints?.["packages/api/node_modules/dep/index.ts"]).toBeUndefined();
+});
+
 
 test("buildCodebaseIndex counts associated tests against the indexed file cap", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-test-cap-"));
@@ -3144,6 +3210,30 @@ test("buildCodebaseIndex counts associated tests against the indexed file cap", 
   expect(sourceModule?.tests).toBeUndefined();
   expect(result.index.fingerprints?.["src/a.test.ts"]).toBeUndefined();
 });
+test("buildCodebaseIndex counts preserved tests against the indexed file cap", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-preserved-test-cap-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "src", "legacy.test.ts"), "import './a';\n", "utf8");
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    existing: {
+      version: 1,
+      modules: [{ path: "src/a.ts", tests: ["src/legacy.test.ts"] }],
+      fingerprints: {},
+    },
+    limits: { maxIndexedFiles: 1 },
+  });
+  expect(result.truncated).toBe(true);
+  expect(result.indexedFiles).toBeLessThanOrEqual(1);
+  const sourceModule = result.index.modules?.find((mod) => mod.path === "src/a.ts");
+  expect(sourceModule).toBeDefined();
+  expect(sourceModule?.tests).toBeUndefined();
+  expect(result.index.fingerprints?.["src/legacy.test.ts"]).toBeUndefined();
+});
+
 
 test("buildCodebaseIndex associates tests by nearest path and avoids ambiguous basename fallback", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-test-association-"));

@@ -421,6 +421,9 @@ test("renderScanPrompt refresh mode shows deterministic stale files and refresh 
   const prompt = renderScanPrompt({ config, map: false, refresh: true, deterministicSummary: summary });
   expect(prompt).toContain("Refresh the project intelligence prose by patching stale sections");
   expect(prompt).toContain("Refresh run:");
+  expect(prompt).toContain("patch stale prose sections");
+  expect(prompt).toContain("fill any newly created or empty agent-owned prose sections");
+  expect(prompt).toContain("Do not rewrite unaffected sections");
   expect(prompt).toContain("Stale files: 1");
   expect(prompt).toContain("src/core/x.ts (changed)");
   expect(prompt).not.toContain("Refresh contract:");
@@ -439,6 +442,29 @@ test("renderScanPrompt map+refresh mode focuses map artifact and refresh note", 
   expect(prompt).not.toContain("Refresh contract:");
   expect(prompt).toContain("Command-owned (do not edit directly): .specwright/project/codebase-index.json and its machine fields");
   expect(prompt).toContain("Agent-owned (edit prose only): .specwright/project/codebase-map.md. You may summarize current index facts in prose");
+});
+
+test("renderScanPrompt renders non-default deterministic summary state", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const summary = scanSummary({ indexUpdated: false, truncated: true, staleFiles: ["src/core/y.ts (changed)"] });
+  const prompt = renderScanPrompt({ config, map: false, refresh: false, deterministicSummary: summary });
+  expect(prompt).toContain("codebase-index.json updated: false");
+  expect(prompt).toContain("Truncated/capped: yes");
+  expect(prompt).toContain("Stale files: 1");
+  expect(prompt).toContain("src/core/y.ts (changed)");
+});
+
+test("renderScanPrompt caps stale file list and summarizes remaining count", () => {
+  const config = defaultConfig("scan-prompt-test");
+  const staleFiles = Array.from({ length: 25 }, (_, i) => `src/f${i}.ts (changed)`);
+  const summary = scanSummary({ staleFiles });
+  const prompt = renderScanPrompt({ config, map: false, refresh: false, deterministicSummary: summary });
+  expect(prompt).toContain("Stale files: 25");
+  for (let i = 0; i < 20; i += 1) {
+    expect(prompt).toContain(`src/f${i}.ts (changed)`);
+  }
+  expect(prompt).toContain("... and 5 more stale files not listed here");
+  expect(prompt).not.toContain("src/f20.ts (changed)");
 });
 
 test("renderScanPrompt is runtime-neutral and avoids OMP-specific scout wording", () => {

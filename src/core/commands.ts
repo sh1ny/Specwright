@@ -547,7 +547,7 @@ async function commandScan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
   let existing: CodebaseIndex | undefined;
   let rebuiltFromValidationErrors = false;
   let validationReport = { ok: true, issues: [] as import("./validators").ValidationIssue[] };
-  if (indexExists) {
+  if (indexExists && !args.force) {
     const existingRead = await readJsonFile<CodebaseIndex>(indexPath);
     if (existingRead) {
       validationReport = await validateCodebaseIndex(ctx.cwd, existingRead);
