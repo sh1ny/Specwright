@@ -38,20 +38,20 @@
 
 ## Wave 3 - Regression coverage
 
-- [ ] T006: Update command tests for command-owned indexing
+- [x] T006: Update command tests for command-owned indexing
   - Files: `test/core-commands.test.ts`
   - Action: Replace old refresh expectations with tests for non-Git first scan, second-scan no-op bytes, edited-file fingerprint update, `--refresh` compatibility, `--force` rewrite behavior, and `--map` compatibility without separate index ownership.
   - Acceptance: Tests prove the command writes deterministic fingerprints itself and never depends on agent-authored fingerprint JSON.
   - Verification: Run `bun test test/core-commands.test.ts`.
 
-- [ ] T007: Update validator and prompt boundary tests
+- [x] T007: Update validator and prompt boundary tests
   - Files: `test/core-validators.test.ts`, `test/core-prompts.test.ts`
   - Action: Align validator expectations with shared `CodebaseIndex` ownership and hard-error versus `SW106` preservation behavior; update prompt assertions for the semantic-prose-only contract.
   - Acceptance: Tests cover hard validation rebuild inputs, missing-file warning preservation, no core OMP wording, and no manual fingerprint instructions.
   - Verification: Run `bun test test/core-validators.test.ts test/core-prompts.test.ts`.
 
-- [ ] T008: Run final targeted verification for the change
-  - Files: `src/core/codebase-index.ts`, `src/core/commands.ts`, `src/core/prompts.ts`, `src/core/validators.ts`, `test/core-commands.test.ts`, `test/core-prompts.test.ts`, `test/core-validators.test.ts`
-  - Action: Execute only the targeted verification suite for this change and fix any failures at the source.
-  - Acceptance: The implemented scan flow satisfies all acceptance scenarios from `intent.md` without project-wide unrelated gates.
-  - Verification: Run `bun test test/core-commands.test.ts test/core-validators.test.ts test/core-prompts.test.ts` and `bun run typecheck`.
+ - [x] T008: Run final targeted verification for the change
+   - Files: `src/core/codebase-index.ts`, `src/core/commands.ts`, `src/core/prompts.ts`, `src/core/validators.ts`, `test/core-commands.test.ts`, `test/core-prompts.test.ts`, `test/core-validators.test.ts`
+   - Action: Execute only the targeted verification suite for this change and fix any failures at the source.
+   - Acceptance: The implemented scan flow satisfies all acceptance scenarios from `intent.md` without project-wide unrelated gates.
+   - Verification: Run `bun test test/core-commands.test.ts test/core-validators.test.ts test/core-prompts.test.ts` and `bun run typecheck`.
