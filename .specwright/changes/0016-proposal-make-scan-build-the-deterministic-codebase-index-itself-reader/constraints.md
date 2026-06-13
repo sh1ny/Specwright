@@ -18,7 +18,7 @@
 - Missing-file warnings remain non-blocking.
 - Use streaming SHA-256 for indexed-file fingerprints instead of whole-file reads.
 - Default behavior skips symlinked directories and symlinked files; symlink skips are recorded as deterministic risks.
-- Initial caps are `maxFilesScanned = 50000`, `maxIndexedFiles = 5000`, and `maxFingerprintBytesPerFile = 1048576` unless research finds a blocking implementation reason to adjust them.
+- Initial caps are maxFilesScanned = 50000, maxGitLsFilesBytes = 64 * 1024 * 1024, maxIndexedFiles = 5000, maxFingerprintBytesPerFile = 1048576, and maxRisksPerArea = 64 unless research finds a blocking implementation reason to adjust them.
 - Core scan prompt wording stays runtime-neutral; OMP-specific parallel scout wording stays in the OMP prompt adapter.
 
 ## Open constraints

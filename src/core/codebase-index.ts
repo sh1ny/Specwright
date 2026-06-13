@@ -92,6 +92,10 @@ const SOURCE_EXTENSIONS: Record<string, true> = {
   ".php": true,
 };
 
+function hasSourceExtension(relPath: string): boolean {
+  return SOURCE_EXTENSIONS[extname(relPath).toLowerCase()] === true;
+}
+
 const ENTRYPOINT_BASE_NAMES: Record<string, true> = {
   cli: true,
   main: true,
@@ -297,49 +301,99 @@ async function discoverFiles(
   }
 
   const candidates: DiscoveredFile[] = [];
+  const pending: PendingFsEntry[] = [];
+  const symlinkPaths = new Set<string>();
+  const unsafePaths = new Set<string>();
+  let hitFileCap = false;
 
-  async function walk(dir: string): Promise<void> {
+  interface PendingFsEntry {
+    relPath: string;
+    absolute: string;
+    kind: "directory" | "file";
+    sortKey: string;
+  }
+
+  function insertPending(queue: PendingFsEntry[], entry: PendingFsEntry): void {
+    let low = 0;
+    let high = queue.length;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      const current = queue[mid];
+      if (current === undefined || compareCodeUnit(entry.sortKey, current.sortKey) < 0) {
+        high = mid;
+      } else {
+        low = mid + 1;
+      }
+    }
+    queue.splice(low, 0, entry);
+  }
+
+  async function enqueueDirectory(dir: string): Promise<void> {
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
-    const sorted = entries.slice().sort((a, b) => compareCodeUnit(a.name, b.name));
-    for (const entry of sorted) {
+    for (const entry of entries) {
       const absolute = join(dir, entry.name);
       const relPath = normalizePath(relative(cwd, absolute));
       if (shouldExclude(relPath)) {
         continue;
       }
+      const kind = entry.isDirectory() ? "directory" : "file";
+      const sortKey = kind === "directory" ? `${relPath}/` : relPath;
       if (!isSafeRelativePath(relPath)) {
-        recordRisk({ area: "unsafe path skipped", summary: `Skipped unsafe path: ${relPath}` });
+        unsafePaths.add(relPath);
+        insertPending(pending, { relPath, absolute, kind, sortKey });
         continue;
       }
       if (entry.isSymbolicLink()) {
-        recordRisk({ area: "symlink skipped", summary: `Skipped symlinked path: ${relPath}` });
+        symlinkPaths.add(relPath);
+        insertPending(pending, { relPath, absolute, kind: "file", sortKey: relPath });
         continue;
       }
-      if (entry.isDirectory()) {
-        await walk(absolute);
-      } else if (entry.isFile()) {
-        try {
-          const st = await stat(absolute);
-          candidates.push({ relPath, absolute, size: st.size });
-        } catch {
-          // Ignore files that disappeared during the walk.
-        }
+      if (entry.isDirectory() || entry.isFile()) {
+        insertPending(pending, { relPath, absolute, kind, sortKey });
       }
     }
   }
 
-  await walk(cwd);
+  await enqueueDirectory(cwd);
+  while (pending.length > 0) {
+    const entry = pending.shift();
+    if (!entry) {
+      break;
+    }
+    if (unsafePaths.has(entry.relPath)) {
+      recordRisk({ area: "unsafe path skipped", summary: `Skipped unsafe path: ${entry.relPath}` });
+      continue;
+    }
+    if (symlinkPaths.has(entry.relPath)) {
+      recordRisk({ area: "symlink skipped", summary: `Skipped symlinked path: ${entry.relPath}` });
+      continue;
+    }
+    if (entry.kind === "directory") {
+      await enqueueDirectory(entry.absolute);
+      continue;
+    }
+    if (candidates.length >= maxFilesScanned) {
+      hitFileCap = true;
+      break;
+    }
+    try {
+      const st = await stat(entry.absolute);
+      if (st.isFile()) {
+        candidates.push({ relPath: entry.relPath, absolute: entry.absolute, size: st.size });
+      }
+    } catch {
+      // Ignore files that disappeared during the walk.
+    }
+  }
   candidates.sort((a, b) => compareCodeUnit(a.relPath, b.relPath));
 
-  const truncated = candidates.length > maxFilesScanned;
-  const files = candidates.slice(0, maxFilesScanned);
-  const result: DiscoveryResult = { files, scannedFiles: files.length };
-  if (truncated) {
+  const result: DiscoveryResult = { files: candidates, scannedFiles: candidates.length };
+  if (hitFileCap) {
     result.truncationReason = "file-cap";
   }
   return result;
@@ -657,8 +711,11 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     if (file.relPath === "package.json") {
       continue;
     }
+    const isSourceFile = hasSourceExtension(file.relPath);
     if (isTestFile(file.relPath)) {
-      testPaths.push(file.relPath);
+      if (isSourceFile) {
+        testPaths.push(file.relPath);
+      }
       continue;
     }
     const normalized = normalizePath(file.relPath);
@@ -668,7 +725,7 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     if (isEntry) {
       addEntrypoint({ path: file.relPath, kind });
       addModule({ path: file.relPath, kind });
-    } else if (SOURCE_EXTENSIONS[extname(file.relPath).toLowerCase()] === true) {
+    } else if (isSourceFile) {
       addModule({ path: file.relPath, kind });
     }
   }
@@ -729,7 +786,7 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
           mod.summary = summary;
         }
         const previousTests = (previous.tests ?? [])
-          .filter((testPath) => filePaths.has(testPath))
+          .filter((testPath) => filePaths.has(testPath) && hasSourceExtension(testPath))
           .sort(compareCodeUnit);
         for (const testPath of previousTests) {
           if (reserveIndexedPath(testPath)) {

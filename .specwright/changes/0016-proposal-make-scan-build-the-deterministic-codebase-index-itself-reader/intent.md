@@ -15,7 +15,7 @@ Internal Specwright maintainers implementing the next scan/index increment; end 
 
 - Adding a new required `--index` subcommand.
 - Making agents paste or hand-edit fingerprint JSON in `codebase-index.json`.
-- Preserving semantic fields from an existing index that has hard validation errors (`SW100`-`SW105`, `SW107`-`SW109`).
+- Preserving semantic fields from an existing index that has hard validation errors (`SW100`, `SW101`, `SW103`-`SW105`, `SW107`-`SW109`).
 - Classifying every file in a tree (binary, vendor, generated, symlinked, and oversized files are skipped).
 - Requiring Git for correctness (non-Git projects use deterministic filesystem fallback).
 - Moving OMP-specific parallel scout wording into core scan prompts.
@@ -85,8 +85,8 @@ Command flow:
 1. Ensure project artifacts exactly as current code does (`src/core/commands.ts:598-623`).
 2. Read existing `.specwright/project/codebase-index.json` if present.
 3. Validate the existing index.
-4. If validation has hard shape/path/fingerprint errors (`SW100`-`SW105`, `SW107`-`SW109`), do not preserve semantic fields from the invalid object. Build from scratch and surface validation issues in the prompt.
-5. Treat missing-file warnings (`SW106`) as non-blocking for preservation.
+4. If validation has hard shape/path/fingerprint errors (`SW100`, `SW101`, `SW103`-`SW105`, `SW107`-`SW109`), do not preserve semantic fields from the invalid object. Build from scratch and surface validation issues in the prompt.
+5. Treat warning-only validation issues (SW102, SW106) as non-blocking for preservation.
 6. Run `buildCodebaseIndex({ cwd: ctx.cwd, now: ctx.now(), existing })`.
 7. Write `codebase-index.json` only when `BuildCodebaseIndexResult.changed` is true, the file is missing, or `--force` is supplied.
 8. Return JSON payload fields that make the state machine observable: `indexUpdated`, `staleFiles`, `scannedFiles`, `indexedFiles`, `truncated`.
@@ -116,14 +116,18 @@ Initial caps:
 
 ```ts
 maxFilesScanned = 50000;
+maxGitLsFilesBytes = 64 * 1024 * 1024;
 maxIndexedFiles = 5000;
 maxFingerprintBytesPerFile = 1048576;
+maxRisksPerArea = 64;
 ```
 
 Cap behavior:
 
-- If `maxFilesScanned` is exceeded, stop scanning deterministically and record `area: "scan coverage"`.
+- If `maxFilesScanned` is exceeded, stop discovery after the first omitted eligible regular file and record `area: "scan coverage"`.
+- If `maxGitLsFilesBytes` is exceeded, stop Git discovery, keep paths already read from Git, do not fall back to filesystem recursion, and record `area: "scan coverage"`.
 - If `maxIndexedFiles` is exceeded, truncate indexed candidates deterministically and record `area: "scan coverage"`.
+- If `maxRisksPerArea` is exceeded for an area, append one omitted-risk sentinel for that area and set the result truncated flag.
 - If an otherwise indexed file exceeds `maxFingerprintBytesPerFile`, skip its fingerprint and record `area: "large file skipped"`.
 
 ## Deterministic index builder
@@ -138,8 +142,10 @@ export interface BuildCodebaseIndexOptions {
   existing?: CodebaseIndex;
   limits?: Partial<{
     maxFilesScanned: number;
+    maxGitLsFilesBytes: number;
     maxIndexedFiles: number;
     maxFingerprintBytesPerFile: number;
+    maxRisksPerArea: number;
   }>;
 }
 
@@ -169,7 +175,7 @@ Builder rules:
 - Remove fingerprints for paths no longer indexed.
 - Add deterministic risk entries for truncation/caps.
 - Preserve manually authored risks only when their `area` is not reserved.
-- Reserved deterministic risk areas: `scan coverage`, `large file skipped`, `symlink skipped`.
+- Reserved deterministic risk areas: scan coverage, large file skipped, symlink skipped, unsafe path skipped.
 - Use streaming SHA-256 for fingerprinting in this module instead of extending `computeFileFingerprint()` as-is, because `computeFileFingerprint()` currently reads the entire file into memory (`src/core/json.ts:17-19`).
 
 Deterministic extraction targets:

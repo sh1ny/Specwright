@@ -5,12 +5,12 @@
 - `package.json` exposes the `specwright` bin and Bun scripts (`package.json:6-13`).
 - `bin/specwright.mjs` is the published Node wrapper; it invokes `bun src/cli.ts` and fails clearly when Bun is absent (`bin/specwright.mjs:10-17`).
 - `src/cli.ts` is the Bun CLI entrypoint; it prints help, delegates to `runSpecwrightCommand`, optionally prints generated prompts, and exits with the command result (`src/cli.ts:1-26`).
-- `src/core/commands.ts` exports the core dispatcher `runSpecwrightCommand` and `renderHelp` (`src/core/commands.ts:1451-1486`).
+- `src/core/commands.ts` exports the core dispatcher `runSpecwrightCommand` and `renderHelp` (`src/core/commands.ts:1482-1517`).
 - `src/runtime/omp/extension.ts` is the OMP extension entrypoint; generated `.omp/extensions/specwright/index.ts` re-exports it (`src/runtime/omp/extension.ts:7`, `src/runtime/omp/install.ts:31-38`).
 
 ## Core modules
 
-- `src/core/commands.ts` — command kernel, argument parsing, scan/index refresh, command dispatch, and prompt selection. Public commands: `init`, `status`, `scan`, `new`, `discuss`, `research`, `plan`, `tasks`, `execute`, `verify`, `checkpoint`/`commit`, `handoff`, `pack`, `config`, `publish`, `complete` (`src/core/commands.ts:1451-1478`).
+- `src/core/commands.ts` — command kernel, argument parsing, scan/index refresh, command dispatch, and prompt selection. Public commands: `init`, `status`, `scan`, `new`, `discuss`, `research`, `plan`, `tasks`, `execute`, `verify`, `checkpoint`/`commit`, `handoff`, `pack`, `config`, `publish`, `complete` (`src/core/commands.ts:1482-1508`).
 - `src/core/codebase-index.ts` — command-owned deterministic codebase map builder; discovers files through Git or filesystem fallback, classifies entrypoints/modules/tests, derives package scripts, records risks, and fingerprints indexed files.
 - `src/core/state.ts` — default config/state, change validation, task parsing/sync, drift detection, config/state load/save, current-change resolution (`src/core/state.ts:57-87,124-279,299-421`).
 - `src/core/validators.ts` — config validation, codebase-index validation, change validation, observed-output detection, validation report rendering (`src/core/validators.ts:73-99,100-308,408-493`).

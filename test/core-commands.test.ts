@@ -2907,7 +2907,7 @@ test("scan preserves SW106 warnings while rebuilding deterministic data", async 
   await writeFile(
     indexPath,
     JSON.stringify(
-      { version: 1, generatedAt: ctx.now().toISOString(), entrypoints: [], modules: [{ path: "src/dir" }], commands: [], verification: [], risks: [], fingerprints: {} },
+      { version: 1, generatedAt: ctx.now().toISOString(), entrypoints: [], modules: [{ path: "src/dir" }], commands: [], verification: [], risks: [{ area: "manual risk", summary: "preserved" }], fingerprints: {} },
       null,
       2,
     ),
@@ -2918,13 +2918,22 @@ test("scan preserves SW106 warnings while rebuilding deterministic data", async 
   expect(result.ok).toBe(true);
   expect(result.prompt).toContain("references non-file path: src/dir");
   const payload = JSON.parse(result.summary);
+  const validationIssues = payload.validation.issues as Array<{ level: string; code: string; message: string }>;
+  expect(payload.validation.ok).toBe(true);
+  expect(validationIssues).toContainEqual(
+    expect.objectContaining({ level: "warning", code: "SW106", message: expect.stringContaining("src/dir") }),
+  );
+  expect(validationIssues.some((issue) => issue.level === "error")).toBe(false);
+  expect(result.prompt).not.toContain("Hard validation errors");
   expect(payload.indexUpdated).toBe(true);
 
   const rebuilt = JSON.parse(await readFile(indexPath, "utf8"));
+  expect(rebuilt.risks).toContainEqual(expect.objectContaining({ area: "manual risk", summary: "preserved" }));
   expect(rebuilt.modules.some((mod: { path: string }) => mod.path === "src/dir")).toBe(false);
   expect(rebuilt.entrypoints.some((entry: { path: string }) => entry.path === "package.json")).toBe(true);
 
 });
+
 test("scan --map prompt focuses only on map artifacts", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-scan-map-prompt-"));
   const ctx = testContext(cwd);
@@ -3073,6 +3082,7 @@ test("buildCodebaseIndex records deterministic scan coverage risk when scanned f
   const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
   expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 1 exceeded"));
 });
+
 test("buildCodebaseIndex filesystem fallback applies scan cap in global path order", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fs-global-cap-"));
   await mkdir(join(cwd, "a"), { recursive: true });
@@ -3092,6 +3102,30 @@ test("buildCodebaseIndex filesystem fallback applies scan cap in global path ord
   const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
   expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 1 exceeded"));
 });
+test("buildCodebaseIndex filesystem fallback stops after first omitted regular file", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-fs-stop-cap-"));
+  await writeFile(join(cwd, "a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "b.ts"), "export const b = 2;\n", "utf8");
+  await symlink("a.ts", join(cwd, "z-link.ts"));
+
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxFilesScanned: 1 },
+  });
+
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  const scanCoverageSummaries = result.index.risks?.filter((risk) => risk.area === "scan coverage").map((risk) => risk.summary ?? "") ?? [];
+
+  expect(result.truncated).toBe(true);
+  expect(result.scannedFiles).toBe(1);
+  expect(modulePaths).toEqual(["a.ts"]);
+  expect(modulePaths).not.toContain("b.ts");
+  expect(result.index.fingerprints?.["b.ts"]).toBeUndefined();
+  expect(result.index.risks?.some((risk) => risk.area === "symlink skipped")).toBe(false);
+  expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("Scanned file cap of 1 exceeded"));
+});
+
 test("buildCodebaseIndex bounds repeated symlink risks", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-symlink-risks-"));
   await mkdir(join(cwd, "src"), { recursive: true });
@@ -3580,6 +3614,46 @@ test("buildCodebaseIndex treats root test directories as tests", async () => {
   expect(standaloneTest?.kind).toBe("test");
   expect(normalRootTestModules).toEqual([]);
 });
+test("buildCodebaseIndex excludes non-source fixtures inside test directories from modules", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-test-fixtures-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "test", "fixtures"), { recursive: true });
+  await mkdir(join(cwd, "__tests__", "data"), { recursive: true });
+  await writeFile(join(cwd, "src", "lib.ts"), "export const lib = 1;\n", "utf8");
+  await writeFile(join(cwd, "test", "lib.test.ts"), "import '../src/lib';\n", "utf8");
+  await writeFile(join(cwd, "test", "fixtures", "sample.json"), "{\"x\":1}\n", "utf8");
+  await writeFile(join(cwd, "test", "fixtures", "notes.txt"), "hello\n", "utf8");
+  await writeFile(join(cwd, "__tests__", "data", "schema.yaml"), "x: 1\n", "utf8");
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+  const libModule = result.index.modules?.find((mod) => mod.path === "src/lib.ts");
+
+  expect(modulePaths).toContain("src/lib.ts");
+  expect(libModule?.tests).toContain("test/lib.test.ts");
+  for (const fixturePath of ["test/fixtures/sample.json", "test/fixtures/notes.txt", "__tests__/data/schema.yaml"]) {
+    expect(modulePaths).not.toContain(fixturePath);
+    expect(result.index.fingerprints?.[fixturePath]).toBeUndefined();
+  }
+
+  const rebuilt = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    existing: {
+      version: 1,
+      entrypoints: [],
+      modules: [{ path: "src/lib.ts", tests: ["test/fixtures/sample.json"] }],
+      commands: [],
+      verification: [],
+      risks: [],
+      fingerprints: {},
+    },
+  });
+  const rebuiltLibModule = rebuilt.index.modules?.find((mod) => mod.path === "src/lib.ts");
+  expect(rebuiltLibModule?.tests ?? []).not.toContain("test/fixtures/sample.json");
+  expect(rebuilt.index.fingerprints?.["test/fixtures/sample.json"]).toBeUndefined();
+});
+
 
 test("buildCodebaseIndex does not mark exact scan cap as truncated", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-exact-scan-cap-"));
@@ -3679,11 +3753,14 @@ test("buildCodebaseIndex keeps Git discovery results when git output byte cap is
   expect(result.truncated).toBe(true);
   expect(modulePaths).toContain("src/tracked.ts");
   expect(result.index.fingerprints?.["src/tracked.ts"]).toBeDefined();
+  expect(modulePaths).not.toContain("src/zzz.ts");
+  expect(result.index.fingerprints?.["src/zzz.ts"]).toBeUndefined();
   expect(modulePaths).not.toContain("ignored.ts");
   expect(result.index.fingerprints?.["ignored.ts"]).toBeUndefined();
   expect(scanCoverageSummaries).toContainEqual(expect.stringContaining("git ls-files output exceeded"));
   expect(scanCoverageSummaries).not.toContainEqual(expect.stringContaining("Scanned file cap"));
 });
+
 
 test("buildCodebaseIndex Git discovery skips unsafe paths before indexing", async () => {
   const cwd = await initGitRepo("specwright-build-index-git-unsafe-");

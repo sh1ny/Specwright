@@ -257,6 +257,29 @@ test("validateCodebaseIndex reports non-string optional semantic fields", async 
   expect(messages).toContain("risks[0] field summary must be a string.");
   await rm(cwd, { recursive: true, force: true });
 });
+test("validateCodebaseIndex reports SW102 generatedAt type drift as a warning", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-index-generated-at-warning-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "entry.ts"), "export default 1;\n", "utf8");
+
+  const report = await validateCodebaseIndex(cwd, {
+    version: 1,
+    generatedAt: 123,
+    entrypoints: [{ path: "src/entry.ts" }],
+    modules: [],
+    commands: [],
+    verification: [],
+    risks: [],
+  });
+
+  expect(report.ok).toBe(true);
+  expect(report.issues).toContainEqual(
+    expect.objectContaining({ level: "warning", code: "SW102", message: expect.stringContaining("generatedAt must be a string") }),
+  );
+  expect(report.issues.some((issue) => issue.level === "error" && issue.code === "SW102")).toBe(false);
+  await rm(cwd, { recursive: true, force: true });
+});
+
 
 
 test("validateCodebaseIndex warns when listed paths do not exist", async () => {
