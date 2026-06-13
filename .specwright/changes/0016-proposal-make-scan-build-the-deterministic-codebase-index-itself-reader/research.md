@@ -8,7 +8,7 @@
 
 - Before this change, `specwright scan` ensured prose project artifacts and created an object-shaped `codebase-index.json`; refresh behavior only considered paths already recorded in the existing index.
 - The old refresh prompt made `codebase-index.json` partly agent-owned by asking the agent to copy checksum JSON into the artifact.
-- Existing validation already separated hard shape/path/fingerprint errors from missing-file warnings, which allowed scan to rebuild from scratch on poisoned indexes while preserving valid semantic fields.
+- Existing validation separated hard shape/path/fingerprint errors from missing-file warnings; this change rebuilds deterministic data from scratch on hard errors and does not preserve semantic fields from invalid indexes.
 - Prompt tests already protected the core/OMP boundary, so OMP scout wording had to remain in `src/runtime/omp/prompts.ts`.
 
 ### Implemented branch evidence

@@ -229,130 +229,130 @@
   ],
   "fingerprints": {
     "bin/specwright.mjs": {
-      "mtime": 1780953252872.955,
+      "mtime": 0,
       "size": 681,
       "checksum": "acc895450d6f0357c63026ab210d7c8afce1b5f6311505e7b7341c8a53a3912d"
     },
     "package.json": {
-      "mtime": 1781279808957.7588,
+      "mtime": 0,
       "size": 471,
       "checksum": "9b50471d92a9713c3f58488e2af1a9d0f1dbbe55b16228a42e219975fb10f9c9"
     },
     "src/cli.ts": {
-      "mtime": 1780953707267.4595,
+      "mtime": 0,
       "size": 575,
       "checksum": "81242d991f68c9ba7c48f189180fbf603cbde1cbd94e698a04d8f417b2cc8928"
     },
     "src/core/codebase-index.ts": {
-      "mtime": 1781362715546.687,
-      "size": 22584,
-      "checksum": "082f561091467d23faa5a9cf368a1e132f56e7fea81902c1c7da4a3ff1ddcfdd"
+      "mtime": 0,
+      "size": 23013,
+      "checksum": "5957e5113401372b42539c057e14072db8e15ea0f59bcf3541fb9accf5067ad7"
     },
     "src/core/commands.ts": {
-      "mtime": 1781359932097.5178,
+      "mtime": 0,
       "size": 63206,
       "checksum": "876b5e79650893b9653ea63d8774eb9d1993ba220dff9c3c7220dec89cb5d45a"
     },
     "src/core/git.ts": {
-      "mtime": 1781279808957.7588,
+      "mtime": 0,
       "size": 10977,
       "checksum": "c848c3b6aa37cdbdfd5fe5e0319b27447dbbc167eee604e27e3c8e48770af7e4"
     },
     "src/core/json.ts": {
-      "mtime": 1781305743049.888,
+      "mtime": 0,
       "size": 1787,
       "checksum": "0fd9a8d5bd0e50f82785973689d69561758b09debbf0d75cdfbda39ec4a7217f"
     },
     "src/core/paths.ts": {
-      "mtime": 1780953289836.9673,
+      "mtime": 0,
       "size": 1114,
       "checksum": "e74aa67565084548a457865d9cbfe1076905f07c7c8db91011aceadb6ece12be"
     },
     "src/core/prompts.ts": {
-      "mtime": 1781362837828.136,
+      "mtime": 0,
       "size": 10900,
       "checksum": "b9df56af57f5534795ea93d6abe92a0789530b1d8b91a6ebe5d0fb9fb3dceca0"
     },
     "src/core/slug.ts": {
-      "mtime": 1781279808957.7588,
+      "mtime": 0,
       "size": 587,
       "checksum": "e4d60c2ba52826413095ffd49438da90a1265297938efe546af677657d07060e"
     },
     "src/core/state.ts": {
-      "mtime": 1781279808957.7588,
+      "mtime": 0,
       "size": 13347,
       "checksum": "80911d8c296625c849ef16f2f2f1cd37282f78bc77ac6814171c5d7904f14de3"
     },
     "src/core/types.ts": {
-      "mtime": 1781279808957.7588,
+      "mtime": 0,
       "size": 3802,
       "checksum": "d143e7c37058bdacd752bc004d580e158a7f14b0a6abec0bbffd970fdb5254fd"
     },
     "src/core/validators.ts": {
-      "mtime": 1781349854092.4036,
+      "mtime": 0,
       "size": 17467,
       "checksum": "2efe112281ef842981380519ade34c5082206bd0859e150cdd05302a4dbd1f50"
     },
     "src/runtime/omp/args.ts": {
-      "mtime": 1781279808957.7588,
+      "mtime": 0,
       "size": 1021,
       "checksum": "03b5b1c8ded746a99f20cdc63b9831c333bb2ab67894958c8f9d9a103d1cdef4"
     },
     "src/runtime/omp/extension.ts": {
-      "mtime": 1781190030932.0422,
+      "mtime": 0,
       "size": 7951,
       "checksum": "d535f1849c33f1e56708a019b4d95fafbcc5c1ac5d1294ef7ad96cc780a2a4ba"
     },
     "src/runtime/omp/install.ts": {
-      "mtime": 1781119519629.5776,
+      "mtime": 0,
       "size": 7122,
       "checksum": "2e8186fa8d8eb12aa928f7284aeab96e7eaf4ce4abae3b33a5a78f12b8f7a70f"
     },
     "src/runtime/omp/prompts.ts": {
-      "mtime": 1781362837832.1653,
-      "size": 5376,
-      "checksum": "e3eb15526b56849c22c17e22c72ba3e1b00b2ddd3e479be5cdbcb5cceeea00e5"
+      "mtime": 0,
+      "size": 5551,
+      "checksum": "0f4e86132f4fb4e0a89c92872ec57051dd0484348bf38759e550347436348b3b"
     },
     "src/runtime/omp/status.ts": {
-      "mtime": 1781279808957.7588,
+      "mtime": 0,
       "size": 8605,
       "checksum": "11964ad886488ff034499409feedde0702b780f1990e1852b36933517870f084"
     },
     "src/runtime/omp/types.ts": {
-      "mtime": 1781102286058.157,
+      "mtime": 0,
       "size": 2580,
       "checksum": "b703f3e12f87c2c987c4ed48adbccd0e8a9c74c947c35d22bb4b1ba53fda3d25"
     },
     "test/core-commands.test.ts": {
-      "mtime": 1781362800736.6133,
-      "size": 160801,
-      "checksum": "68e41e177c090904367717929da86058f756d1701ce71174ef082bfda8e5cdcb"
+      "mtime": 0,
+      "size": 164445,
+      "checksum": "ada6d94947686e55ce8859d564cf014e909c3d6f92da157426aca7ef89237ca3"
     },
     "test/core-init.test.ts": {
-      "mtime": 1781102286058.157,
+      "mtime": 0,
       "size": 1308,
       "checksum": "8ec6d9d36f95288797633bf1cd18ebcbb1ba366c65e232c6454b42ddca21fb72"
     },
     "test/core-new.test.ts": {
-      "mtime": 1781205776087.9817,
+      "mtime": 0,
       "size": 7344,
       "checksum": "998e6539b64cd57ed2551556515a275f56cab83fc1ce19a098c6e88c38080511"
     },
     "test/core-prompts.test.ts": {
-      "mtime": 1781362852815.204,
-      "size": 31874,
-      "checksum": "d665e54e3ee5f92659193fd6680bca28dc66172572c9a7fee9ed3ab24ebdc227"
+      "mtime": 0,
+      "size": 32849,
+      "checksum": "cadf13d17b37e829585739a582b0d94ac130342ebf512a072f9c2dc2d780cc13"
     },
     "test/core-validators.test.ts": {
-      "mtime": 1781355373228.4434,
+      "mtime": 0,
       "size": 17269,
       "checksum": "1de3438d0e33c0337f3fc7aae671e7968aa5e0333c62862a6a8d01606899ce8b"
     },
     "test/omp-extension.test.ts": {
-      "mtime": 1781305743049.888,
-      "size": 74951,
-      "checksum": "27765f72a8754963e926b2cedb1a7730894a1eaf46cae6ed6b682cc937ee28a5"
+      "mtime": 0,
+      "size": 75188,
+      "checksum": "9a831f8b192aecddc66d6a84dff3593ad7e0ca6e355f60e8e56e8c03e5964f6d"
     }
   },
-  "generatedAt": "2026-06-13T15:02:23.528Z"
+  "generatedAt": "2026-06-13T15:38:24.184Z"
 }

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { buildCodebaseIndex } from "../src/core/codebase-index";
@@ -3041,6 +3041,34 @@ test("buildCodebaseIndex reports stale files and refreshes fingerprints when a s
   expect(second.index.fingerprints?.["test/cli.test.ts"]).toEqual(first.index.fingerprints?.["test/cli.test.ts"]);
 });
 
+test("buildCodebaseIndex keeps fingerprints stable when only filesystem mtime changes", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-stable-mtime-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ name: "demo", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "src", "cli.ts"), "console.log('hi');\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({ cwd, now });
+  const originalFingerprint = first.index.fingerprints?.["src/cli.ts"];
+  expect(originalFingerprint).toBeDefined();
+  expect(originalFingerprint?.mtime).toBe(0);
+
+  await utimes(
+    join(cwd, "src", "cli.ts"),
+    new Date("2030-01-01T00:00:00.000Z"),
+    new Date("2030-01-01T00:00:00.000Z"),
+  );
+
+  const second = await buildCodebaseIndex({ cwd, now, existing: first.index });
+  expect(second.changed).toBe(false);
+  expect(second.staleFiles).toEqual([]);
+  expect(second.index.fingerprints?.["src/cli.ts"]).toEqual(originalFingerprint);
+});
+
 test("buildCodebaseIndex removes fingerprints for paths no longer indexed", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-removed-"));
   await mkdir(join(cwd, "src"), { recursive: true });
@@ -3152,6 +3180,32 @@ test("buildCodebaseIndex skips oversized files and records a large file skipped 
   expect(result.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
   expect(result.index.fingerprints?.["src/small.ts"]).toBeDefined();
 });
+
+test("buildCodebaseIndex reports stale when a fingerprinted file becomes oversized", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-oversized-stale-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src", "huge.ts"), "export const huge = 1;\n", "utf8");
+
+  const now = new Date("2026-06-08T00:00:00.000Z");
+  const first = await buildCodebaseIndex({
+    cwd,
+    now,
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  expect(first.index.fingerprints?.["src/huge.ts"]).toBeDefined();
+
+  await writeFile(join(cwd, "src", "huge.ts"), "x".repeat(64), "utf8");
+  const second = await buildCodebaseIndex({
+    cwd,
+    now,
+    existing: first.index,
+    limits: { maxFingerprintBytesPerFile: 32 },
+  });
+  expect(second.staleFiles).toContain("src/huge.ts (changed)");
+  expect(second.changed).toBe(true);
+  expect(second.index.fingerprints?.["src/huge.ts"]).toBeUndefined();
+  expect(second.index.risks?.some((risk) => risk.area === "large file skipped")).toBe(true);
+});
 test("buildCodebaseIndex treats root test directories as tests", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-build-index-root-tests-"));
   await mkdir(join(cwd, "src"), { recursive: true });
@@ -3221,9 +3275,15 @@ test("buildCodebaseIndex deduplicates package and inferred entrypoints before ca
   );
   await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
 
-  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const result = await buildCodebaseIndex({
+    cwd,
+    now: new Date("2026-06-08T00:00:00.000Z"),
+    limits: { maxIndexedFiles: 2 },
+  });
   expect(result.index.entrypoints?.filter((entry) => entry.path === "src/cli.ts")).toHaveLength(1);
   expect(result.index.modules?.filter((mod) => mod.path === "src/cli.ts")).toHaveLength(1);
+  expect(result.truncated).toBe(false);
+  expect(result.indexedFiles).toBe(2);
 });
 
 test("buildCodebaseIndex uses Git discovery for tracked and untracked files while ignoring ignored files", async () => {
@@ -3245,6 +3305,32 @@ test("buildCodebaseIndex uses Git discovery for tracked and untracked files whil
   expect(result.index.fingerprints?.["src/tracked.ts"]).toBeDefined();
   expect(result.index.fingerprints?.["src/untracked.ts"]).toBeDefined();
   expect(result.index.fingerprints?.["ignored.ts"]).toBeUndefined();
+});
+
+test("buildCodebaseIndex ignores root package metadata excluded by Git discovery", async () => {
+  const cwd = await initGitRepo("specwright-build-index-ignored-package-");
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, ".gitignore"), "package.json\n", "utf8");
+  await writeFile(join(cwd, "src", "cli.ts"), "export const cli = 1;\n", "utf8");
+  await expectGit(cwd, ["add", ".gitignore", "src/cli.ts"]);
+  await expectGit(cwd, ["commit", "-m", "seed"]);
+  await writeFile(
+    join(cwd, "package.json"),
+    JSON.stringify({ main: "./src/cli.ts", scripts: { test: "bun test" } }),
+    "utf8",
+  );
+
+  const result = await buildCodebaseIndex({ cwd, now: new Date("2026-06-08T00:00:00.000Z") });
+  const entrypointPaths = result.index.entrypoints?.map((entry) => entry.path) ?? [];
+  const commandNames = result.index.commands?.map((command) => command.name) ?? [];
+  const verificationCommands = result.index.verification?.map((item) => item.command) ?? [];
+  const modulePaths = result.index.modules?.map((mod) => mod.path) ?? [];
+
+  expect(entrypointPaths).not.toContain("package.json");
+  expect(result.index.fingerprints?.["package.json"]).toBeUndefined();
+  expect(commandNames).not.toContain("test");
+  expect(verificationCommands).not.toContain("bun test");
+  expect(modulePaths).toContain("src/cli.ts");
 });
 
 test("buildCodebaseIndex sorts paths by code-unit order", async () => {

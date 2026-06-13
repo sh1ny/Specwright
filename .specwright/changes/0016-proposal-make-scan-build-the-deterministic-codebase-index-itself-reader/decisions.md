@@ -17,5 +17,5 @@
 
 ## Ready state
 
-- Ready for research once this discuss checkpoint is verified.
+- Current state: follow-up review remediation is complete after verification; no research-phase decisions remain open.
 

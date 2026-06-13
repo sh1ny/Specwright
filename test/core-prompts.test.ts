@@ -494,8 +494,16 @@ test("renderOmpScanPrompt includes parallel scout guidance for mapping subsystem
   expect(prompt).toContain("runtime adapters");
   expect(prompt).toContain("packs, templates, and agents");
   expect(prompt).toContain("fall back to sequential mapping");
-  expect(prompt).toContain("Ownership boundary and Agent contract sections");
-  expect(prompt).toContain("Merge scout findings into agent-owned prose artifacts only; read `codebase-index.json` for confirmed facts and record uncertainty in Open questions.");
+  expect(prompt).toContain(
+    "Give each scout the Context budget, Deterministic index state, Ownership boundary, and Discovery instructions sections",
+  );
+  expect(prompt).toContain(
+    "Do not give scouts the Agent contract or `Update these files` sections; scouts report findings only.",
+  );
+  expect(prompt).toContain(
+    "The parent agent merges scout findings into agent-owned prose artifacts only; read `codebase-index.json` for confirmed facts and record uncertainty in Open questions.",
+  );
+  expect(prompt).not.toContain("Give each scout the Ownership boundary and Agent contract sections");
   expect(prompt).not.toContain("bounded discovery and mapping contract");
   expect(prompt).not.toContain("Merge scout findings into `codebase-map.md` and `codebase-index.json`");
   expect(prompt).not.toContain("Merge scout findings into agent-owned prose artifacts only; read `codebase-index.json` and `codebase-index.json`");
@@ -511,6 +519,16 @@ test("renderOmpScanPrompt preserves deterministic state and OMP guidance in refr
   expect(prompt).toContain("OMP map guidance");
   expect(prompt).not.toContain("Refresh contract:");
   expect(prompt).not.toContain("## Current fingerprints");
-  expect(prompt).toContain("Merge scout findings into agent-owned prose artifacts only; read `codebase-index.json` for confirmed facts");
+  expect(prompt).toContain("The parent agent merges scout findings into agent-owned prose artifacts only; read `codebase-index.json` for confirmed facts");
   expect(prompt).not.toContain("Merge scout findings into `codebase-map.md` and `codebase-index.json`");
+});
+
+test("renderOmpScanPrompt keeps scouts read-only while parent owns prose edits", () => {
+  const config = defaultConfig("omp-scan-prompt-test");
+  const prompt = renderOmpScanPrompt({ config, map: true, refresh: false, deterministicSummary: scanSummary() });
+  expect(prompt).toContain("Update the agent-owned prose artifacts based on current code.");
+  expect(prompt).toContain(
+    "Do not give scouts the Agent contract or `Update these files` sections; scouts report findings only.",
+  );
+  expect(prompt).toContain("The parent agent merges scout findings into agent-owned prose artifacts only");
 });

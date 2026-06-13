@@ -1792,6 +1792,10 @@ test("OMP runtime scan prompt includes parallel scout map guidance", async () =>
   expect(result.prompt).toContain("fall back to sequential mapping");
   expect(result.prompt).toContain(".specwright/project/codebase-map.md under Open questions");
   expect(result.prompt).not.toContain(".specwright/project/scan.md");
+  expect(result.prompt).toContain(
+    "Do not give scouts the Agent contract or `Update these files` sections; scouts report findings only.",
+  );
+  expect(result.prompt).not.toContain("Ownership boundary and Agent contract sections");
 });
 
 test("CLI runtime scan prompt stays neutral without OMP map guidance", async () => {

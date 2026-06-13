@@ -116,7 +116,8 @@ async function streamFileFingerprint(
     for await (const chunk of stream) {
       hash.update(chunk as Buffer);
     }
-    return { mtime: stats.mtimeMs, size: stats.size, checksum: hash.digest("hex") };
+    // Codebase index fingerprints are content-stable; mtime is retained only for FileFingerprint compatibility.
+    return { mtime: 0, size: stats.size, checksum: hash.digest("hex") };
   } catch {
     return undefined;
   }
@@ -315,9 +316,9 @@ function packageEntrypointCandidates(
   pkg: PackageInfo,
   filePaths: ReadonlySet<string>,
 ): Array<{ path: string; kind?: string; summary?: string }> {
-  const entrypoints: Array<{ path: string; kind?: string; summary?: string }> = [
-    { path: "package.json", kind: "package" },
-  ];
+  const entrypoints: Array<{ path: string; kind?: string; summary?: string }> = filePaths.has("package.json")
+    ? [{ path: "package.json", kind: "package" }]
+    : [];
   if (typeof pkg.main === "string") {
     const path = normalizePackageEntrypointPath(pkg.main, filePaths);
     if (path !== undefined) {
@@ -473,37 +474,40 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
   }
 
   const filePaths = new Set(files.map((file) => file.relPath));
-  const pkg = await readPackageInfo(options.cwd);
+  const pkg = filePaths.has("package.json") ? await readPackageInfo(options.cwd) : undefined;
 
   const entrypoints: Array<{ path: string; kind?: string; summary?: string }> = [];
   const modules: Array<{ path: string; kind?: string; summary?: string; tests?: string[] }> = [];
   const commands: Array<{ name: string; summary?: string }> = [];
   const verification: Array<{ command: string; purpose?: string }> = [];
-  let indexedFiles = 0;
+  const countedIndexedPaths = new Set<string>();
   let indexedTruncated = false;
   type EntryPointRecord = NonNullable<CodebaseIndex["entrypoints"]>[number];
   type ModuleRecord = NonNullable<CodebaseIndex["modules"]>[number];
   const entrypointPaths = new Set<string>();
   const modulesByPath = new Map<string, ModuleRecord>();
 
-  function checkIndexedCap(): boolean {
-    if (indexedFiles >= limits.maxIndexedFiles) {
-      indexedTruncated = true;
+  function reserveIndexedPath(path: string): boolean {
+    if (countedIndexedPaths.has(path)) {
       return true;
     }
-    return false;
+    if (countedIndexedPaths.size >= limits.maxIndexedFiles) {
+      indexedTruncated = true;
+      return false;
+    }
+    countedIndexedPaths.add(path);
+    return true;
   }
 
   function addEntrypoint(entry: EntryPointRecord): void {
     if (entrypointPaths.has(entry.path)) {
       return;
     }
-    if (checkIndexedCap()) {
+    if (!reserveIndexedPath(entry.path)) {
       return;
     }
     entrypoints.push(entry);
     entrypointPaths.add(entry.path);
-    indexedFiles++;
   }
 
   function addModule(mod: ModuleRecord): ModuleRecord | undefined {
@@ -511,12 +515,11 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     if (existing) {
       return existing;
     }
-    if (checkIndexedCap()) {
+    if (!reserveIndexedPath(mod.path)) {
       return undefined;
     }
     modules.push(mod);
     modulesByPath.set(mod.path, mod);
-    indexedFiles++;
     return mod;
   }
 
@@ -555,10 +558,9 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     let associated = false;
     if (candidate) {
       associated = true;
-      if (!checkIndexedCap()) {
+      if (reserveIndexedPath(testPath)) {
         candidate.tests = candidate.tests ?? [];
         candidate.tests.push(testPath);
-        indexedFiles++;
       }
     }
     if (!associated) {
@@ -663,6 +665,10 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     const file = fileByPath.get(relPath);
     if (file && file.size > limits.maxFingerprintBytesPerFile) {
       risks.push({ area: "large file skipped", summary: `Skipped fingerprint for large file: ${relPath}` });
+      const previous = previousFingerprints[relPath];
+      if (isFileFingerprint(previous)) {
+        staleFiles.push(`${relPath} (changed)`);
+      }
       continue;
     }
     const absolute = resolve(options.cwd, relPath);
@@ -670,10 +676,7 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     if (fp) {
       fingerprints[relPath] = fp;
       const previous = previousFingerprints[relPath];
-      if (
-        isFileFingerprint(previous) &&
-        (previous.mtime !== fp.mtime || previous.size !== fp.size || previous.checksum !== fp.checksum)
-      ) {
+      if (isFileFingerprint(previous) && (previous.size !== fp.size || previous.checksum !== fp.checksum)) {
         staleFiles.push(`${relPath} (changed)`);
       }
     } else {
@@ -717,7 +720,7 @@ export async function buildCodebaseIndex(options: BuildCodebaseIndexOptions): Pr
     changed,
     staleFiles,
     scannedFiles,
-    indexedFiles,
+    indexedFiles: countedIndexedPaths.size,
     truncated: scanTruncated || indexedTruncated,
   };
 }

@@ -2,7 +2,7 @@
 
 Scope: `main...refactor/0016-proposal-make-scan-build-the-deter`
 
-Verdict: **FIX BEFORE MERGE** until the follow-up review findings below are resolved.
+Verdict: **READY FOR RE-REVIEW** after follow-up remediation; merge still requires a fresh review verdict.
 
 Reviewed the current PR scope via 8 parallel reviewer agents. This artifact supersedes the earlier 21-file review snapshot.
 
@@ -104,14 +104,25 @@ Reviewed the current PR scope via 8 parallel reviewer agents. This artifact supe
 
 ## Resolution status
 
-- [ ] Deterministic ordering depends on host locale.
-- [ ] Root test directories are not classified as tests.
-- [ ] Exact scan cap is reported as truncation.
-- [ ] Duplicate entrypoints inflate indexed cap accounting.
-- [ ] Large-file risks are emitted for unindexed files.
-- [ ] Risk ordering is not final after fingerprint-time additions.
-- [ ] Index-builder regression tests miss review cases.
-- [ ] Core scan prompt has overbroad ownership wording.
-- [ ] OMP scout guidance references stale contract text.
-- [ ] Change planning artifacts still describe Git discovery as future work.
-- [ ] Project scan prose still describes manual index ownership.
+- [x] Deterministic ordering depends on host locale.
+- [x] Root test directories are not classified as tests.
+- [x] Exact scan cap is reported as truncation.
+- [x] Duplicate entrypoints inflate indexed cap accounting.
+- [x] Large-file risks are emitted for unindexed files.
+- [x] Risk ordering is not final after fingerprint-time additions.
+- [x] Index-builder regression tests miss review cases.
+- [x] Core scan prompt has overbroad ownership wording.
+- [x] OMP scout guidance references stale contract text.
+- [x] Change planning artifacts still describe Git discovery as future work.
+- [x] Project scan prose still describes manual index ownership.
+
+## Follow-up review remediation
+
+- [x] Unique indexed cap accounting.
+- [x] Oversized stale reporting.
+- [x] Ignored package metadata.
+- [x] Stable fingerprint mtimes.
+- [x] OMP read-only scouts.
+- [x] Verify/review consistency.
+- [x] Decisions ready state.
+- [x] Research invalid-index wording.
