@@ -17,6 +17,10 @@ export function projectDir(cwd: string): string {
   return join(specwrightDir(cwd), "project");
 }
 
+export function projectArtifactPath(cwd: string, name: string): string {
+  return join(projectDir(cwd), name);
+}
+
 export function changesDir(cwd: string): string {
   return join(specwrightDir(cwd), "changes");
 }

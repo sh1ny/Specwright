@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { CodebaseIndex } from "../src/core/codebase-index";
 import { runSpecwrightCommand } from "../src/core/commands";
 import { defaultConfig, findCurrentChange, upsertChange } from "../src/core/state";
-import { hasObservedOutput, validateChange, validateCodebaseIndex, validateSpecwrightConfig } from "../src/core/validators";
+import { hasObservedOutput, validateChange, validateCodebaseIndex, validateProject, validateSpecwrightConfig } from "../src/core/validators";
 
 test("validators reject duplicate task IDs", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-validators-"));
@@ -424,4 +424,87 @@ test("validateCodebaseIndex accepts a CodebaseIndex-typed object from the shared
   expect(report.ok).toBe(true);
   expect(report.issues).toEqual([]);
   await rm(cwd, { recursive: true, force: true });
+});
+test("validateProject accepts empty seeded project artifacts", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-validators-empty-"));
+  const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const report = await validateProject(cwd);
+  expect(report.ok).toBe(true);
+  expect(report.issues).toEqual([]);
+});
+
+test("validateProject reports duplicate roadmap IDs as SW201", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-validators-dup-roadmap-"));
+  const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright", "project", "roadmap.md"),
+    "# Roadmap\n\n## Items\n\n- [planned] R001: First\n- [planned] R001: Duplicate\n",
+    "utf8",
+  );
+  const report = await validateProject(cwd);
+  expect(report.ok).toBe(false);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW201" }));
+});
+
+test("validateProject reports current milestone mismatch as SW209", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-validators-bad-current-"));
+  const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright", "project", "milestones.md"),
+    "# Milestones\n\n## Items\n\n- [planned] M001: M1\n",
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, ".specwright", "project", "current-milestone.md"),
+    "# Current Milestone\n\nMilestone: M001\n",
+    "utf8",
+  );
+  const report = await validateProject(cwd);
+  expect(report.ok).toBe(false);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW209" }));
+});
+
+test("validateProject reports multiple active milestones as SW210", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-validators-multi-active-"));
+  const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright", "project", "milestones.md"),
+    "# Milestones\n\n## Items\n\n- [active] M001: M1\n  - Stage: building\n- [active] M002: M2\n  - Stage: building\n",
+    "utf8",
+  );
+  const report = await validateProject(cwd);
+  expect(report.ok).toBe(false);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW210" }));
+});
+
+test("validateProject reports progress missing references as SW212", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-validators-bad-progress-"));
+  const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright", "project", "progress.md"),
+    "# Progress\n\n## Entries\n\n- P0001 [note] 2026-06-08T00:00:00.000Z: Text\n  - Milestone: M001\n",
+    "utf8",
+  );
+  const report = await validateProject(cwd);
+  expect(report.ok).toBe(false);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW212" }));
+});
+
+test("validateProject reports duplicate learning IDs as SW214", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-validators-dup-learning-"));
+  const ctx = { cwd, runtime: "cli" as const, now: () => new Date("2026-06-08T00:00:00.000Z") };
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright", "project", "learnings.md"),
+    "# Learnings\n\n## Entries\n\n- L0001 2026-06-08T00:00:00.000Z: Topic — Summary\n- L0001 2026-06-08T00:00:00.000Z: Topic — Summary\n",
+    "utf8",
+  );
+  const report = await validateProject(cwd);
+  expect(report.ok).toBe(false);
+  expect(report.issues).toContainEqual(expect.objectContaining({ level: "error", code: "SW214" }));
 });

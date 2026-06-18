@@ -10,13 +10,22 @@ import {
   changesDir,
   configPath,
   packsDir,
+  projectArtifactPath,
   projectDir,
   specwrightDir,
   statePath,
 } from "./paths";
 import { renderCheckpointClause, renderContextBudget, renderDiscussPrompt, renderLifecycleSpawnStrategy, renderScanPrompt, renderSubagentRetryClause } from "./prompts";
+import {
+  PROJECT_ARTIFACTS,
+  ensureProjectStateArtifacts,
+  suggestNextProjectItem,
+  syncProjectStateFromArtifacts,
+  writeProjectStateArtifactsAndCache,
+  type ProjectSyncResult,
+} from "./project";
 import { renderOmpDiscussPrompt, renderOmpLifecycleSpawnStrategy, renderOmpScanPrompt, renderOmpSubagentRetryClause } from "../runtime/omp/prompts";
-import { slugify, nextChangeId } from "./slug";
+import { slugify, nextChangeId, nextRoadmapId, nextMilestoneId, nextProgressId, nextLearningId } from "./slug";
 import {
   defaultConfig,
   defaultState,
@@ -38,7 +47,15 @@ import type {
   ChangeState,
   CommandContext,
   CommandResult,
+  LearningEntry,
+  MilestoneStage,
+  MilestoneState,
   OnlineResearchMode,
+  ProgressEntry,
+  ProgressKind,
+  ProjectState,
+  RoadmapItemState,
+  RoadmapItemStatus,
   SpecwrightConfig,
   SpecwrightAgentName,
   SpecwrightMode,
@@ -64,6 +81,13 @@ interface ParsedArgs {
   summary?: string;
   online?: OnlineResearchMode;
   task?: string;
+  milestone?: string;
+  roadmap?: string;
+  change?: string;
+  projectKind?: string;
+  source?: string;
+  status?: string;
+  stage?: string;
   unknown?: string;
 }
 
@@ -72,6 +96,10 @@ const MODES = new Set<SpecwrightMode>(["lite", "full"]);
 const ONLINE_MODES = new Set<OnlineResearchMode>(["never", "ask", "auto", "require"]);
 const PUBLISH_MODES = new Set<WorkflowPublishMode>(["none", "push", "pr"]);
 const COMPLETE_MODES = new Set<WorkflowCompleteMode>(["none", "push", "pr", "merge"]);
+const ROADMAP_STATUSES = new Set<RoadmapItemStatus>(["planned", "active", "shipped", "cut"]);
+const MILESTONE_STATUSES = new Set<MilestoneState["status"]>(["planned", "active", "completed", "cut"]);
+const MILESTONE_STAGES = new Set<MilestoneStage>(["scoping", "building", "stabilizing", "shipped"]);
+const PROGRESS_KINDS = new Set<ProgressKind>(["note", "decision", "blocker", "metric"]);
 const CHECKPOINT_PHASES = new Set(["discuss", "research", "plan", "tasks", "verify", "handoff"]);
 const REQUEST_FILE_GLOB_PATTERN = /[*?\[\]{}]/;
 const MAX_REQUEST_FILE_BYTES = 64 * 1024;
@@ -90,14 +118,13 @@ const TEMPLATE_FILES = [
   "verify.md",
   "handoff.md",
 ] as const;
-
 function ok(summary: string, updates: Partial<CommandResult> = {}): CommandResult {
   return {
     ok: true,
     summary,
     filesCreated: updates.filesCreated ?? [],
     filesUpdated: updates.filesUpdated ?? [],
-    exitCode: 0,
+    exitCode: updates.exitCode ?? 0,
     ...(updates.prompt ? { prompt: updates.prompt } : {}),
     ...(updates.statusText ? { statusText: updates.statusText } : {}),
   };
@@ -201,6 +228,34 @@ function parseArgs(argv: string[]): ParsedArgs {
       } else {
         parsed.summary = value;
       }
+    } else if (arg === "--milestone") {
+      const value = rest[++index];
+      if (value === undefined || value.startsWith("--")) parsed.unknown = arg;
+      else parsed.milestone = value;
+    } else if (arg === "--roadmap") {
+      const value = rest[++index];
+      if (value === undefined || value.startsWith("--")) parsed.unknown = arg;
+      else parsed.roadmap = value;
+    } else if (arg === "--change") {
+      const value = rest[++index];
+      if (value === undefined || value.startsWith("--")) parsed.unknown = arg;
+      else parsed.change = value;
+    } else if (arg === "--kind") {
+      const value = rest[++index];
+      if (value === undefined || value.startsWith("--")) parsed.unknown = arg;
+      else parsed.projectKind = value;
+    } else if (arg === "--source") {
+      const value = rest[++index];
+      if (value === undefined || value.startsWith("--")) parsed.unknown = arg;
+      else parsed.source = value;
+    } else if (arg === "--status") {
+      const value = rest[++index];
+      if (value === undefined || value.startsWith("--")) parsed.unknown = arg;
+      else parsed.status = value;
+    } else if (arg === "--stage") {
+      const value = rest[++index];
+      if (value === undefined || value.startsWith("--")) parsed.unknown = arg;
+      else parsed.stage = value;
     } else if (arg?.startsWith("--")) {
       parsed.unknown = arg;
     } else if (arg) {
@@ -484,12 +539,14 @@ async function commandInit(ctx: CommandContext, args: ParsedArgs): Promise<Comma
 
   updated.push(...await copyBuiltInCorePack(ctx.cwd, args.force));
   created.push(...await ensureProjectFiles(ctx.cwd));
+  const projectArtifacts = await ensureProjectStateArtifacts(ctx.cwd);
+  created.push(...projectArtifacts.filesCreated);
+  updated.push(...projectArtifacts.filesUpdated);
   const config = await loadConfig(ctx.cwd);
   const needsRegen = await adapterNeedsRegeneration(ctx.cwd);
   updated.push(...await installOmpAdapter({ cwd: ctx.cwd, force: args.force, regenerateAdapter: needsRegen, config }));
   return ok("Initialized Specwright in .specwright and installed OMP adapter in .omp.", { filesCreated: created, filesUpdated: updated });
 }
-
 async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
   const config = await loadConfig(ctx.cwd);
   const state = await loadState(ctx.cwd);
@@ -500,19 +557,409 @@ async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<Com
   }
   const currentStatus = current?.status ?? null;
   const progress = taskProgress(current);
+  let projectStatePayload: { currentMilestoneId: string | null; roadmap: ReturnType<typeof projectStatusCounts>["roadmap"]; milestones: ReturnType<typeof projectStatusCounts>["milestones"]; progress: { total: number; recent: string[] }; learnings: { total: number }; issues: ValidationIssue[] } | undefined;
+  let projectSuffix = "";
+  const anyProjectArtifact = await Promise.all(
+    Object.values(PROJECT_ARTIFACTS).map(async (name) => {
+      try {
+        await access(projectArtifactPath(ctx.cwd, name));
+        return true;
+      } catch {
+        return false;
+      }
+    }),
+  ).then((results) => results.some(Boolean));
+  if (anyProjectArtifact) {
+    const projectSync = await syncProjectStateFromArtifacts(ctx.cwd, ctx.now(), { createMissing: false, writeCache: true });
+    const projectIssues = convertProjectIssues(projectSync.issues);
+    const hasProject = Object.keys(projectSync.project.milestones).length > 0 || Object.keys(projectSync.project.roadmapItems).length > 0;
+    if (hasProject || projectIssues.length > 0) {
+      const counts = projectStatusCounts(projectSync.project);
+      projectStatePayload = {
+        currentMilestoneId: projectSync.project.currentMilestoneId ?? null,
+        ...counts,
+        issues: projectIssues,
+      };
+      if (hasProject) {
+        const shipped = counts.roadmap.shipped;
+        const total = counts.roadmap.total;
+        projectSuffix = ` · milestone=${projectSync.project.currentMilestoneId ?? "none"} · roadmap=${shipped}/${total} shipped`;
+      }
+    }
+  }
   if (args.json) {
-    return ok(JSON.stringify({
+    const payload: Record<string, unknown> = {
       project: config.project.name,
       currentChange,
       changeCount: Object.keys(state.changes).length,
       currentStatus,
       tasks: progress,
-    }, null, 2));
+    };
+    if (projectStatePayload) payload.projectState = projectStatePayload;
+    return ok(JSON.stringify(payload, null, 2));
   }
   const taskSuffix = progress.total > 0 ? ` · tasks=${progress.done}/${progress.total}` : "";
-  return ok(`Specwright · ${config.project.name} · current=${currentChange ?? "none"} · changes=${Object.keys(state.changes).length}${taskSuffix}`, {
-    statusText: `Specwright · ${currentChange ?? "none"} · ${currentStatus ?? "idle"}${taskSuffix}`,
+  return ok(`Specwright · ${config.project.name} · current=${currentChange ?? "none"} · changes=${Object.keys(state.changes).length}${taskSuffix}${projectSuffix}`, {
+    statusText: `Specwright · ${currentChange ?? "none"} · ${currentStatus ?? "idle"}${taskSuffix}${projectSuffix}`,
   });
+}
+function requireSubcommand(args: ParsedArgs, command: string, allowed: readonly string[]): string | CommandResult {
+  const sub = args.positionals[0];
+  if (!sub || !allowed.includes(sub)) {
+    return fail(`Usage: specwright ${command} ${allowed.join("|")} [...]`);
+  }
+  return sub;
+}
+
+function projectSummary(project: ProjectState, issues: ValidationIssue[]): string {
+  const activeMilestones = Object.values(project.milestones).filter((m) => m.status === "active").length;
+  const totalMilestones = Object.keys(project.milestones).length;
+  const roadmapActive = Object.values(project.roadmapItems).filter((r) => r.status === "active").length;
+  const roadmapPlanned = Object.values(project.roadmapItems).filter((r) => r.status === "planned").length;
+  const roadmapTotal = Object.keys(project.roadmapItems).length;
+  const progressCount = Object.keys(project.progress).length;
+  const learningsCount = Object.keys(project.learnings).length;
+  const errorCount = issues.filter((i) => i.level === "error").length;
+  let summary = `Project · milestones=${activeMilestones}/${totalMilestones} · roadmap=${roadmapActive + roadmapPlanned}/${roadmapTotal} · progress=${progressCount} · learnings=${learningsCount}`;
+  if (errorCount > 0) summary += ` · ${errorCount} error(s)`;
+  return summary;
+}
+
+function projectJsonPayload(project: ProjectState, issues: ValidationIssue[]): { ok: boolean; project: ProjectState; issues: ValidationIssue[] } {
+  return { ok: !issues.some((i) => i.level === "error"), project, issues };
+}
+
+function convertProjectIssues(issues: import("./project").ProjectArtifactIssue[]): ValidationIssue[] {
+  return issues.map((issue) => ({
+    level: issue.level,
+    code: issue.code,
+    message: issue.message,
+    file: issue.file,
+  }));
+}
+
+function projectStatusCounts(project: ProjectState) {
+  const roadmap = Object.values(project.roadmapItems);
+  const milestones = Object.values(project.milestones);
+  return {
+    roadmap: {
+      total: roadmap.length,
+      active: roadmap.filter((r) => r.status === "active").length,
+      planned: roadmap.filter((r) => r.status === "planned").length,
+      shipped: roadmap.filter((r) => r.status === "shipped").length,
+      cut: roadmap.filter((r) => r.status === "cut").length,
+    },
+    milestones: {
+      total: milestones.length,
+      active: milestones.filter((m) => m.status === "active").length,
+      planned: milestones.filter((m) => m.status === "planned").length,
+      completed: milestones.filter((m) => m.status === "completed").length,
+      cut: milestones.filter((m) => m.status === "cut").length,
+    },
+    progress: {
+      total: Object.keys(project.progress).length,
+      recent: project.progressOrder.slice(-5),
+    },
+    learnings: {
+      total: Object.keys(project.learnings).length,
+    },
+  };
+}
+
+async function projectPointerSection(cwd: string): Promise<string> {
+  const paths: string[] = [];
+  for (const name of Object.values(PROJECT_ARTIFACTS)) {
+    if (await exists(projectArtifactPath(cwd, name))) {
+      paths.push(join(".specwright", "project", name));
+    }
+  }
+  if (paths.length === 0) return "";
+  return ["", "Optional project roadmap context:"].concat(paths.map((p) => `- ${p}`)).join("\n");
+}
+
+async function commandProject(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
+  const sub = requireSubcommand(args, "project", ["status", "sync"]);
+  if (typeof sub !== "string") return sub;
+  const { project, issues, filesCreated, filesUpdated } = await syncProjectStateFromArtifacts(ctx.cwd, ctx.now(), {
+    createMissing: sub === "sync",
+    writeCache: sub === "sync",
+  });
+  const validationIssues = convertProjectIssues(issues);
+  const hasErrors = validationIssues.some((i) => i.level === "error");
+  if (sub === "status") {
+    if (args.json) {
+      return ok(JSON.stringify(projectJsonPayload(project, validationIssues), null, 2), { exitCode: hasErrors ? 1 : 0 });
+    }
+    return ok(projectSummary(project, validationIssues), { exitCode: hasErrors ? 1 : 0 });
+  }
+  if (args.json) {
+    if (hasErrors) {
+      return fail(JSON.stringify({ ok: false, project, issues: validationIssues, filesCreated, filesUpdated }, null, 2), { filesCreated, filesUpdated });
+    }
+    return ok(JSON.stringify({ ok: true, project, filesCreated, filesUpdated }, null, 2), { filesCreated, filesUpdated });
+  }
+  if (hasErrors) {
+    return fail("Project sync failed validation.", { filesCreated, filesUpdated });
+  }
+  return ok("Synced project state.", { filesCreated, filesUpdated });
+}
+async function commandRoadmap(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
+  const sub = requireSubcommand(args, "roadmap", ["list", "add", "set-status", "move", "unassign"]);
+  if (typeof sub !== "string") return sub;
+  const isList = sub === "list";
+  const { project, issues } = await syncProjectStateFromArtifacts(ctx.cwd, ctx.now(), { createMissing: !isList, writeCache: false });
+  const validationIssues = convertProjectIssues(issues);
+  if (validationIssues.some((i) => i.level === "error")) {
+    return fail("Project validation failed.", { filesUpdated: [] });
+  }
+  if (sub === "list") {
+    if (args.json) {
+      return ok(JSON.stringify({ items: project.roadmapOrder.map((id) => project.roadmapItems[id]).filter(Boolean), issues: validationIssues }, null, 2));
+    }
+    return ok(`Roadmap · ${project.roadmapOrder.length} item(s)`);
+  }
+  if (sub === "add") {
+    const title = args.positionals.slice(1).join(" ").trim();
+    if (!title) return fail("Roadmap item title is required.");
+    if (args.milestone && !project.milestones[args.milestone]) {
+      return fail(`Milestone not found: ${args.milestone}`);
+    }
+    if (args.change && !(await stateHasChange(ctx.cwd, args.change))) {
+      return fail(`Change not found: ${args.change}`);
+    }
+    const id = nextRoadmapId(project.roadmapOrder);
+    const item: RoadmapItemState = {
+      id,
+      title,
+      status: "planned",
+      updatedAt: ctx.now().toISOString(),
+    };
+    if (args.milestone) item.milestoneId = args.milestone;
+    if (args.change) item.changeId = args.change;
+    project.roadmapItems[id] = item;
+    project.roadmapOrder.push(id);
+    if (args.milestone) {
+      const milestone = project.milestones[args.milestone];
+      if (milestone && !milestone.roadmapItemIds.includes(id)) {
+        milestone.roadmapItemIds.push(id);
+      }
+    }
+    const { filesUpdated } = await writeProjectStateArtifactsAndCache(ctx.cwd, project, ctx.now());
+    if (args.json) return ok(JSON.stringify({ project, item, filesUpdated }, null, 2));
+    return ok(`Created roadmap item ${id}: ${title}.`, { filesUpdated });
+  }
+  if (sub === "set-status") {
+    const id = args.positionals[1];
+    const status = args.positionals[2] as RoadmapItemStatus;
+    if (!id || !project.roadmapItems[id]) return fail(`Roadmap item not found: ${id ?? ""}`);
+    if (!status || !ROADMAP_STATUSES.has(status)) return fail(`Invalid status: ${status ?? ""}`);
+    const item = project.roadmapItems[id];
+    item.status = status;
+    item.updatedAt = ctx.now().toISOString();
+    const { filesUpdated } = await writeProjectStateArtifactsAndCache(ctx.cwd, project, ctx.now());
+    if (args.json) return ok(JSON.stringify({ project, item, filesUpdated }, null, 2));
+    return ok(`Set roadmap item ${id} to ${status}.`, { filesUpdated });
+  }
+  if (sub === "move") {
+    const id = args.positionals[1];
+    const milestoneId = args.milestone;
+    if (!id || !project.roadmapItems[id]) return fail(`Roadmap item not found: ${id ?? ""}`);
+    if (!milestoneId || !project.milestones[milestoneId]) return fail(`Milestone not found: ${milestoneId ?? ""}`);
+    const item = project.roadmapItems[id];
+    if (item.milestoneId) {
+      const old = project.milestones[item.milestoneId];
+      if (old) old.roadmapItemIds = old.roadmapItemIds.filter((rid) => rid !== id);
+    }
+    item.milestoneId = milestoneId;
+    item.updatedAt = ctx.now().toISOString();
+    const milestone = project.milestones[milestoneId];
+    if (!milestone.roadmapItemIds.includes(id)) milestone.roadmapItemIds.push(id);
+    const { filesUpdated } = await writeProjectStateArtifactsAndCache(ctx.cwd, project, ctx.now());
+    if (args.json) return ok(JSON.stringify({ project, item, filesUpdated }, null, 2));
+    return ok(`Moved roadmap item ${id} to milestone ${milestoneId}.`, { filesUpdated });
+  }
+  // unassign
+  const id = args.positionals[1];
+  if (!id || !project.roadmapItems[id]) return fail(`Roadmap item not found: ${id ?? ""}`);
+  const item = project.roadmapItems[id];
+  for (const milestone of Object.values(project.milestones)) {
+    milestone.roadmapItemIds = milestone.roadmapItemIds.filter((rid) => rid !== id);
+  }
+  delete item.milestoneId;
+  item.updatedAt = ctx.now().toISOString();
+  const { filesUpdated } = await writeProjectStateArtifactsAndCache(ctx.cwd, project, ctx.now());
+  if (args.json) return ok(JSON.stringify({ project, item, filesUpdated }, null, 2));
+  return ok(`Unassigned roadmap item ${id} from milestones.`, { filesUpdated });
+}
+
+async function commandMilestone(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
+  const sub = requireSubcommand(args, "milestone", ["list", "add", "start", "complete"]);
+  if (typeof sub !== "string") return sub;
+  const isList = sub === "list";
+  const { project, issues } = await syncProjectStateFromArtifacts(ctx.cwd, ctx.now(), { createMissing: !isList, writeCache: false });
+  const validationIssues = convertProjectIssues(issues);
+  if (validationIssues.some((i) => i.level === "error")) {
+    return fail("Project validation failed.", { filesUpdated: [] });
+  }
+  if (sub === "list") {
+    if (args.json) {
+      return ok(JSON.stringify({ items: project.milestoneOrder.map((id) => project.milestones[id]).filter(Boolean), issues: validationIssues }, null, 2));
+    }
+    return ok(`Milestones · ${project.milestoneOrder.length} item(s)`);
+  }
+  if (sub === "add") {
+    const title = args.positionals.slice(1).join(" ").trim();
+    if (!title) return fail("Milestone title is required.");
+    const stage = args.stage as MilestoneStage | undefined;
+    if (stage && !MILESTONE_STAGES.has(stage)) return fail(`Invalid stage: ${stage}`);
+    const id = nextMilestoneId(project.milestoneOrder);
+    const milestone: MilestoneState = {
+      id,
+      title,
+      status: "planned",
+      stage: stage ?? "scoping",
+      roadmapItemIds: [],
+      updatedAt: ctx.now().toISOString(),
+    };
+    project.milestones[id] = milestone;
+    project.milestoneOrder.push(id);
+    const { filesUpdated } = await writeProjectStateArtifactsAndCache(ctx.cwd, project, ctx.now());
+    if (args.json) return ok(JSON.stringify({ project, milestone, filesUpdated }, null, 2));
+    return ok(`Created milestone ${id}: ${title}.`, { filesUpdated });
+  }
+  if (sub === "start") {
+    const id = args.positionals[1];
+    if (!id || !project.milestones[id]) return fail(`Milestone not found: ${id ?? ""}`);
+    const activeOther = Object.values(project.milestones).some((m) => m.id !== id && m.status === "active");
+    if (activeOther) return fail("Another milestone is already active.");
+    const milestone = project.milestones[id];
+    milestone.status = "active";
+    if (milestone.stage !== "stabilizing") milestone.stage = "building";
+    milestone.updatedAt = ctx.now().toISOString();
+    project.currentMilestoneId = id;
+    const { filesUpdated } = await writeProjectStateArtifactsAndCache(ctx.cwd, project, ctx.now());
+    if (args.json) return ok(JSON.stringify({ project, milestone, filesUpdated }, null, 2));
+    return ok(`Started milestone ${id}.`, { filesUpdated });
+  }
+  // complete
+  const id = args.positionals[1];
+  if (!id || !project.milestones[id]) return fail(`Milestone not found: ${id ?? ""}`);
+  const milestone = project.milestones[id];
+  milestone.status = "completed";
+  milestone.stage = "shipped";
+  milestone.updatedAt = ctx.now().toISOString();
+  if (project.currentMilestoneId === id) {
+    delete project.currentMilestoneId;
+  }
+  let plannedRemaining = 0;
+  for (const itemId of milestone.roadmapItemIds) {
+    const item = project.roadmapItems[itemId];
+    if (!item) continue;
+    if (item.status === "active") item.status = "shipped";
+    if (item.status === "planned") plannedRemaining += 1;
+    item.updatedAt = ctx.now().toISOString();
+  }
+  const { filesUpdated } = await writeProjectStateArtifactsAndCache(ctx.cwd, project, ctx.now());
+  let summary = `Completed milestone ${id}.`;
+  if (plannedRemaining > 0) summary += ` ${plannedRemaining} planned roadmap item(s) remaining.`;
+  if (args.json) return ok(JSON.stringify({ project, milestone, filesUpdated }, null, 2));
+  return ok(summary, { filesUpdated });
+}
+
+async function commandProgress(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
+  const sub = requireSubcommand(args, "progress", ["list", "note"]);
+  if (typeof sub !== "string") return sub;
+  const isList = sub === "list";
+  const { project, issues } = await syncProjectStateFromArtifacts(ctx.cwd, ctx.now(), { createMissing: !isList, writeCache: false });
+  const validationIssues = convertProjectIssues(issues);
+  if (validationIssues.some((i) => i.level === "error")) {
+    return fail("Project validation failed.", { filesUpdated: [] });
+  }
+  if (sub === "list") {
+    if (args.json) {
+      return ok(JSON.stringify({ entries: project.progressOrder.map((id) => project.progress[id]).filter(Boolean), issues: validationIssues }, null, 2));
+    }
+    return ok(`Progress · ${project.progressOrder.length} entry(s)`);
+  }
+  const text = args.positionals.slice(1).join(" ").trim();
+  if (!text) return fail("Progress text is required.");
+  const kind = (args.projectKind ?? "note") as ProgressKind;
+  if (!PROGRESS_KINDS.has(kind)) return fail(`Invalid kind: ${kind}`);
+  if (args.milestone && !project.milestones[args.milestone]) return fail(`Milestone not found: ${args.milestone}`);
+  if (args.roadmap && !project.roadmapItems[args.roadmap]) return fail(`Roadmap item not found: ${args.roadmap}`);
+  if (args.change && !(await stateHasChange(ctx.cwd, args.change))) return fail(`Change not found: ${args.change}`);
+  const id = nextProgressId(project.progressOrder);
+  const entry: ProgressEntry = {
+    id,
+    kind,
+    text,
+    at: ctx.now().toISOString(),
+  };
+  if (args.milestone) entry.milestoneId = args.milestone;
+  if (args.roadmap) entry.roadmapItemId = args.roadmap;
+  if (args.change) entry.changeId = args.change;
+  project.progress[id] = entry;
+  project.progressOrder.push(id);
+  const { filesUpdated } = await writeProjectStateArtifactsAndCache(ctx.cwd, project, ctx.now());
+  if (args.json) return ok(JSON.stringify({ project, entry, filesUpdated }, null, 2));
+  return ok(`Logged progress ${id}.`, { filesUpdated });
+}
+
+async function commandLearnings(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
+  const sub = requireSubcommand(args, "learnings", ["list", "add"]);
+  if (typeof sub !== "string") return sub;
+  const isList = sub === "list";
+  const { project, issues } = await syncProjectStateFromArtifacts(ctx.cwd, ctx.now(), { createMissing: !isList, writeCache: false });
+  const validationIssues = convertProjectIssues(issues);
+  if (validationIssues.some((i) => i.level === "error")) {
+    return fail("Project validation failed.", { filesUpdated: [] });
+  }
+  if (sub === "list") {
+    if (args.json) {
+      return ok(JSON.stringify({ entries: project.learningOrder.map((id) => project.learnings[id]).filter(Boolean), issues: validationIssues }, null, 2));
+    }
+    return ok(`Learnings · ${project.learningOrder.length} entry(s)`);
+  }
+  const topic = args.positionals[1]?.trim();
+  const summary = args.positionals.slice(2).join(" ").trim();
+  if (!topic || !summary) return fail("Learning topic and summary are required.");
+  const id = nextLearningId(project.learningOrder);
+  const entry: LearningEntry = {
+    id,
+    topic,
+    summary,
+    at: ctx.now().toISOString(),
+  };
+  if (args.source) entry.source = args.source;
+  project.learnings[id] = entry;
+  project.learningOrder.push(id);
+  const { filesUpdated } = await writeProjectStateArtifactsAndCache(ctx.cwd, project, ctx.now());
+  if (args.json) return ok(JSON.stringify({ project, entry, filesUpdated }, null, 2));
+  return ok(`Recorded learning ${id}.`, { filesUpdated });
+}
+
+async function commandNext(ctx: CommandContext, args: ParsedArgs): Promise<CommandResult> {
+  const { project, issues } = await syncProjectStateFromArtifacts(ctx.cwd, ctx.now(), { createMissing: false, writeCache: false });
+  const validationIssues = convertProjectIssues(issues);
+  if (validationIssues.some((i) => i.level === "error")) {
+    return fail("Project validation failed.", { filesUpdated: [] });
+  }
+  const suggestion = suggestNextProjectItem(project);
+  if (args.json) {
+    const payload: { milestone?: MilestoneState; item?: RoadmapItemState; reason: string } = { reason: suggestion.reason };
+    if (suggestion.milestone) payload.milestone = suggestion.milestone;
+    if (suggestion.item) payload.item = suggestion.item;
+    return ok(JSON.stringify(payload, null, 2));
+  }
+  if (suggestion.item) {
+    return ok(`Next: ${suggestion.item.id} ${suggestion.item.title} · milestone=${suggestion.milestone?.id ?? "none"} · reason=${suggestion.reason}`);
+  }
+  return ok(`No next project item. ${suggestion.reason}`);
+}
+
+async function stateHasChange(cwd: string, changeId: string): Promise<boolean> {
+  const state = await loadState(cwd);
+  return !!state.changes[changeId];
 }
 
 function codebaseIndexReadIssue(error: unknown): ValidationIssue | undefined {
@@ -899,6 +1346,7 @@ async function commandResearch(ctx: CommandContext, args: ParsedArgs): Promise<C
     ? renderOmpLifecycleSpawnStrategy({ step: "research", config })
     : renderLifecycleSpawnStrategy({ step: "research", config });
   const mapPointer = await mapPointerSection(ctx.cwd);
+  const projectPointer = await projectPointerSection(ctx.cwd);
   const subagentRetry = ctx.runtime === "omp"
     ? renderOmpSubagentRetryClause()
     : renderSubagentRetryClause();
@@ -916,7 +1364,7 @@ Read first:
 - .specwright/changes/${change.id}-${change.slug}/research.md
 - .specwright/changes/${change.id}-${change.slug}/sources.md
 - .specwright/changes/${change.id}-${change.slug}/evidence.md
-- .specwright/changes/${change.id}-${change.slug}/options.md${mapPointer}
+- .specwright/changes/${change.id}-${change.slug}/options.md${mapPointer}${projectPointer}
 
 Research rules:
 - Start with local repository evidence: find, OMP grep/search, read, and lsp when available.
@@ -949,6 +1397,7 @@ async function commandPlan(ctx: CommandContext, args: ParsedArgs): Promise<Comma
     ? renderOmpLifecycleSpawnStrategy({ step: "plan", config })
     : renderLifecycleSpawnStrategy({ step: "plan", config });
   const mapPointer = await mapPointerSection(ctx.cwd);
+  const projectPointer = await projectPointerSection(ctx.cwd);
   const prompt = `# Specwright Plan: ${updated.id}-${updated.slug}
 
 ${renderContextBudget(config)}
@@ -961,7 +1410,7 @@ Read first:
 - .specwright/changes/${updated.id}-${updated.slug}/research.md
 - .specwright/changes/${updated.id}-${updated.slug}/evidence.md
 - .specwright/changes/${updated.id}-${updated.slug}/plan.md
-- .specwright/changes/${updated.id}-${updated.slug}/tasks.md${mapPointer}
+- .specwright/changes/${updated.id}-${updated.slug}/tasks.md${mapPointer}${projectPointer}
 Produce a decision-complete plan.md and a CLI-parseable tasks.md.
 
 tasks.md contract required by the Specwright CLI:
@@ -1131,7 +1580,8 @@ async function commandExecute(ctx: CommandContext, args: ParsedArgs): Promise<Co
     ? renderOmpLifecycleSpawnStrategy({ step: "execute", config })
     : renderLifecycleSpawnStrategy({ step: "execute", config });
   const mapPointer = await mapPointerSection(ctx.cwd);
-  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\n${lifecycleStrategy}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md${mapPointer}\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
+  const projectPointer = await projectPointerSection(ctx.cwd);
+  const prompt = `# Specwright Execute: ${updated.id} ${task.id}\n\n${lifecycleStrategy}\n\nRead first:\n- .specwright/changes/${updated.id}-${updated.slug}/intent.md\n- .specwright/changes/${updated.id}-${updated.slug}/evidence.md\n- .specwright/changes/${updated.id}-${updated.slug}/tasks.md${mapPointer}${projectPointer}\n\nTask:\n- [ ] ${task.id}: ${task.title}\n\nRules:\n- Implement this task only.\n- Do not broaden scope.\n- Update tasks.md checkbox/status only after verification for this task passes.\n- If new facts invalidate the plan, stop and update decisions.md with the blocking fact.\n\n${renderCheckpointClause({ change: updated, unit: { kind: "task", id: task.id }, files: taskFiles })}`;
   return ok(`Prepared execute prompt for ${task.id}.`, { prompt });
 }
 
@@ -1200,7 +1650,8 @@ async function commandHandoff(ctx: CommandContext, args: ParsedArgs): Promise<Co
   const verify = artifacts[3] ?? "";
   const taskLines = tasks.split(/\r?\n/).filter((line) => args.task ? line.includes(args.task) : /^\s*- \[ ] T\d{3}:/.test(line)).join("\n");
   const mapPointer = !args.task ? await mapPointerSection(ctx.cwd) : "";
-  const handoff = `# Agent Handoff: ${change.id}\n\n## Goal\n\n${intent}\n\n## Read first\n\n- .specwright/changes/${change.id}-${change.slug}/intent.md\n- .specwright/changes/${change.id}-${change.slug}/evidence.md\n- .specwright/changes/${change.id}-${change.slug}/tasks.md\n- .specwright/changes/${change.id}-${change.slug}/verify.md${mapPointer}\n\n## Current state\n\nstatus=${change.status}; step=${change.step}\n\n## Constraints\n\nSee intent.md and evidence.md.\n\n## Acceptance\n\n${verify}\n\n## Next task\n\n${taskLines || "No incomplete tasks."}\n\n## Evidence\n\n${evidence}\n`;
+  const projectPointer = !args.task ? await projectPointerSection(ctx.cwd) : "";
+  const handoff = `# Agent Handoff: ${change.id}\n\n## Goal\n\n${intent}\n\n## Read first\n\n- .specwright/changes/${change.id}-${change.slug}/intent.md\n- .specwright/changes/${change.id}-${change.slug}/evidence.md\n- .specwright/changes/${change.id}-${change.slug}/tasks.md\n- .specwright/changes/${change.id}-${change.slug}/verify.md${mapPointer}${projectPointer}\n\n## Current state\n\nstatus=${change.status}; step=${change.step}\n\n## Constraints\n\nSee intent.md and evidence.md.\n\n## Acceptance\n\n${verify}\n\n## Next task\n\n${taskLines || "No incomplete tasks."}\n\n## Evidence\n\n${evidence}\n`;
   const handoffPath = join(dir, "handoff.md");
   await writeFile(handoffPath, handoff, "utf8");
   const report = await validateChange(ctx.cwd, change);
@@ -1506,6 +1957,12 @@ export async function runSpecwrightCommand(ctx: CommandContext, argv: string[]):
       case "config": return await commandConfig(ctx, args);
       case "publish": return await commandPublish(ctx, args);
       case "complete": return await commandComplete(ctx, args);
+      case "project": return await commandProject(ctx, args);
+      case "roadmap": return await commandRoadmap(ctx, args);
+      case "milestone": return await commandMilestone(ctx, args);
+      case "progress": return await commandProgress(ctx, args);
+      case "learnings": return await commandLearnings(ctx, args);
+      case "next": return await commandNext(ctx, args);
       default: return fail(`Unknown command: ${args.command}`);
     }
   } catch (error) {
@@ -1513,5 +1970,5 @@ export async function runSpecwrightCommand(ctx: CommandContext, argv: string[]):
   }
 }
 export function renderHelp(): string {
-  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--map] [--refresh] [--force] [--json] [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright complete [<change>] [--mode none|push|pr|merge]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n`;
+  return `Specwright\n\nUsage:\n  specwright init [--force] [--json]\n  specwright status [--json]\n  specwright scan [--map] [--refresh] [--force] [--json] [--print-prompt]\n  specwright new <kind> <request...> [--mode lite|full] [--pack core] [--json]\n  specwright discuss [<change>] [--print-prompt]\n  specwright research [<change>] [--online never|ask|auto|require] [--print-prompt]\n  specwright plan [<change>] [--print-prompt]\n  specwright tasks [<change>] [--print-prompt]\n  specwright execute [<change>] [--task T###] [--print-prompt]\n  specwright checkpoint [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright commit [<change>] (--phase discuss|research|plan|tasks|verify|handoff | --task T###) --summary '<summary>' --files <file[,file...]>\n  specwright publish [<change>] [--mode none|push|pr]\n  specwright complete [<change>] [--mode none|push|pr|merge]\n  specwright verify [<change>] [--json] [--print-prompt]\n  specwright handoff [<change>] [--task T###] [--print-prompt]\n  specwright pack list|validate|add\n  specwright config get <key>\n  specwright config set <key> <value>\n  specwright project status [--json]\n  specwright project sync [--json]\n  specwright next [--json]\n  specwright roadmap list [--json]\n  specwright roadmap add <title...> [--milestone M###] [--change ####] [--json]\n  specwright roadmap set-status <R###> planned|active|shipped|cut [--json]\n  specwright roadmap move <R###> --milestone M### [--json]\n  specwright roadmap unassign <R###> [--json]\n  specwright milestone list [--json]\n  specwright milestone add <title...> [--stage scoping|building|stabilizing|shipped] [--json]\n  specwright milestone start <M###> [--json]\n  specwright milestone complete <M###> [--json]\n  specwright progress list [--json]\n  specwright progress note <text...> [--kind note|decision|blocker|metric] [--milestone M###] [--roadmap R###] [--change ####] [--json]\n  specwright learnings list [--json]\n  specwright learnings add <topic> <summary...> [--source <path-or-url>] [--json]\n`;
 }

@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join, posix, win32 } from "node:path";
 import { changeDir } from "./paths";
 import { loadConfig, unreconciledTaskDriftIssues } from "./state";
+import { readProjectStateFromArtifacts } from "./project";
 import { SPECWRIGHT_AGENT_NAMES } from "./types";
 import type { ChangeState, LifecycleStep, OnlineResearchMode, SpecwrightAgentName, SpecwrightConfig, SpecwrightMode, WorkflowPublishMode } from "./types";
 import type { CodebaseIndex } from "./codebase-index";
@@ -484,6 +485,21 @@ export async function validateChange(cwd: string, change: ChangeState): Promise<
   return {
     ok: issues.every((issue) => issue.level !== "error"),
     issues,
+  };
+}
+
+export async function validateProject(cwd: string): Promise<ValidationReport> {
+  const { project, issues } = await readProjectStateFromArtifacts(cwd, new Date());
+  void project;
+  const validationIssues: ValidationIssue[] = issues.map((issue) => ({
+    level: issue.level,
+    code: issue.code,
+    message: issue.message,
+    file: issue.file,
+  }));
+  return {
+    ok: !validationIssues.some((issue) => issue.level === "error"),
+    issues: validationIssues,
   };
 }
 

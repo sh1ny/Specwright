@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { buildCodebaseIndex, type CodebaseIndex } from "../src/core/codebase-index";
@@ -3983,3 +3983,284 @@ test("handoff prompt omits map pointer when task is specified", async () => {
   expect(result.prompt).not.toContain("Optional project context:");
 });
 
+test("project commands accept project-specific flags before dispatch", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-flags-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "add", "GSD parity"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "start", "M001"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["roadmap", "add", "Project roadmap state", "--milestone", "M001", "--change", "0001"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, [
+    "progress",
+    "note",
+    "Started",
+    "--kind",
+    "decision",
+    "--milestone",
+    "M001",
+    "--roadmap",
+    "R001",
+    "--change",
+    "0001",
+    "--json",
+  ]);
+  expect(result.ok).toBe(true);
+  expect(result.summary).not.toContain("Unknown option");
+  const payload = JSON.parse(result.summary);
+  expect(payload.entry.id).toBe("P0001");
+});
+
+test("init creates project roadmap artifacts without overwriting existing project prose", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-artifacts-"));
+  const ctx = testContext(cwd);
+  await mkdir(join(cwd, ".specwright", "project"), { recursive: true });
+  await writeFile(join(cwd, ".specwright", "project", "roadmap.md"), "# Roadmap\n\n## Items\n\n- [planned] R999: Preserved item\n\n## Notes\n\nCustom prose\n", "utf8");
+  expect((await runSpecwrightCommand(ctx, ["init", "--force"])).ok).toBe(true);
+  const roadmap = await readFile(join(cwd, ".specwright", "project", "roadmap.md"), "utf8");
+  expect(roadmap).toContain("R999");
+  expect(roadmap).toContain("Custom prose");
+  for (const name of ["milestones.md", "current-milestone.md", "progress.md", "learnings.md"]) {
+    await expect(access(join(cwd, ".specwright", "project", name)).then(() => true).catch(() => false)).resolves.toBe(true);
+  }
+});
+
+test("project sync creates missing project artifacts and writes derived cache", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-sync-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  for (const name of ["roadmap.md", "milestones.md", "current-milestone.md", "progress.md", "learnings.md"]) {
+    await rm(join(cwd, ".specwright", "project", name), { force: true });
+  }
+  const stateBefore = JSON.parse(await readFile(join(cwd, ".specwright", "state.json"), "utf8")) as { currentChange?: string; project?: unknown };
+  const beforeCurrentChange = stateBefore.currentChange;
+  const result = await runSpecwrightCommand(ctx, ["project", "sync", "--json"]);
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.summary);
+  expect(payload.project.version).toBe(1);
+  expect(payload.filesCreated.length).toBe(5);
+  for (const name of ["roadmap.md", "milestones.md", "current-milestone.md", "progress.md", "learnings.md"]) {
+    await expect(access(join(cwd, ".specwright", "project", name)).then(() => true).catch(() => false)).resolves.toBe(true);
+  }
+  const stateAfter = JSON.parse(await readFile(join(cwd, ".specwright", "state.json"), "utf8")) as { currentChange?: string; project?: { version: 1 } };
+  expect(stateAfter.project?.version).toBe(1);
+  expect(stateAfter.currentChange).toBe(beforeCurrentChange);
+});
+test("project sync --json returns parseable JSON on validation failure", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-sync-json-error-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright", "project", "roadmap.md"),
+    "# Roadmap\n\n## Items\n\n- [planned] R001: First\n- [planned] R001: Duplicate\n",
+    "utf8",
+  );
+  const result = await runSpecwrightCommand(ctx, ["project", "sync", "--json"]);
+  expect(result.ok).toBe(false);
+  expect(result.exitCode).toBe(1);
+  const payload = JSON.parse(result.summary);
+  expect(payload.ok).toBe(false);
+  expect(payload.issues).toContainEqual(expect.objectContaining({ code: "SW201" }));
+  const state = JSON.parse(await readFile(join(cwd, ".specwright", "state.json"), "utf8")) as { project?: unknown };
+  expect(state.project).toBeUndefined();
+});
+
+
+test("project status reports validation errors without writing invalid cache", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-status-errors-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright", "project", "roadmap.md"),
+    "# Roadmap\n\n## Items\n\n- [planned] R001: First\n- [planned] R001: Duplicate\n",
+    "utf8",
+  );
+  const stateBefore = JSON.parse(await readFile(join(cwd, ".specwright", "state.json"), "utf8")) as { project?: unknown };
+  expect(stateBefore.project).toBeUndefined();
+  const result = await runSpecwrightCommand(ctx, ["project", "status", "--json"]);
+  expect(result.exitCode).toBe(1);
+  const payload = JSON.parse(result.summary);
+  expect(payload.ok).toBe(false);
+  expect(payload.issues).toContainEqual(expect.objectContaining({ code: "SW201" }));
+  const stateAfter = JSON.parse(await readFile(join(cwd, ".specwright", "state.json"), "utf8")) as { project?: unknown };
+  expect(stateAfter.project).toBeUndefined();
+});
+
+test("list commands do not create project artifacts on init-less repo", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-list-no-create-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  for (const name of ["roadmap.md", "milestones.md", "current-milestone.md", "progress.md", "learnings.md"]) {
+    await rm(join(cwd, ".specwright", "project", name), { force: true });
+  }
+  for (const command of ["roadmap", "milestone", "progress", "learnings"]) {
+    const result = await runSpecwrightCommand(ctx, [command, "list"]);
+    expect(result.ok).toBe(true);
+  }
+  for (const name of ["roadmap.md", "milestones.md", "current-milestone.md", "progress.md", "learnings.md"]) {
+    await expect(access(join(cwd, ".specwright", "project", name)).then(() => true).catch(() => false)).resolves.toBe(false);
+  }
+});
+
+test("roadmap add renders canonical section when existing file lacks header", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-roadmap-no-header-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  await writeFile(join(cwd, ".specwright", "project", "roadmap.md"), "# Roadmap\n\nSome prose without canonical section.\n", "utf8");
+  expect((await runSpecwrightCommand(ctx, ["roadmap", "add", "Item"])).ok).toBe(true);
+  const roadmap = await readFile(join(cwd, ".specwright", "project", "roadmap.md"), "utf8");
+  expect(roadmap).toContain("## Items");
+  expect(roadmap).toContain("- [planned] R001: Item");
+  const parsed = JSON.parse((await runSpecwrightCommand(ctx, ["roadmap", "list", "--json"])).summary);
+  expect(parsed.items).toHaveLength(1);
+  expect(parsed.items[0].id).toBe("R001");
+});
+
+test("project roadmap milestone progress learnings happy path", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-happy-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "add", "GSD parity"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "start", "M001"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["roadmap", "add", "Project roadmap state", "--milestone", "M001"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["progress", "note", "Started project-state slice", "--kind", "note", "--milestone", "M001", "--roadmap", "R001"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["learnings", "add", "Project state", "Markdown artifacts are canonical"])).ok).toBe(true);
+
+  const nextResult = await runSpecwrightCommand(ctx, ["next", "--json"]);
+  expect(nextResult.ok).toBe(true);
+  const nextPayload = JSON.parse(nextResult.summary);
+  expect(nextPayload.item.id).toBe("R001");
+  expect(nextPayload.milestone.id).toBe("M001");
+
+  const roadmap = await readFile(join(cwd, ".specwright", "project", "roadmap.md"), "utf8");
+  expect(roadmap).toContain("R001");
+  const milestones = await readFile(join(cwd, ".specwright", "project", "milestones.md"), "utf8");
+  expect(milestones).toContain("M001");
+  expect(milestones).toContain("R001");
+  const progress = await readFile(join(cwd, ".specwright", "project", "progress.md"), "utf8");
+  expect(progress).toContain("P0001");
+  const learnings = await readFile(join(cwd, ".specwright", "project", "learnings.md"), "utf8");
+  expect(learnings).toContain("L0001");
+
+  const state = JSON.parse(await readFile(join(cwd, ".specwright", "state.json"), "utf8")) as { project?: { currentMilestoneId?: string } };
+  expect(state.project?.currentMilestoneId).toBe("M001");
+});
+
+test("milestone start rejects second active milestone", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-milestone-second-active-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "add", "One"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "add", "Two"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "start", "M001"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["milestone", "start", "M002"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("already active");
+});
+
+test("roadmap add rejects missing milestone reference", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-roadmap-bad-milestone-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["roadmap", "add", "Item", "--milestone", "M001"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("Milestone not found");
+});
+
+test("roadmap add rejects missing change reference", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-roadmap-bad-change-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["roadmap", "add", "Item", "--change", "0001"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("Change not found");
+});
+
+test("roadmap move keeps milestone links symmetric", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-roadmap-move-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "add", "M1"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "add", "M2"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["roadmap", "add", "Item", "--milestone", "M001"])).ok).toBe(true);
+  const moveResult = await runSpecwrightCommand(ctx, ["roadmap", "move", "R001", "--milestone", "M002", "--json"]);
+  expect(moveResult.ok).toBe(true);
+  const milestones = await readFile(join(cwd, ".specwright", "project", "milestones.md"), "utf8");
+  expect(milestones).toContain("- [planned] M001: M1");
+  expect(milestones).toContain("- [planned] M002: M2");
+  expect(milestones).toMatch(/- \[planned\] M002: M2[\s\S]*- Roadmap: R001/);
+  const payload = JSON.parse(moveResult.summary);
+  expect(payload.item.milestoneId).toBe("M002");
+  expect(payload.project.milestones.M001.roadmapItemIds).not.toContain("R001");
+  expect(payload.project.milestones.M002.roadmapItemIds).toContain("R001");
+});
+
+test("progress note rejects invalid kind", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-progress-bad-kind-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["progress", "note", "Text", "--kind", "invalid"]);
+  expect(result.ok).toBe(false);
+  expect(result.summary).toContain("Invalid kind");
+});
+
+test("learnings add requires topic and summary", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-learnings-args-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  const noSummary = await runSpecwrightCommand(ctx, ["learnings", "add", "Topic"]);
+  expect(noSummary.ok).toBe(false);
+  const noTopic = await runSpecwrightCommand(ctx, ["learnings", "add"]);
+  expect(noTopic.ok).toBe(false);
+});
+
+
+test("roadmap unassign removes item from all milestone roadmap lists", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-roadmap-unassign-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "add", "M1"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["roadmap", "add", "Item", "--milestone", "M001"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["roadmap", "unassign", "R001", "--json"]);
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.summary);
+  expect(payload.item.milestoneId).toBeUndefined();
+  const milestones = await readFile(join(cwd, ".specwright", "project", "milestones.md"), "utf8");
+  expect(milestones).not.toContain("R001");
+});
+
+test("status --json preserves existing fields and adds projectState", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-status-project-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "add", "GSD parity"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["milestone", "start", "M001"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["status", "--json"]);
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.summary);
+  expect(payload.project).toBeDefined();
+  expect(payload.currentChange).toBeDefined();
+  expect(payload.changeCount).toBeDefined();
+  expect(payload.currentStatus).toBeDefined();
+  expect(payload.tasks).toBeDefined();
+  expect(payload.projectState).toBeDefined();
+  expect(payload.projectState.currentMilestoneId).toBe("M001");
+});
+
+test("research prompt includes project roadmap context pointers when artifacts exist", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-research-project-pointers-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["new", "feature", "Inventory Crafting"])).ok).toBe(true);
+  const result = await runSpecwrightCommand(ctx, ["research"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).toContain("Optional project roadmap context:");
+  expect(result.prompt).toContain(".specwright/project/roadmap.md");
+});
+
+test("task-scoped handoff omits project roadmap context pointers", async () => {
+  const cwd = await createCompleteFixture("specwright-handoff-no-project-pointers-");
+  const result = await runSpecwrightCommand(cwd.ctx, ["handoff", "--task", "T001"]);
+  expect(result.ok).toBe(true);
+  expect(result.prompt).not.toContain("Optional project roadmap context:");
+});

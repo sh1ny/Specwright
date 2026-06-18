@@ -3,8 +3,8 @@ import { basename, join } from "node:path";
 import { changeDir, configPath, statePath } from "./paths";
 import { readJsonFile, writeJsonFile } from "./json";
 import { validateSpecwrightConfig } from "./validators";
+import { assertProjectState } from "./project";
 import type { ChangeKind, ChangeState, ParsedTaskArtifact, SpecwrightAgentConfig, SpecwrightAgentName, SpecwrightConfig, SpecwrightState, TaskState, TaskSyncIssue, TaskSyncIssueKind, TaskSyncResult } from "./types";
-
 type StoredSpecwrightConfig = Partial<Omit<SpecwrightConfig, "agents" | "workflow">> & {
   version?: unknown;
   agents?: Partial<Record<SpecwrightAgentName, Partial<SpecwrightAgentConfig>>>;
@@ -354,7 +354,7 @@ export async function loadConfig(cwd: string): Promise<SpecwrightConfig> {
 }
 
 export async function loadState(cwd: string): Promise<SpecwrightState> {
-  const state = await readJsonFile<SpecwrightState & { version?: unknown }>(statePath(cwd));
+  const state = await readJsonFile<SpecwrightState & { version?: unknown; project?: unknown }>(statePath(cwd));
   if (!state) {
     return defaultState(new Date());
   }
@@ -366,6 +366,9 @@ export async function loadState(cwd: string): Promise<SpecwrightState> {
   }
   for (const [id, change] of Object.entries(state.changes)) {
     assertChangeState(change, id);
+  }
+  if (state.project !== undefined) {
+    assertProjectState(state.project);
   }
   return state as SpecwrightState;
 }
