@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { projectArtifactPath, projectDir } from "./paths";
+import { projectArtifactPath, projectDir, isEnoent } from "./paths";
 import { loadState, saveState } from "./state";
 import type {
   LearningEntry,
@@ -11,9 +11,6 @@ import type {
   RoadmapItemState,
   RoadmapItemStatus,
 } from "./types";
-function isEnoent(error: unknown): boolean {
-  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
-}
 
 
 export const PROJECT_ARTIFACTS = {

@@ -1,9 +1,7 @@
 import { access, cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
-function isEnoent(error: unknown): boolean {
-  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
-}
+
 
 import { fileURLToPath } from "node:url";
 import { adapterNeedsRegeneration, installOmpAdapter } from "../runtime/omp/install";
@@ -13,6 +11,7 @@ import {
   changeDir,
   changesDir,
   configPath,
+  isEnoent,
   packsDir,
   projectArtifactPath,
   projectDir,

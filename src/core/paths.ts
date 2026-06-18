@@ -44,3 +44,7 @@ export function ompAgentsDir(cwd: string): string {
 export function ompRulesDir(cwd: string): string {
   return join(cwd, OMP_DIR, "rules");
 }
+export function isEnoent(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
