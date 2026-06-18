@@ -225,7 +225,7 @@ export function clearStatus(_event: unknown, ctx: OmpContextLike): void {
 }
 
 export function getArgumentCompletions(prefix: string): Array<{ value: string; label?: string; description?: string }> {
-  const commands = ["init", "status", "scan", "new", "discuss", "research", "plan", "tasks", "execute", "verify", "handoff", "complete", "pack"];
+  const commands = ["init", "status", "scan", "new", "discuss", "research", "plan", "tasks", "execute", "verify", "handoff", "complete", "pack", "project", "roadmap", "milestone", "progress", "learnings", "next"];
   return commands
     .filter((command) => command.startsWith(prefix))
     .map((command) => ({ value: command, label: command }));

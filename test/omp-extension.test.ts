@@ -101,9 +101,15 @@ test("OMP extension registers and handles specwright command", async () => {
   expect(sentMessages).toHaveLength(0);
 });
 
-test("OMP argument completions include complete", () => {
+test("OMP argument completions include project commands", () => {
   const all = getArgumentCompletions("").map((entry) => entry.value);
   expect(all).toContain("complete");
+  expect(all).toContain("project");
+  expect(all).toContain("roadmap");
+  expect(all).toContain("milestone");
+  expect(all).toContain("progress");
+  expect(all).toContain("learnings");
+  expect(all).toContain("next");
 
   const c = getArgumentCompletions("c").map((entry) => entry.value);
   expect(c).toContain("complete");
