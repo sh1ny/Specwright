@@ -4115,6 +4115,79 @@ test("roadmap add renders canonical section when existing file lacks header", as
   expect(parsed.items).toHaveLength(1);
   expect(parsed.items[0].id).toBe("R001");
 });
+test("status --json includes projectState when only progress or learnings exist", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-status-progress-only-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  for (const name of ["roadmap.md", "milestones.md", "current-milestone.md"]) {
+    await rm(join(cwd, ".specwright", "project", name), { force: true });
+  }
+  expect((await runSpecwrightCommand(ctx, ["progress", "note", "A note", "--kind", "note"])).ok).toBe(true);
+  expect((await runSpecwrightCommand(ctx, ["learnings", "add", "Topic", "Summary"])).ok).toBe(true);
+  const status = JSON.parse((await runSpecwrightCommand(ctx, ["status", "--json"])).summary);
+  expect(status.projectState).toBeDefined();
+  expect(status.projectState.progress.total).toBe(1);
+  expect(status.projectState.learnings.total).toBe(1);
+  expect(status.projectState.currentMilestoneId).toBeNull();
+});
+
+test("syncProjectStateFromArtifacts propagates non-ENOENT filesystem errors", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-eisdir-"));
+  await mkdir(join(cwd, ".specwright"), { recursive: true });
+  await mkdir(join(cwd, ".specwright", "project", "roadmap.md"), { recursive: true });
+  const { syncProjectStateFromArtifacts } = await import("../src/core/project.ts");
+  await expect(syncProjectStateFromArtifacts(cwd, new Date(), { createMissing: false })).rejects.toThrow();
+});
+
+test("syncProjectStateFromArtifacts reports changed true when createMissing creates files", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-create-changed-"));
+  await mkdir(join(cwd, ".specwright"), { recursive: true });
+  const { syncProjectStateFromArtifacts } = await import("../src/core/project.ts");
+  const result = await syncProjectStateFromArtifacts(cwd, new Date(), { createMissing: true });
+  expect(result.changed).toBe(true);
+  expect(result.filesCreated.length).toBeGreaterThan(0);
+});
+
+test("normalizeRoadmapMilestoneLinks resolves duplicate milestone ownership by parse order", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-dup-owner-"));
+  const ctx = testContext(cwd);
+  expect((await runSpecwrightCommand(ctx, ["init"])).ok).toBe(true);
+  await writeFile(
+    join(cwd, ".specwright", "project", "milestones.md"),
+    "# Milestones\n\n## Items\n\n- [planned] M001: First\n  - Roadmap: R001\n- [planned] M002: Second\n  - Roadmap: R001\n",
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, ".specwright", "project", "roadmap.md"),
+    "# Roadmap\n\n## Items\n\n- [planned] R001: Shared item\n",
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, ".specwright", "project", "current-milestone.md"),
+    "# Current Milestone\n\nMilestone: none\n",
+    "utf8",
+  );
+  const result = await runSpecwrightCommand(ctx, ["project", "sync", "--json"]);
+  expect(result.ok).toBe(true);
+  const parsed = JSON.parse(result.summary);
+  expect(parsed.project.milestones.M001.roadmapItemIds).toContain("R001");
+  expect(parsed.project.milestones.M002.roadmapItemIds).not.toContain("R001");
+  expect(parsed.project.roadmapItems.R001.milestoneId).toBe("M001");
+});
+
+test("syncProjectStateFromArtifacts propagates invalid state.json errors", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "specwright-project-bad-state-"));
+  await mkdir(join(cwd, ".specwright"), { recursive: true });
+  await mkdir(join(cwd, ".specwright", "project"), { recursive: true });
+  await writeFile(
+    join(cwd, ".specwright", "state.json"),
+    JSON.stringify({ version: 2, changes: {}, currentChange: null }),
+    "utf8",
+  );
+  const { syncProjectStateFromArtifacts } = await import("../src/core/project.ts");
+  await expect(syncProjectStateFromArtifacts(cwd, new Date(), { createMissing: false })).rejects.toThrow("Unsupported Specwright state version");
+});
+
 
 test("project roadmap milestone progress learnings happy path", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "specwright-project-happy-"));

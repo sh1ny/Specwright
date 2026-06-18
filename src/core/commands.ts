@@ -1,6 +1,10 @@
 import { access, cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
+function isEnoent(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
 import { fileURLToPath } from "node:url";
 import { adapterNeedsRegeneration, installOmpAdapter } from "../runtime/omp/install";
 import { readJsonFile, writeJsonFile } from "./json";
@@ -564,15 +568,21 @@ async function commandStatus(ctx: CommandContext, args: ParsedArgs): Promise<Com
       try {
         await access(projectArtifactPath(ctx.cwd, name));
         return true;
-      } catch {
-        return false;
+      } catch (error) {
+        if (isEnoent(error)) return false;
+        throw error;
       }
     }),
   ).then((results) => results.some(Boolean));
   if (anyProjectArtifact) {
     const projectSync = await syncProjectStateFromArtifacts(ctx.cwd, ctx.now(), { createMissing: false, writeCache: true });
     const projectIssues = convertProjectIssues(projectSync.issues);
-    const hasProject = Object.keys(projectSync.project.milestones).length > 0 || Object.keys(projectSync.project.roadmapItems).length > 0;
+    const hasProject =
+      Boolean(projectSync.project.currentMilestoneId)
+      || Object.keys(projectSync.project.milestones).length > 0
+      || Object.keys(projectSync.project.roadmapItems).length > 0
+      || Object.keys(projectSync.project.progress).length > 0
+      || Object.keys(projectSync.project.learnings).length > 0;
     if (hasProject || projectIssues.length > 0) {
       const counts = projectStatusCounts(projectSync.project);
       projectStatePayload = {

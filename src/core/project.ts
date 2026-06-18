@@ -11,6 +11,10 @@ import type {
   RoadmapItemState,
   RoadmapItemStatus,
 } from "./types";
+function isEnoent(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
 
 export const PROJECT_ARTIFACTS = {
   roadmap: "roadmap.md",
@@ -400,6 +404,13 @@ function normalizeRoadmapMilestoneLinks(
   project: ProjectState,
   issues: ProjectArtifactIssue[],
 ): ProjectState {
+  const orderedMilestoneIds = [
+    ...project.milestoneOrder.filter((id) => project.milestones[id]),
+    ...Object.keys(project.milestones).filter((id) => !project.milestoneOrder.includes(id)),
+  ];
+  const orderedMilestones = orderedMilestoneIds.map((id) => project.milestones[id]!);
+
+  // Pass 1: add reverse links for items that already declare a valid milestone.
   for (const item of Object.values(project.roadmapItems)) {
     const milestone = item.milestoneId ? project.milestones[item.milestoneId] : undefined;
     if (milestone) {
@@ -416,25 +427,68 @@ function normalizeRoadmapMilestoneLinks(
       }
     }
   }
-  for (const milestone of Object.values(project.milestones)) {
-    for (const itemId of [...milestone.roadmapItemIds]) {
+
+  // Pass 2: prune claims that conflict with an item's authoritative milestone.
+  for (const milestone of orderedMilestones) {
+    milestone.roadmapItemIds = milestone.roadmapItemIds.filter((itemId) => {
       const item = project.roadmapItems[itemId];
       if (!item) {
         issues.push(issue("error", "SW208", `Milestone ${milestone.id} references missing roadmap item ${itemId}.`, PROJECT_ARTIFACTS.milestones));
-        milestone.roadmapItemIds = milestone.roadmapItemIds.filter((id) => id !== itemId);
-      } else if (item.milestoneId !== milestone.id) {
-        item.milestoneId = milestone.id;
+        return false;
+      }
+      if (item.milestoneId && item.milestoneId !== milestone.id) {
         issues.push(
           issue(
             "warning",
             "SW203",
-            `Milestone ${milestone.id} lists roadmap item ${itemId} but item does not reference milestone; normalized.`,
+            `Milestone ${milestone.id} lists roadmap item ${itemId} but item references ${item.milestoneId}; removed.`,
             PROJECT_ARTIFACTS.milestones,
           ),
         );
+        return false;
       }
+      return true;
+    });
+  }
+
+  // Pass 3: assign first remaining claim (milestone parse order) to items with no milestone.
+  const claimedBy = new Map<string, string>();
+  for (const milestone of orderedMilestones) {
+    for (const itemId of milestone.roadmapItemIds) {
+      const item = project.roadmapItems[itemId];
+      if (!item) continue;
+      if (item.milestoneId) continue;
+      item.milestoneId = milestone.id;
+      claimedBy.set(itemId, milestone.id);
+      issues.push(
+        issue(
+          "warning",
+          "SW208",
+          `Roadmap item ${itemId} has no milestone reference but is listed in ${milestone.id}; normalized.`,
+          PROJECT_ARTIFACTS.roadmap,
+        ),
+      );
     }
   }
+
+  // Pass 4: remove any duplicate claims left after assignment.
+  for (const milestone of orderedMilestones) {
+    milestone.roadmapItemIds = milestone.roadmapItemIds.filter((itemId) => {
+      if (!claimedBy.has(itemId)) return true;
+      const ownerId = claimedBy.get(itemId);
+      if (ownerId === milestone.id) return true;
+      issues.push(
+        issue(
+          "warning",
+          "SW203",
+          `Roadmap item ${itemId} is already owned by ${ownerId}; removed from ${milestone.id}.`,
+          PROJECT_ARTIFACTS.milestones,
+        ),
+      );
+      return false;
+    });
+  }
+
   return project;
 }
 
@@ -530,8 +584,9 @@ export function renderLearningsMarkdown(existing: string | undefined, project: P
 async function readArtifact(cwd: string, name: string): Promise<string | undefined> {
   try {
     return await readFile(projectArtifactPath(cwd, name), "utf8");
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (isEnoent(error)) return undefined;
+    throw error;
   }
 }
 
@@ -540,8 +595,8 @@ async function writeArtifact(cwd: string, name: string, content: string): Promis
   let existing: string | undefined;
   try {
     existing = await readFile(path, "utf8");
-  } catch {
-    // file does not exist
+  } catch (error) {
+    if (!isEnoent(error)) throw error;
   }
   if (existing === content) return false;
   await mkdir(projectDir(cwd), { recursive: true });
@@ -565,8 +620,8 @@ export async function ensureProjectStateArtifacts(cwd: string): Promise<{ filesC
     try {
       await readFile(path, "utf8");
       existed = true;
-    } catch {
-      // does not exist
+    } catch (error) {
+      if (!isEnoent(error)) throw error;
     }
     if (!existed) {
       await writeFile(path, template, "utf8");
@@ -622,7 +677,7 @@ export async function readProjectStateFromArtifacts(cwd: string, now: Date): Pro
   const issues: ProjectArtifactIssue[] = [];
   const filesCreated: string[] = [];
   const filesUpdated: string[] = [];
-  const state = await loadState(cwd).catch(() => undefined);
+  const state = await loadState(cwd);
   const changes = state?.changes ?? {};
 
   const roadmapMd = await readArtifact(cwd, PROJECT_ARTIFACTS.roadmap);
@@ -695,7 +750,7 @@ export async function syncProjectStateFromArtifacts(
   const result = await readProjectStateFromArtifacts(cwd, now);
   result.filesCreated.push(...ensured.filesCreated);
   result.filesUpdated.push(...ensured.filesUpdated);
-
+  result.changed = result.filesCreated.length > 0 || result.filesUpdated.length > 0;
   if (writeCache && !result.issues.some((issue) => issue.level === "error")) {
     await writeProjectStateCache(cwd, result.project);
   }
