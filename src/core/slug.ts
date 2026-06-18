@@ -9,16 +9,39 @@ export function slugify(input: string): string {
 }
 
 export function nextChangeId(existingIds: Iterable<string>): string {
+  return nextPrefixedId(existingIds, "", 4);
+}
+
+export function nextPrefixedId(existingIds: Iterable<string>, prefix: string, width: number): string {
+  const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\d{${width}}$`);
   let maxId = 0;
   for (const id of existingIds) {
-    if (/^\d{4}$/.test(id)) {
-      maxId = Math.max(maxId, Number(id));
+    if (pattern.test(id)) {
+      const numeric = Number(id.slice(prefix.length));
+      maxId = Math.max(maxId, numeric);
     }
   }
-
   const next = maxId + 1;
-  if (next > 9999) {
-    throw new Error("Change ID overflow: maximum of 9999 changes reached.");
+  const limit = Math.pow(10, width) - 1;
+  if (next > limit) {
+    const displayPrefix = prefix ? `${prefix.toUpperCase()} ` : "";
+    throw new Error(`${displayPrefix}ID overflow: maximum of ${limit} ${displayPrefix.toLowerCase().trim() || "ID"}s reached.`);
   }
-  return String(next).padStart(4, "0");
+  return `${prefix}${String(next).padStart(width, "0")}`;
+}
+
+export function nextRoadmapId(existingIds: Iterable<string>): string {
+  return nextPrefixedId(existingIds, "R", 3);
+}
+
+export function nextMilestoneId(existingIds: Iterable<string>): string {
+  return nextPrefixedId(existingIds, "M", 3);
+}
+
+export function nextProgressId(existingIds: Iterable<string>): string {
+  return nextPrefixedId(existingIds, "P", 4);
+}
+
+export function nextLearningId(existingIds: Iterable<string>): string {
+  return nextPrefixedId(existingIds, "L", 4);
 }

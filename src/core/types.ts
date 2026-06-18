@@ -105,6 +105,62 @@ export interface SpecwrightState {
   version: 1;
   currentChange?: string;
   changes: Record<string, ChangeState>;
+  project?: ProjectState;
+  updatedAt: string;
+}
+
+export type RoadmapItemStatus = "planned" | "active" | "shipped" | "cut";
+export type MilestoneStatus = "planned" | "active" | "completed" | "cut";
+export type MilestoneStage = "scoping" | "building" | "stabilizing" | "shipped";
+export type ProgressKind = "note" | "decision" | "blocker" | "metric";
+
+export interface RoadmapItemState {
+  id: string;
+  title: string;
+  status: RoadmapItemStatus;
+  milestoneId?: string;
+  changeId?: string;
+  updatedAt: string;
+}
+
+export interface MilestoneState {
+  id: string;
+  title: string;
+  status: MilestoneStatus;
+  stage: MilestoneStage;
+  roadmapItemIds: string[];
+  updatedAt: string;
+}
+
+export interface ProgressEntry {
+  id: string;
+  kind: ProgressKind;
+  text: string;
+  milestoneId?: string;
+  roadmapItemId?: string;
+  changeId?: string;
+  at: string;
+}
+
+export interface LearningEntry {
+  id: string;
+  topic: string;
+  summary: string;
+  source?: string;
+  at: string;
+}
+
+export interface ProjectState {
+  version: 1;
+  roadmapItems: Record<string, RoadmapItemState>;
+  roadmapOrder: string[];
+  milestones: Record<string, MilestoneState>;
+  milestoneOrder: string[];
+  currentMilestoneId?: string;
+  progress: Record<string, ProgressEntry>;
+  progressOrder: string[];
+  learnings: Record<string, LearningEntry>;
+  learningOrder: string[];
   updatedAt: string;
 }
 

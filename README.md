@@ -73,6 +73,32 @@ bun run specwright verify
 bun run specwright handoff
 ```
 
+## Project roadmap state
+
+Specwright can track project-level roadmap items, milestones, progress notes, and learnings under `.specwright/project/`. These Markdown artifacts are the canonical source; `.specwright/state.json` only caches a derived copy.
+
+Start a milestone, add roadmap items, log progress, and record learnings:
+
+```bash
+bun run specwright milestone add "GSD parity"
+bun run specwright milestone start M001
+bun run specwright roadmap add "Project roadmap state" --milestone M001
+bun run specwright progress note "Started project-state slice" --kind note --milestone M001 --roadmap R001
+bun run specwright learnings add "Project state" "Markdown artifacts are canonical"
+bun run specwright next
+```
+
+Other useful commands:
+
+```bash
+bun run specwright project status
+bun run specwright project sync
+bun run specwright roadmap list
+bun run specwright milestone list
+bun run specwright progress list
+bun run specwright learnings list
+```
+
 ## Project scanning
 
 `specwright scan` keeps mechanical codebase facts command-owned and leaves interpretation to agents or maintainers.

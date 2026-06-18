@@ -17,6 +17,10 @@ export function projectDir(cwd: string): string {
   return join(specwrightDir(cwd), "project");
 }
 
+export function projectArtifactPath(cwd: string, name: string): string {
+  return join(projectDir(cwd), name);
+}
+
 export function changesDir(cwd: string): string {
   return join(specwrightDir(cwd), "changes");
 }
@@ -40,3 +44,7 @@ export function ompAgentsDir(cwd: string): string {
 export function ompRulesDir(cwd: string): string {
   return join(cwd, OMP_DIR, "rules");
 }
+export function isEnoent(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
