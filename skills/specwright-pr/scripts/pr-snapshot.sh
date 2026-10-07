@@ -51,7 +51,7 @@ query($owner:String!, $name:String!, $pr:Int!) {
       comments(first:100) { totalCount nodes { databaseId author { login } body createdAt lastEditedAt url } }
     } }
     comments(last:100) { pageInfo { hasPreviousPage } nodes { id author { login } body createdAt lastEditedAt url } }
-    reviews(last:100) { pageInfo { hasPreviousPage } nodes { id author { login } body state submittedAt lastEditedAt } }
+    reviews(last:100) { pageInfo { hasPreviousPage } nodes { id author { login } body state submittedAt lastEditedAt url } }
   } }
 }
 GQL
@@ -103,7 +103,14 @@ def unhandled($h): (.lastEditedAt // .createdAt // .submittedAt // "") as $rev
 | ([ $p.reviews.nodes[] | select(.state != "PENDING" and (.body // "") != ""
        and (.author.login // "") != $me and unhandled($handled)) |
      { id, rev: (.lastEditedAt // .submittedAt), author: (.author.login // "ghost"), state,
-       body: (.body | clip(1200)), at: .submittedAt } ]) as $reviews
+       body: (.body | clip(1200)), at: .submittedAt, url } ]) as $reviews
+# A reviewer's latest verdict stays CHANGES_REQUESTED until they approve or it
+# is dismissed. Stale: none of the threads they started is still open.
+| ([ $p.reviews.nodes[] | select(.state | IN("APPROVED","CHANGES_REQUESTED","DISMISSED")) ]
+   | group_by(.author.login // "ghost") | map(max_by(.submittedAt // ""))
+   | map(select(.state == "CHANGES_REQUESTED") | (.author.login // "ghost") as $a
+         | select([ $threads[] | select(.comments[0].author == $a) ] | length == 0)
+         | { author: $a, review_id: .id, at: .submittedAt })) as $stale_verdicts
 | ([ (if $p.reviewThreads.pageInfo.hasNextPage then "threads" else empty end),
      ($p.reviewThreads.nodes[] | select(.comments.totalCount > 100) | "thread " + .id + " comments"),
      (if $p.comments.pageInfo.hasPreviousPage then "comments" else empty end),
@@ -119,7 +126,7 @@ def unhandled($h): (.lastEditedAt // .createdAt // .submittedAt // "") as $rev
               pending: ([ $checks[] | select(.state == "pending") ] | length),
               failing: [ $checks[] | select(.state == "fail") ] },
     fail_run_ids: ([ $checks[] | select(.state == "fail" and .run_id != null) | .run_id ] | unique),
-    threads: $threads, comments: $comments, reviews: $reviews,
+    threads: $threads, comments: $comments, reviews: $reviews, stale_verdicts: $stale_verdicts,
     complete: ($truncated | length == 0), truncated: $truncated,
     # base64 keeps the signature free of quotes, so sig_of can cut it out safely
     sig: ([ $p.state, $p.headRefOid, $p.mergeStateStatus,
@@ -127,6 +134,7 @@ def unhandled($h): (.lastEditedAt // .createdAt // .submittedAt // "") as $rev
             ($threads | map(.id + ":" + .rev) | join(",")),
             ($comments | map(.id + ":" + .rev) | join(",")),
             ($reviews | map(.id + ":" + .rev) | join(",")),
+            ($stale_verdicts | map(.author + ":" + .review_id) | join(",")),
             ($truncated | sort | join(",")) ] | join("|") | @base64)
   }
 | tojson

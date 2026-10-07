@@ -2,7 +2,7 @@
 name: specwright-commit
 description: "MANDATORY during the OpenSpec apply phase: /opsx:apply, openspec-apply-change, `openspec instructions apply`, or the user asks to implement/apply an OpenSpec change. Commits each completed task on the change branch, verifies the commits when all tasks are done, then hands off to archive or to the PR."
 metadata:
-  version: 0.1.4
+  version: 0.1.5
 user-invocable: false
 allowed-tools: Bash(git *) Bash(openspec *)
 ---
@@ -25,6 +25,7 @@ One commit per task, in **one shell call**: `git branch --show-current` must sti
 - Subject: `<type>(<change-name>): task X.Y <task text>`, at most 72 characters (cut at a word boundary). Write the message to a temp file so quotes and `$` survive any shell.
 - Follow the user's commit identity and trailer rules (CLAUDE.md / AGENTS.md).
 - Nothing to commit → note the task as no-op for the final report.
+- When a `specwright-implementer` returns, before verifying its group: check for shells or background tasks it left running (your harness's task or process list), stop any you find and say so in the report, then run `git status --porcelain` again. A late writer may have changed or added files, so verify only after this.
 - When a `specwright-implementer` did a group, commit its tasks one by one in order after verifying: each task's files with that task (a file two tasks touched goes with the later one). Re-run each task's green verification yourself; its report is not evidence. A red-confirmation task is the one exception: the test is green by now, so accept the report's exact command and failure output for it, and say so in the commit body.
 - Drift amendments to proposal, specs, design or review.md: commit them by name as `<type>(<change-name>): amend <artifact>` before resuming tasks.
 
@@ -33,6 +34,6 @@ One call: `git log <main>..HEAD --oneline && git status --porcelain`. Every chec
 
 Then read `finish` in `openspec/specwright.yaml` (default `local`):
 - `local` → suggest `/opsx:archive`; the user runs it.
-- `pr` → hand off to `specwright-pr` **ship**, then offer **watch**. Archive after review settles, on the same branch, before the PR is merged.
+- `pr` → hand off to `specwright-pr` **ship**, then offer **watch**. Archive after review settles, on the same branch, before the PR is merged: **watch** offers it once the PR is ready.
 
 Never commit on main, push from this skill, batch tasks into one commit, amend unprompted, or start archive yourself.
