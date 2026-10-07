@@ -22,11 +22,24 @@ export GH_TOKEN=$token
 actual=$(gh api --hostname github.com user --jq .login 2>/dev/null) || actual=
 [ "$actual" = "$login" ] || { echo "as.sh: token resolves to '$actual', expected '$login'; refusing" >&2; exit 3; }
 
+# git push: the token fences HTTPS only. Over SSH the key SSH picks decides the
+# account, so refuse rather than push as an unverified identity.
+if [ "$1" = git ] && [ "${2:-}" = push ]; then
+  remote=origin
+  for a in "${@:3}"; do case $a in -*) ;; *) remote=$a; break ;; esac; done
+  url=$(git remote get-url --push "$remote" 2>/dev/null) || url=
+  case $url in
+    https://github.com/*) ;;
+    *) echo "as.sh: push URL of '$remote' is '$url', not https://github.com/...; cannot pin the identity" >&2; exit 3 ;;
+  esac
+fi
+
 # Command-scoped git config: drop inherited credential helpers, then answer
-# with GH_TOKEN. Never written to any config file.
+# with GH_TOKEN - for https://github.com only, never another host. Never
+# written to any config file.
 export GIT_CONFIG_COUNT=2
 export GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
 export GIT_CONFIG_KEY_1=credential.helper
-export GIT_CONFIG_VALUE_1='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
+export GIT_CONFIG_VALUE_1='!f() { [ "$1" = get ] || exit 0; h= p=; while IFS= read -r l && [ -n "$l" ]; do case $l in host=*) h=${l#host=} ;; protocol=*) p=${l#protocol=} ;; esac; done; [ "$h" = github.com ] && [ "$p" = https ] || exit 0; echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
 
 exec "$@"

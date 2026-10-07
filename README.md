@@ -1,6 +1,6 @@
 # Specwright
 
-![version](https://img.shields.io/badge/version-0.1.1-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
+![version](https://img.shields.io/badge/version-0.1.2-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
 
 A lightweight spec-driven development bundle for AI coding agents, built on [OpenSpec](https://github.com/Fission-AI/OpenSpec). It keeps OpenSpec's small artifact set and adds what OpenSpec leaves out — **architecture reasoning scaled to the change**, test discipline, a git and GitHub PR workflow, and project-level planning — as one custom schema plus a handful of auto-activating skills. No OpenSpec core changes.
 
@@ -48,7 +48,8 @@ Install/Update Specwright
 
 Install or update Specwright from https://github.com/sh1ny/Specwright into the
 current project. Follow the steps in order. Ask the user where indicated - do
-not assume answers.
+not assume answers. Every step is safe to repeat, so re-running this prompt
+also repairs an interrupted or partial install.
 
 Step 1 - Check prerequisites
 - Run `openspec --version`. If it fails, tell the user to install it
@@ -67,34 +68,42 @@ Step 3 - Download and compare versions
 - Clone https://github.com/sh1ny/Specwright to a temporary directory
   (`git clone --depth 1`, or any other method that works).
 - Read the downloaded `VERSION` and the installed
-  `openspec/.specwright/VERSION` (missing = fresh install). Tell the user
-  which applies: fresh install, update from <old> to <new>, or already at
-  <new>. If already at <new>, ask whether to reinstall anyway; if not, skip to
-  Step 7.
+  `openspec/.specwright/VERSION` (missing = fresh install, or an earlier
+  install that did not finish). Tell the user which applies: fresh install,
+  update from <old> to <new>, or reinstall of <new>. Continue in every case.
 
-Step 4 - Install files (overwrite existing copies; track new vs updated)
-- Copy each `skills/specwright-*` directory, recursively, into every chosen
-  skills directory.
+Step 4 - Install files (track new vs updated)
+- In every chosen skills directory, replace each `specwright-*` directory
+  with the downloaded one: delete the installed copy, then copy the new one
+  recursively, so files removed upstream do not linger. If an installed
+  `specwright-*` directory has no downloaded counterpart, list it and ask
+  before removing it.
 - Copy `agents/claude/*.md` into `.claude/agents/` if Claude Code was chosen,
-  and `agents/omp/*.md` into `.omp/agents/` if OMP was chosen.
+  and `agents/omp/*.md` into `.omp/agents/` if OMP was chosen. If an
+  installed agent file has a different `model:` value than the downloaded
+  one, the user changed it: keep their value and say so.
 - Replace `openspec/schemas/specwright/` with the downloaded
   `schemas/specwright/`.
-- Copy `VERSION` to `openspec/.specwright/VERSION`.
 - Legacy openspec-git-flow: if `openspec-git-branch`, `openspec-git-commit` or
   `openspec-git-merge` skill directories exist in a chosen skills directory,
-  or `openspec/.git-flow/` exists, tell the user and remove them.
+  or `openspec/.git-flow/` exists, list them and ask before removing them.
+- Do not write `openspec/.specwright/VERSION` yet; Step 7 does, last.
 
 Step 5 - Merge openspec/config.yaml (never remove unrelated content)
 - If it does not exist, copy the downloaded `openspec/config.yaml`.
 - Otherwise:
   - `schema:` - if it is missing or `spec-driven`, set it to `specwright`. If
-    it names another schema, ask the user before changing it.
-  - `context:` - a Specwright line is one that names a `specwright-*` skill
-    or `openspec/specwright.yaml`. Remove each Specwright line that is not in
-    the downloaded context (an older wording), then append each downloaded
-    line that is not already present, so no line appears twice. Remove any
-    line naming `openspec-git-branch`, `openspec-git-commit` or
-    `openspec-git-merge`. Leave all other lines alone.
+    it names another schema, ask the user before changing it; if they
+    decline, keep it.
+  - `context:` - if there is no `context:` key, add `context: |` holding the
+    downloaded lines (leave any commented-out example alone). Otherwise, a
+    line is Specwright-managed when it starts with
+    `MANDATORY: Invoke the 'specwright-`, `Project-level planning (strategy`
+    or `Specwright settings (`. Remove every managed line (older wordings and
+    duplicates alike), then append each downloaded context line once. Remove
+    any line naming `openspec-git-branch`, `openspec-git-commit` or
+    `openspec-git-merge`. Leave every other line alone, including the
+    project's own lines that mention Specwright.
 
 Step 6 - Settings (openspec/specwright.yaml)
 - If it does not exist, copy the downloaded file, then ask the user for:
@@ -112,31 +121,41 @@ Step 6 - Settings (openspec/specwright.yaml)
   the user's file has keys the downloaded file no longer has, list them and
   ask before removing them.
 
-Step 7 - Verify and clean up
-- Run `openspec schema validate specwright`; report any error.
-- `openspec/.specwright/VERSION` matches the downloaded `VERSION`.
-- In every chosen skills directory, each `specwright-*/SKILL.md` has
-  `version:` equal to that VERSION.
-- `openspec/config.yaml` has `schema: specwright`, every downloaded context
-  line exactly once, and no other Specwright line.
-- `openspec/specwright.yaml` has every key in the downloaded file.
-- Report each failed check and how to fix it; do not claim success past one.
+Step 7 - Verify, stamp the version, clean up
+- Run `openspec schema validate specwright`.
+- Every file of the downloaded `skills/specwright-*` directories exists,
+  with the same content, in every chosen skills directory, and nothing else
+  is in them.
+- Every downloaded agent file exists in each chosen agents directory (the
+  `model:` line may differ, per Step 4).
+- `openspec/config.yaml` has `schema: specwright` (or the schema the user
+  chose to keep - then report "installed, but not the default schema"),
+  every downloaded context line exactly once, and no other managed line.
+- `openspec/specwright.yaml` has every key in the downloaded file, unless
+  the user chose otherwise in Step 6.
+- If every check passes, copy `VERSION` to `openspec/.specwright/VERSION`.
+  If any fails, do not write it: report each failed check and how to fix it,
+  and never claim success.
 - Delete the temporary directory.
 
 Step 8 - Report briefly: version change (fresh, <old> → <new>, or
-unchanged), directories used, skills and agents installed (new vs updated),
-config and settings created/merged/unchanged (keys added or removed), legacy
-files removed, and the result of each Step 7 check. Tell the user to restart
-their agent so new skills and agents load.
+reinstall), directories used, skills and agents installed (new vs updated,
+models kept), config and settings created/merged/unchanged (keys added or
+removed), legacy files removed, and the result of each Step 7 check. Tell the
+user to restart their agent so new skills and agents load.
 ```
 
 ## ⚡ First Steps After Install
 
-1. **Start a change** with `/opsx:propose <idea>` — `specwright-branch` checks for a clean `main` and creates the branch.
-2. **Write the artifacts** with `/opsx:continue` or `/opsx:ff`. The design triage picks LIGHT or FULL; FULL designs are reviewed by a different model before tasks can be written.
+1. **Start a change** — `specwright-branch` checks for a clean `main` and creates the branch first:
+   - `/opsx:propose <idea>` or `/opsx:ff <name>` writes every artifact in one go;
+   - `/opsx:new <name>` scaffolds it, then `/opsx:continue` writes one artifact per run.
+2. **Review gate:** the design triage picks LIGHT or FULL; FULL designs are reviewed in a fresh context (by a different model unless `review.cross_model: false`) before tasks can be written.
 3. **Apply** with `/opsx:apply` — task groups go to `specwright-implementer`, each verified task becomes its own commit.
 4. **PR mode:** the PR opens when apply finishes; `specwright-pr` **watch** handles reviews and CI. Archive once it is green, then merge on GitHub.
 5. **Archive** with `/opsx:archive` — `specwright-finish` merges locally or pushes the archive commit to the PR.
+
+**Several agents at once?** Give each change its own `git worktree`: the skills switch branches in the checkout they run in.
 
 **A whole project instead of one change?** Give the idea to `specwright-roadmap` **init**, then use **next** to start each change and **close** to finish a milestone.
 
@@ -182,9 +201,9 @@ All in [`skills/specwright-pr/scripts/`](skills/specwright-pr/scripts/); bash + 
 
 | Script | Does |
 |---|---|
-| [`as.sh`](skills/specwright-pr/scripts/as.sh) | Runs a command as one GitHub login: pins the token per process, verifies it, and feeds it to both `gh` and `git push`. Safe against a concurrent `gh auth switch`. |
-| [`pr-snapshot.sh`](skills/specwright-pr/scripts/pr-snapshot.sh) | One GraphQL call → the whole PR as JSON (checks, unresolved threads, unhandled comments). `--wait` polls in-process and wakes once; `--logs` appends failed CI logs. |
-| [`pr-reply.sh`](skills/specwright-pr/scripts/pr-reply.sh) | Replies over REST, checks for a pending review, resolves the thread, and marks the item handled on GitHub itself. |
+| [`as.sh`](skills/specwright-pr/scripts/as.sh) | Runs a command as one GitHub login: pins the token per process, verifies it, and feeds it to both `gh` and `git push` (HTTPS to github.com only; it refuses SSH remotes). Safe against a concurrent `gh auth switch`. |
+| [`pr-snapshot.sh`](skills/specwright-pr/scripts/pr-snapshot.sh) | One GraphQL call → the whole PR as JSON (checks, unresolved threads, unhandled or edited comments, and a `complete` flag when a list was cut off). `--wait` polls in-process and wakes once; `--logs` appends failed CI logs. |
+| [`pr-reply.sh`](skills/specwright-pr/scripts/pr-reply.sh) | Replies over REST, checks for a pending review, resolves the thread, and marks the item handled on GitHub itself. `resolve` retries only a failed resolution. |
 
 ---
 
@@ -245,6 +264,7 @@ No trigger → **LIGHT** (triage, context, decisions). Any trigger → **FULL**:
 | `APPROVE` | Tasks may be written |
 | `APPROVE_WITH_CHANGES` | Apply the listed changes; tasks wait for `CHANGES_APPLIED: yes` |
 | `REVISE` | Fix and re-review; two REVISE rounds in a row escalate to the user |
+| `USER_OVERRIDE` | After escalation, the user decided to proceed; their words and the open findings are recorded |
 
 A verdict covers only what was reviewed: editing proposal, specs or design afterwards voids it.
 </details>
@@ -263,12 +283,12 @@ A verdict covers only what was reviewed: editing proposal, specs or design after
 
 | When | Message |
 |---|---|
-| Apply start | `<type>(<change>): add planning artifacts` |
+| Apply start | `<type>(<change>): add planning artifacts` (`<type>` = branch prefix, `bugfix` → `fix`) |
 | Each task | `<type>(<change>): task X.Y <task text>` (≤ 72 chars) |
 | After archive | `<type>(<change>): archive change` |
 | Local merge | `merge: <change>` |
 
-Files are always staged by name — never `git add -A` — and pre-existing untracked files are left alone.
+Files are always staged by name — never `git add -A`, never all of `openspec/` — and pre-existing untracked files are left alone.
 </details>
 
 <details>

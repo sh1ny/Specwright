@@ -2,7 +2,7 @@
 name: specwright-debug
 description: "Root-cause debugging discipline: reproduce, trace, test hypotheses, fix test-first. Use for unexplained failures, not for the deliberate red step of test-first work. Triggers: a bug report, an issue link, an unexpected test or CI failure, an error or crash, 'debug this', 'why does X happen', 'fix this bug', or specwright-pr watch handing off a CI failure."
 metadata:
-  version: 0.1.1
+  version: 0.1.2
 ---
 
 # Specwright Debug
@@ -43,4 +43,4 @@ In a Specwright change, a cause that invalidates a spec, scenario or design deci
 - Infrastructure flakes (runner died, network, timeouts unrelated to the change) → re-run, not a code fix.
 - Fix only convergent failures - where the right fix is clear and keeps the existing contract. Never weaken, skip or mock away a failing assertion.
 - A failure whose fix would reverse a deliberate contract is needs-human: report it with options.
-- Commit as `fix(ci): <summary>` and report one of: fixed-and-pushed, fixed-not-pushed, diagnosed-no-fix, flaky-infra, needs-human.
+- Do not commit or push: `specwright-pr` watch owns publishing. Report one of: fixed (verified locally; list the changed files), diagnosed-no-fix, flaky-infra, needs-human.
