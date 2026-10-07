@@ -1,0 +1,88 @@
+{
+  "skill_name": "specwright-git-workflow",
+  "evals": [
+    {
+      "id": 1,
+      "name": "eval-branch-dirty-main",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "Refuses to branch or scaffold because main has uncommitted changes; reports the status and the options.",
+      "assertions": [
+        "Still on main",
+        "No new branch was created",
+        "No change directory openspec/changes/add-csv-export was created",
+        "The uncommitted README edit is still uncommitted and unstashed",
+        "The report tells the user the tree is not clean"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "eval-branch-clean-main",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called fix-login-timeout (just scaffold it, don't write the artifacts yet).",
+      "expected_output": "Creates and checks out bugfix/fix-login-timeout from main, then scaffolds the change on it without committing.",
+      "assertions": [
+        "Branch bugfix/fix-login-timeout exists and is checked out",
+        "The branch starts at main's HEAD with no new commits",
+        "The change directory openspec/changes/fix-login-timeout exists",
+        "main is unchanged"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "eval-apply-three-tasks",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Commits the planning artifacts, then one commit per task (1.1, 1.2, 2.1) with conventional subjects, leaving the unrelated scratch-notes.txt untouched.",
+      "assertions": [
+        "Still on feat/add-greeting and main is unchanged",
+        "A planning-artifacts commit exists: feat(add-greeting): add planning artifacts",
+        "Exactly one commit per task, subjects start with feat(add-greeting): task 1.1 / 1.2 / 2.1",
+        "Every commit subject is 72 characters or fewer",
+        "scratch-notes.txt was never committed and is still untracked",
+        "All tasks in tasks.md are ticked",
+        "The test suite passes",
+        "Working tree is clean apart from scratch-notes.txt",
+        "The report does not treat the pre-existing scratch-notes.txt as blocking",
+        "No commit was amended"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "eval-finish-local",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "Commits the archive move on the branch, merges into main with --no-ff, deletes the branch, does not push.",
+      "assertions": [
+        "Archive commit on the branch: feat(add-greeting): archive change",
+        "Now on main",
+        "main HEAD is a merge commit with two parents and subject merge: add-greeting",
+        "Branch feat/add-greeting was deleted",
+        "Working tree is clean",
+        "No commit was amended",
+        "The merge commit carries the same trailers as the branch's archive commit"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "eval-apply-on-main",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Notices apply is starting on main and stops to offer creating the change branch instead of committing on main.",
+      "assertions": [
+        "No commit was added to main",
+        "The report flags that apply started on main and offers to create a branch"
+      ]
+    }
+  ]
+}

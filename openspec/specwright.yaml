@@ -1,0 +1,30 @@
+# Specwright settings. Read by the specwright-* skills; OpenSpec ignores this file.
+
+# How a change finishes after archive:
+#   local - merge the feature branch into main with --no-ff, no push
+#   pr    - archive on the branch, push to the PR; GitHub merges
+finish: local
+
+# Main branch. Omit to detect (main, else master).
+# main_branch: main
+
+github:
+  # Account for push, PR creation, replies and thread resolution.
+  # Empty = whatever gh is logged in as (unsafe when agents run concurrently).
+  login: ""
+  # Comment posted once on each new PR to request a review. Empty = none.
+  review_request:
+    body: ""
+    login: ""
+
+project:
+  # Project-level files used by specwright-roadmap. Point these at existing
+  # documents instead of duplicating them.
+  strategy: openspec/strategy.md
+  architecture: openspec/architecture.md   # system shape + index of in-force ADRs
+  roadmap: openspec/roadmap.md
+  adr_dir: docs/adr
+
+pr:
+  # Command that must pass before every push. Empty = none.
+  validate: ""
