@@ -2,7 +2,7 @@
 name: specwright-roadmap
 description: "Project-level planning above OpenSpec changes: strategy, architecture baseline (foundational ADRs) and a milestone roadmap. Modes: init (turn a big project idea or brief into strategy, architecture and roadmap), next (start the next change of the current milestone), close (verify a milestone's exit criteria and plan the next one), status. Triggers: a project idea too big for one change, 'plan this project', 'create a roadmap', 'what's next on the roadmap', 'next change/milestone', 'close the milestone', 'roadmap status', or specwright-finish offering next/close."
 metadata:
-  version: 0.1.2
+  version: 0.1.3
 ---
 
 # Specwright Roadmap
@@ -15,9 +15,9 @@ Three project files sit above OpenSpec changes. Paths come from `project:` in `o
 | Architecture | `openspec/architecture.md` | System shape + index of in-force ADRs (`docs/adr/`) | When an ADR is added or superseded |
 | Roadmap | `openspec/roadmap.md` | Milestones: outcome, exit criteria, changes | At every milestone close |
 
-Status is derived, never stored: a change is done when the main branch holds it under `openspec/changes/archive/` (`git ls-tree -d --name-only <main> openspec/changes/archive/`; in pr mode that means its PR merged, not just that archive ran on the branch); a milestone is done when all its changes are done and every exit criterion has passed.
+Status is derived, never stored: a change is done when the main branch holds it under `openspec/changes/archive/` (`git ls-tree -d --name-only <main> openspec/changes/archive/`; in pr mode that means its PR merged, not just that archive ran on the branch); a milestone is done when all its changes are done and every exit criterion has passed. In pr mode PRs merge on GitHub, so local `<main>` lags: run `git fetch origin <main>` first and read `origin/<main>` instead. If there is no `origin` or the fetch fails, read local `<main>` and say the status may be stale.
 
-**Committing project files** (init and close): start from a clean main and `git checkout -b <branch>` before writing anything, commit the files you wrote by name with a `docs(<branch-name>): ...` subject, then finish per `finish` in `openspec/specwright.yaml`: `local` → merge into main with `--no-ff` and subject `merge: <branch-name>`, delete the branch, never push; `pr` → `specwright-pr` **ship**. There is no change to archive, so `specwright-finish` does not apply.
+**Committing project files** (init and close): start from a clean main (in pr mode, `git pull --ff-only origin <main>` first) and `git checkout -b <branch>` before writing anything, commit the files you wrote by name with a `docs(<branch-name>): ...` subject, then finish per `finish` in `openspec/specwright.yaml`: `local` → merge into main with `--no-ff` and subject `merge: <branch-name>`, delete the branch, never push; `pr` → `specwright-pr` **ship**. There is no change to archive, so `specwright-finish` does not apply.
 
 ## init
 

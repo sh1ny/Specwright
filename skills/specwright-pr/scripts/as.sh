@@ -7,13 +7,21 @@
 #   bash as.sh KintsugiBot gh pr create ...
 #   bash as.sh KintsugiBot git push -u origin HEAD
 #   bash as.sh KintsugiBot bash pr-snapshot.sh 12
-# Exit 3: no credential for <login>, or the token resolves to someone else.
+# Exit 3: no credential for <login>, the token resolves to someone else, or gh
+# is older than 2.40 (no per-account token lookup).
 # Inside, git cannot use SSH or prompt; HTTPS credentials go to github.com only.
 set -euo pipefail
 
 login=${1:?usage: as.sh <login> <command> [args...]}
 shift
 [ $# -gt 0 ] || { echo "as.sh: no command given" >&2; exit 2; }
+
+# Without `gh auth token --user` the only per-account lookup is a shared
+# `gh auth switch`, which other agents race on - so refuse rather than fall back.
+case $(gh auth token --help 2>&1 || true) in
+  *--user*) ;;
+  *) echo "as.sh: $(gh --version 2>/dev/null | head -n 1 || echo 'gh not found') cannot look up a token per account (gh auth token --user, gh 2.40+); upgrade gh" >&2; exit 3 ;;
+esac
 
 unset GH_TOKEN GITHUB_TOKEN
 token=$(gh auth token --hostname github.com --user "$login" 2>/dev/null) || token=
@@ -32,12 +40,19 @@ actual=$(gh api --hostname github.com user --jq .login 2>/dev/null) || actual=
 export GIT_SSH_COMMAND='sh -c "echo as.sh: SSH is disabled - push over https://github.com so the identity can be pinned >&2; exit 1"'
 export GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_ASKPASS= SSH_ASKPASS=
 
-# Command-scoped git config: drop inherited credential helpers, then answer
-# with GH_TOKEN - for https://github.com only, never another host. Never
-# written to any config file.
-export GIT_CONFIG_COUNT=2
-export GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
-export GIT_CONFIG_KEY_1=credential.helper
-export GIT_CONFIG_VALUE_1='!f() { [ "$1" = get ] || exit 0; h= p=; while IFS= read -r l && [ -n "$l" ]; do case $l in host=*) h=${l#host=} ;; protocol=*) p=${l#protocol=} ;; esac; done; [ "$h" = github.com ] && [ "$p" = https ] || exit 0; echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
+# Command-scoped git config, never written to any config file. First empty
+# every inherited http extraHeader: an Authorization header there would
+# authenticate the push as someone else. An empty value resets only its own
+# key - a URL-scoped header outranks a plain reset - so each key in effect
+# here is reset by name. Then drop inherited credential helpers and answer
+# with GH_TOKEN - for https://github.com only, never another host.
+n=0
+cfg() { export "GIT_CONFIG_KEY_$n=$1" "GIT_CONFIG_VALUE_$n=$2"; n=$((n + 1)); }
+cfg http.extraHeader ''
+while IFS= read -r key; do cfg "$key" ''; done \
+  < <(git config --name-only --get-regexp '^http\..+\.extraheader$' 2>/dev/null | sort -u || true)
+cfg credential.helper ''
+cfg credential.helper '!f() { [ "$1" = get ] || exit 0; h= p=; while IFS= read -r l && [ -n "$l" ]; do case $l in host=*) h=${l#host=} ;; protocol=*) p=${l#protocol=} ;; esac; done; [ "$h" = github.com ] && [ "$p" = https ] || exit 0; echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
+export GIT_CONFIG_COUNT=$n
 
 exec "$@"

@@ -8,8 +8,9 @@
 #   --logs    append the last 80 lines of each failing run's failed-step log
 #   --wait    poll inside this process; print {"wake":..., "snapshot":...}
 #             once anything changes (checks, threads, comments, reviews, head,
-#             state, edits) or the timeout passes (default 1800s, interval
-#             60s); exits 1 if the last poll failed
+#             state, edits, a list getting cut off) or the timeout passes
+#             (default 1800s, interval 60s); "incomplete" at once if the first
+#             snapshot is already cut off; exits 1 if the last poll failed
 # "complete": false means a list was cut off at its page size - do not treat
 # missing items as absent.
 # Wrap with as.sh to pin the GitHub identity.
@@ -80,15 +81,22 @@ def unhandled($h): (.lastEditedAt // .createdAt // .submittedAt // "") as $rev
          state: (if .state == "SUCCESS" then "pass"
                  elif (.state | IN("PENDING","EXPECTED")) then "pending" else "fail" end) }
      end ]) as $checks
+# A thread's rev covers every comment, so an edit anywhere in it counts. A
+# reviewer may answer by editing an earlier comment instead of replying:
+# $edited marks a comment of theirs edited after your latest reply.
 | ([ $p.reviewThreads.nodes[] | select(.isResolved | not) |
      .id as $tid | .comments.nodes[-1] as $last |
+     ([ .comments.nodes[] | select((.author.login // "") == $me) | .createdAt ] | max // "") as $replied |
+     ([ .comments.nodes[] | select((.author.login // "") != $me and (.lastEditedAt // "") > $replied) ] | length > 0) as $edited |
      { id, root_id: .comments.nodes[0].databaseId, path, line: (.line // .originalLine),
        outdated: .isOutdated,
-       rev: (($last.databaseId // 0 | tostring) + "@" + ($last.lastEditedAt // $last.createdAt // "")),
-       awaiting_reviewer: (($last.author.login // "") == $me),
-       resolve_pending: ((($last.author.login // "") == $me)
+       rev: (($last.databaseId // 0 | tostring) + "@"
+             + ([ .comments.nodes[] | .lastEditedAt // .createdAt // "" ] | max // "")),
+       awaiting_reviewer: ((($last.author.login // "") == $me) and ($edited | not)),
+       resolve_pending: ((($last.author.login // "") == $me) and ($edited | not)
          and (($last.body // "") | contains("specwright:handled " + $tid + " resolve"))),
-       comments: [ .comments.nodes[] | { author: (.author.login // "ghost"), body: (.body | clip(2500)), at: .createdAt, url } ] } ]) as $threads
+       comments: [ .comments.nodes[] | { author: (.author.login // "ghost"), body: (.body | clip(2500)),
+                                        at: .createdAt, edited: .lastEditedAt, url } ] } ]) as $threads
 | ([ $p.comments.nodes[] | select((.author.login // "") != $me and unhandled($handled)) |
      { id, rev: (.lastEditedAt // .createdAt), author: (.author.login // "ghost"),
        body: (.body | clip(1200)), at: .createdAt, url } ]) as $comments
@@ -118,7 +126,8 @@ def unhandled($h): (.lastEditedAt // .createdAt // .submittedAt // "") as $rev
             ($checks | map(.name + "=" + .state) | sort | join(",")),
             ($threads | map(.id + ":" + .rev) | join(",")),
             ($comments | map(.id + ":" + .rev) | join(",")),
-            ($reviews | map(.id + ":" + .rev) | join(",")) ] | join("|") | @base64)
+            ($reviews | map(.id + ":" + .rev) | join(",")),
+            ($truncated | sort | join(",")) ] | join("|") | @base64)
   }
 | tojson
 JQ
@@ -130,6 +139,8 @@ sig_of() { printf '%s' "$1" | grep -o '"sig":"[^"]*"' || true; }
 
 if [ "$wait" = 1 ]; then
   base=$(snapshot); base_sig=$(sig_of "$base"); waited=0; wake=timeout; snap=$base; ok=1
+  # Activity beyond a cut-off page cannot be seen, so do not wait for it.
+  case $base in *'"complete":false'*) wake=incomplete; timeout=0 ;; esac
   while [ "$waited" -lt "$timeout" ]; do
     sleep "$interval"; waited=$((waited + interval))
     # keep the last good snapshot; a failed poll never replaces it
