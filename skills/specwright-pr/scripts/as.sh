@@ -10,6 +10,8 @@
 # Exit 3: no credential for <login>, the token resolves to someone else, or gh
 # is older than 2.40 (no per-account token lookup).
 # Inside, git cannot use SSH or prompt; HTTPS credentials go to github.com only.
+# Run git from inside the target repo: inherited http extraHeaders are scrubbed
+# for the current repository only, not one selected with git -C/--git-dir.
 set -euo pipefail
 
 login=${1:?usage: as.sh <login> <command> [args...]}
