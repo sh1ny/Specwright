@@ -63,9 +63,14 @@ Ask which agents this project uses (several may apply) and confirm the paths:
 - Codex: skills → `.agents/skills/`
 - Other: ask for the skills directory.
 
-Step 3 - Download
-Clone https://github.com/sh1ny/Specwright to a temporary directory
-(`git clone --depth 1`, or any other method that works).
+Step 3 - Download and compare versions
+- Clone https://github.com/sh1ny/Specwright to a temporary directory
+  (`git clone --depth 1`, or any other method that works).
+- Read the downloaded `VERSION` and the installed
+  `openspec/.specwright/VERSION` (missing = fresh install). Tell the user
+  which applies: fresh install, update from <old> to <new>, or already at
+  <new>. If already at <new>, ask whether to reinstall anyway; if not, skip to
+  Step 7.
 
 Step 4 - Install files (overwrite existing copies; track new vs updated)
 - Copy each `skills/specwright-*` directory, recursively, into every chosen
@@ -84,9 +89,12 @@ Step 5 - Merge openspec/config.yaml (never remove unrelated content)
 - Otherwise:
   - `schema:` - if it is missing or `spec-driven`, set it to `specwright`. If
     it names another schema, ask the user before changing it.
-  - `context:` - append each line from the downloaded config's context that
-    is not already present. Remove any line naming `openspec-git-branch`,
-    `openspec-git-commit` or `openspec-git-merge`.
+  - `context:` - a Specwright line is one that names a `specwright-*` skill
+    or `openspec/specwright.yaml`. Remove each Specwright line that is not in
+    the downloaded context (an older wording), then append each downloaded
+    line that is not already present, so no line appears twice. Remove any
+    line naming `openspec-git-branch`, `openspec-git-commit` or
+    `openspec-git-merge`. Leave all other lines alone.
 
 Step 6 - Settings (openspec/specwright.yaml)
 - If it does not exist, copy the downloaded file, then ask the user for:
@@ -99,16 +107,27 @@ Step 6 - Settings (openspec/specwright.yaml)
   whether to point the `project:` paths at them instead of the defaults.
   Write their answers into the file.
 - If it exists, keep the user's values and add only keys that are missing,
-  with the downloaded defaults.
+  with the downloaded defaults. List each added key with its default and its
+  comment from the downloaded file, and ask whether to keep the default. If
+  the user's file has keys the downloaded file no longer has, list them and
+  ask before removing them.
 
 Step 7 - Verify and clean up
 - Run `openspec schema validate specwright`; report any error.
+- `openspec/.specwright/VERSION` matches the downloaded `VERSION`.
+- In every chosen skills directory, each `specwright-*/SKILL.md` has
+  `version:` equal to that VERSION.
+- `openspec/config.yaml` has `schema: specwright`, every downloaded context
+  line exactly once, and no other Specwright line.
+- `openspec/specwright.yaml` has every key in the downloaded file.
+- Report each failed check and how to fix it; do not claim success past one.
 - Delete the temporary directory.
 
-Step 8 - Report briefly: directories used, skills and agents installed (new
-vs updated), config and settings created/merged/unchanged, legacy files
-removed, and the VERSION. Tell the user to restart their agent so new skills
-and agents load.
+Step 8 - Report briefly: version change (fresh, <old> → <new>, or
+unchanged), directories used, skills and agents installed (new vs updated),
+config and settings created/merged/unchanged (keys added or removed), legacy
+files removed, and the result of each Step 7 check. Tell the user to restart
+their agent so new skills and agents load.
 ```
 
 ## ⚡ First Steps After Install
