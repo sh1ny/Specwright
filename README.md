@@ -1,6 +1,6 @@
 # Specwright
 
-![version](https://img.shields.io/badge/version-0.1.4-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
+![version](https://img.shields.io/badge/version-0.1.5-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
 
 A lightweight spec-driven development bundle for AI coding agents, built on [OpenSpec](https://github.com/Fission-AI/OpenSpec). It keeps OpenSpec's small artifact set and adds what OpenSpec leaves out — **architecture reasoning scaled to the change**, test discipline, a git and GitHub PR workflow, and project-level planning — as one custom schema plus a handful of auto-activating skills. No OpenSpec core changes.
 
@@ -152,7 +152,7 @@ user to restart their agent so new skills and agents load.
    - `/opsx:new <name>` scaffolds it, then `/opsx:continue` writes one artifact per run.
 2. **Review gate:** the design triage picks LIGHT or FULL; FULL designs are reviewed in a fresh context (by a different model unless `review.cross_model: false`) before tasks can be written.
 3. **Apply** with `/opsx:apply` — task groups go to `specwright-implementer`, each verified task becomes its own commit.
-4. **PR mode:** the PR opens when apply finishes; `specwright-pr` **watch** handles reviews and CI. Archive once it is green, then merge on GitHub.
+4. **PR mode:** the PR opens when apply finishes; `specwright-pr` **watch** handles reviews and CI, and once it is green offers to archive on the branch. Then merge on GitHub.
 5. **Archive** with `/opsx:archive` — `specwright-finish` merges locally or pushes the archive commit to the PR.
 
 **Several agents at once?** Give each change its own `git worktree`: the skills switch branches in the checkout they run in.
@@ -202,7 +202,7 @@ All in [`skills/specwright-pr/scripts/`](skills/specwright-pr/scripts/); bash + 
 | Script | Does |
 |---|---|
 | [`as.sh`](skills/specwright-pr/scripts/as.sh) | Runs a command as one GitHub login: pins the token per process, verifies it, and feeds it to both `gh` and `git push` (HTTPS to github.com only; SSH, prompts and inherited `http.extraHeader` auth are disabled inside it; run git from inside the target repo, since extraHeaders are scrubbed for the current repository only). Safe against a concurrent `gh auth switch`. |
-| [`pr-snapshot.sh`](skills/specwright-pr/scripts/pr-snapshot.sh) | One GraphQL call → the whole PR as JSON (checks, unresolved threads, unhandled or edited comments, and a `complete` flag when a list was cut off). `--wait` polls in-process and wakes once (at once if the snapshot is already incomplete); `--logs` appends failed CI logs. |
+| [`pr-snapshot.sh`](skills/specwright-pr/scripts/pr-snapshot.sh) | One GraphQL call → the whole PR as JSON (checks, unresolved threads, unhandled or edited comments, stale `CHANGES_REQUESTED` verdicts, and a `complete` flag when a list was cut off). `--wait` polls in-process and wakes once (at once if the snapshot is already incomplete); `--logs` appends failed CI logs. |
 | [`pr-reply.sh`](skills/specwright-pr/scripts/pr-reply.sh) | Replies over REST, checks for a pending review, resolves the thread, and marks the item handled on GitHub itself. `resolve` retries only a failed resolution. |
 
 ---
@@ -233,6 +233,8 @@ project:                        # point at existing docs instead of duplicating 
 
 pr:
   validate: "npm test"          # must pass before every push; empty = none
+  max_fix_rounds: 2             # address-review-feedback commits allowed per PR
+  after_limit: ask              # at the limit: ask = report and stop, issues = file each new finding as an issue and reply with the link, stop = report only
 ```
 
 [`openspec/config.yaml`](openspec/config.yaml) carries the `context:` lines that make the git skills fire at the right phase.
@@ -298,8 +300,8 @@ Files are always staged by name — never `git add -A`, never all of `openspec/`
 | Mode | Does | Never |
 |---|---|---|
 | `ship` | Push, create/update the PR with `--body-file`, post the review request | Push the default branch |
-| `feedback` | One snapshot → judge all items → fix → validate once → one commit → reply and resolve | Resolve needs-human threads; go past 2 rounds |
-| `watch` | Background wait → feedback first → ignore CI for stale heads → fix all failing checks in one pass | Merge, rebase, force-push, approve workflow runs |
+| `feedback` | One snapshot → judge all items → fix → validate once → one commit → reply and resolve | Resolve needs-human threads; go past `max_fix_rounds` |
+| `watch` | Background wait → feedback first → ignore CI for stale heads → fix all failing checks in one pass → at ready, offer the archive on the branch; report stale `CHANGES_REQUESTED` verdicts | Merge, rebase, force-push, approve workflow runs, dismiss reviews |
 </details>
 
 ---

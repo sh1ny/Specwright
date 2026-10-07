@@ -37,3 +37,9 @@ project:
 pr:
   # Command that must pass before every push. Empty = none.
   validate: ""
+  # address-review-feedback commits allowed per PR.
+  max_fix_rounds: 2
+  # At the limit: ask = report and stop (the user decides), issues = file each
+  # new actionable finding as an issue, reply with the link and resolve,
+  # stop = report and stop.
+  after_limit: ask

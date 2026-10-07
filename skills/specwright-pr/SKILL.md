@@ -2,7 +2,7 @@
 name: specwright-pr
 description: "GitHub pull request workflow for Specwright projects, in three modes. ship: push the branch and open or update its PR with a good description, then request review. feedback: fetch all unresolved review threads and comments, judge them, fix, reply and resolve. watch: wait for CI and reviews in the background and handle what arrives until the PR is ready to merge. Triggers: 'open a PR', 'ship this', 'push and create PR', 'address/resolve PR comments', 'handle review feedback', 'babysit/watch the PR', 'fix CI on the PR', or the specwright-commit/specwright-finish skills handing off in pr mode."
 metadata:
-  version: 0.1.4
+  version: 0.1.5
 ---
 
 # Specwright PR
@@ -23,6 +23,9 @@ github:
     after_fixes: false                          # true = request again after each fix round you push
 pr:
   validate: "<command run before every push>"   # empty = none
+  max_fix_rounds: 2                             # address-review-feedback commits allowed
+  after_limit: ask                              # ask | issues | stop
+finish: pr                                      # local | pr (watch offers the archive only in pr)
 ```
 
 When `github.login` is set, run **every** `gh` and `git push` command, and every script below, through `bash scripts/as.sh <login> <command...>`. The commands below show this as `[as] ` - replace it with `bash scripts/as.sh <login> `, or drop it when `github.login` is empty. as.sh pins and verifies the identity per process and pushes over HTTPS only. If it exits 3, stop and tell the user; never fall back to another account. Never run `gh auth switch`.
@@ -42,17 +45,26 @@ Before any push, run `pr.validate` if set. If it fails, fix or stop; never push 
 
 ## feedback
 
-1. Round limit first: count earlier `address review feedback` commits on the branch (`git log <main>..HEAD`). If there are already two, do not fix again: report the recurring pattern and stop.
+1. Round limit first: count earlier `address review feedback` commits on the branch (`git log <main>..HEAD`). Below `pr.max_fix_rounds` (default 2), carry on. At the limit, never fix again; act on `pr.after_limit` (default `ask`):
+   - `ask`: report the recurring pattern and stop. The user decides whether to allow another round.
+   - `stop`: report the recurring pattern and stop, without offering more rounds.
+   - `issues`: carry on with steps 2-4, then go to **After the limit** instead of step 5.
 2. `[as] bash scripts/pr-snapshot.sh [<pr>]` - one call returns everything. If `pending_review` is true, stop: the user has an unsubmitted review that would swallow replies. If `truncated` names anything other than `checks`, stop: report the lists and hand over to the user. A cut-off list hides feedback, and a thread cut off at 100 comments shows a stale last comment, so judging the visible page would answer the wrong thing.
-3. Items: each entry of `threads`, `comments` and `reviews`. Threads with `awaiting_reviewer: true` already have your reply - skip them. It turns false when the reviewer replies, or edits an earlier comment after your reply (that comment's `edited` is newer than your reply's `at`) - an edit is an answer too. A thread with `resolve_pending: true` is either a resolution that failed or a thread the reviewer reopened - the snapshot cannot tell. Run `[as] bash scripts/pr-reply.sh <pr> resolve <id>` only when `pr-reply.sh` reported that failure in this session; otherwise list the thread and ask the user, never re-resolve it silently. Drop non-actionable items (bot summaries, approvals, CI notices) with no reply, and remember their `id` and `rev` as dropped.
+3. Items: each entry of `threads`, `comments` and `reviews`. Threads with `awaiting_reviewer: true` already have your reply - skip them. It turns false when the reviewer replies, or edits an earlier comment after your reply (that comment's `edited` is newer than your reply's `at`) - an edit is an answer too. A thread with `resolve_pending: true` is either a resolution that failed or a thread the reviewer reopened - the snapshot cannot tell. Run `[as] bash scripts/pr-reply.sh <pr> resolve <id>` only when `pr-reply.sh` reported that failure in this session; otherwise list the thread and ask the user, never re-resolve it silently. Drop non-actionable items (bot summaries, approvals, CI notices) with no reply, and remember their `id` and `rev` as dropped. A review's `CHANGES_REQUESTED` state is not feedback in itself; judge its body like any other. `stale_verdicts` lists reviewers whose latest verdict still requests changes although every thread they started is resolved: GitHub clears it only on their approval or a dismissal, so report it (see watch step 3) and never dismiss it yourself.
 4. Judge the whole batch at once with `references/rubric.md` before changing anything. Group items that share a root cause and fix the class, not just the line.
-5. Apply all fixes. Run the project's tests and `pr.validate` once. Commit the changed files by name (`specwright-commit` rules) as `fix(<change-or-scope>): address review feedback`, then push.
+5. Apply all fixes. If the change is already archived on the branch, a spec fix goes into the archived copy (`openspec/changes/archive/<dated-name>/specs/...`) and the main spec it updated, both still the PR's content. Run the project's tests and `pr.validate` once. Commit the changed files by name (`specwright-commit` rules) as `fix(<change-or-scope>): address review feedback`, then push.
 6. Reply to every handled item with a body file:
    - thread: `[as] bash scripts/pr-reply.sh <pr> thread <id> <root_id> <file> --resolve` (omit `--resolve` for needs-human and for questions back to the reviewer)
    - comment or review body: `[as] bash scripts/pr-reply.sh <pr> comment <id> <file>`
    Exit 2 means a pending review appeared - stop and tell the user.
 7. If step 5 pushed a fix commit, **re-request review** (see Settings and identity).
 8. Summarize: fixed / replied / declined / dropped / needs-human (with the options and your recommendation).
+
+**After the limit** (`after_limit: issues`): no fix, commit, push or re-request. Needs-human items are reported as in step 8, not filed. For each actionable item:
+- An issue may exist from an earlier, interrupted run: `[as] gh issue list --state all --limit 200 --json number,body --jq '.[] | select(.body | contains("specwright:pr-item <item id>")) | .number'`. Reuse it if found.
+- Otherwise write a body file with the finding in your words, the file and line, the item's `url` (a thread's: its first comment's) and a last line `specwright:pr-item <item id>`, then `[as] gh issue create --title <title> --body-file <file>`.
+- Reply `Not addressing: tracked as #<N>` with `pr-reply.sh` as in step 6 (threads with `--resolve`).
+Then summarize the issues filed. Under **watch**, carry on toward ready.
 
 ## watch
 
@@ -64,7 +76,9 @@ Loop until a stop condition:
    - `complete` false → stop: report the `truncated` lists and hand over to the user. Only one page of each list is fetched, so readiness cannot be judged.
    - New feedback (anything not dropped at its current `rev`) → run **feedback** first. Never wait for CI before addressing reviews; the fix commit re-triggers CI anyway.
    - Failing checks: only act if `head_oid` is still the head you pushed (otherwise the results are for a dead commit; wait again). Re-run the snapshot with `--logs` and handle **all** failing checks in one pass: infrastructure flake → `[as] gh run rerun <run_id> --failed`; real failure → `specwright-debug` in CI mode, which returns a verified fix without committing; you commit it by name as `fix(ci): <summary>`, push, and **re-request review**.
-3. Ready = `mergeable` MERGEABLE, `merge_state` CLEAN, `checks.pending` 0, no failing checks, no threads/comments/reviews other than dropped ones, and no new activity for one full wait. Report ready and stop; the user merges.
+3. Ready = `mergeable` MERGEABLE, `merge_state` CLEAN, `checks.pending` 0, no failing checks, no threads/comments/reviews other than dropped ones, and no new activity for one full wait. List each entry of `stale_verdicts` as `stale verdict from <author>: dismiss on GitHub (⋯ → Dismiss review)`. When the only thing short of ready is `merge_state` BLOCKED while `stale_verdicts` is non-empty, report `ready except for the stale verdicts above` - a stale verdict can be what blocks the merge.
+   - **Archive before merge:** if `finish` is `pr`, the branch is `<prefix>/<change-name>` and `openspec/changes/<change-name>/` still exists, ask `Ready. Archive <change-name> on this branch now?`. On yes, run the OpenSpec archive workflow for it (`/opsx:archive`, or `openspec archive <change-name>` where the harness has no slash commands); `specwright-finish` then commits the archive and ships it. The archive commit is not a fix round: do not re-request review. Go back to step 1 and watch the new head until ready again. If the user asks to merge before the change is archived, offer the archive the same way first.
+   - Otherwise (already archived, declined, or not a Specwright change) report ready and stop; the user merges.
 4. Stop and report instead of looping when: the same check fails again after a fix on a new head, fixes alternate between two places, three CI fix rounds have passed, or about 2 hours of watching pass with no progress.
 
 ## Never
