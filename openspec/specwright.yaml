@@ -17,6 +17,12 @@ github:
     body: ""
     login: ""
 
+review:
+  # Design reviews (FULL tier and the roadmap baseline) prefer a different
+  # model's CLI (Claude author -> codex, Codex author -> claude).
+  # false = always use the fresh-context specwright-reviewer agent instead.
+  cross_model: true
+
 project:
   # Project-level files used by specwright-roadmap. Point these at existing
   # documents instead of duplicating them.

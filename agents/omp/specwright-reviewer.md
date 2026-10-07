@@ -1,6 +1,6 @@
 ---
 name: specwright-reviewer
-description: Fresh-context, read-only adversarial reviewer for Specwright design reviews (writes review.md) and PR feedback triage. Use when a cross-model reviewer CLI is unavailable.
+description: Fresh-context, read-only adversarial reviewer for Specwright design reviews (writes review.md) and PR feedback triage. Use when a cross-model reviewer CLI is unavailable or disabled.
 model: pi/slow
 tools: read,grep,find,lsp,bash,write
 spawns: []

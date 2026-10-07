@@ -290,7 +290,8 @@ artifacts:
       proposal, specs or design. In order of preference:
       1. A different model through an installed CLI, read-only (an author on
          Claude → `codex`; an author on Codex/GPT → `claude`). Check that the
-         CLI exists and read its current flags; do not guess them.
+         CLI exists and read its current flags; do not guess them. Skip this
+         when `review.cross_model` in openspec/specwright.yaml is `false`.
       2. A fresh-context subagent of the current harness - the
          `specwright-reviewer` agent when installed - given file paths, not
          your reasoning.

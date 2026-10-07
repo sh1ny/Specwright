@@ -1,6 +1,6 @@
 # Specwright
 
-![version](https://img.shields.io/badge/version-0.1.0-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
+![version](https://img.shields.io/badge/version-0.1.1-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
 
 A lightweight spec-driven development bundle for AI coding agents, built on [OpenSpec](https://github.com/Fission-AI/OpenSpec). It keeps OpenSpec's small artifact set and adds what OpenSpec leaves out — **architecture reasoning scaled to the change**, test discipline, a git and GitHub PR workflow, and project-level planning — as one custom schema plus a handful of auto-activating skills. No OpenSpec core changes.
 
@@ -92,7 +92,8 @@ Step 6 - Settings (openspec/specwright.yaml)
 - If it does not exist, copy the downloaded file, then ask the user for:
   finish mode (`local` merges to main locally; `pr` goes through GitHub PRs),
   the GitHub login for pushes/PRs/replies, an optional review-request comment
-  and the login that posts it, and an optional pre-push validation command.
+  and the login that posts it, whether design reviews may call a different
+  model's CLI (`review.cross_model`), and an optional pre-push validation command.
   If the project already has strategy, architecture or roadmap documents
   (e.g. STRATEGY.md, docs/architecture*, a roadmap or milestone plan), ask
   whether to point the `project:` paths at them instead of the defaults.
@@ -152,7 +153,7 @@ and agents load.
 | Agent | Claude Code | OMP | Role |
 |---|---|---|---|
 | `specwright-implementer` | [`sonnet`](agents/claude/specwright-implementer.md) | [`pi/smol`](agents/omp/specwright-implementer.md) | Implements one task group test-first from a packet; never commits |
-| `specwright-reviewer` | [`inherit`](agents/claude/specwright-reviewer.md) | [`pi/slow`](agents/omp/specwright-reviewer.md) | Read-only reviewer; fallback when no cross-model CLI is available |
+| `specwright-reviewer` | [`inherit`](agents/claude/specwright-reviewer.md) | [`pi/slow`](agents/omp/specwright-reviewer.md) | Read-only reviewer; fallback when no cross-model CLI is available or `review.cross_model: false` |
 
 Change the model in each file's `model:` line (Claude Code), or map the role aliases in `~/.omp/agent/config.yml` (OMP).
 
@@ -181,6 +182,9 @@ github:
   review_request:
     body: "@codex review"       # posted once per new PR; empty = none
     login: my-account
+
+review:
+  cross_model: true             # false = design reviews use the specwright-reviewer agent, never another model's CLI
 
 project:                        # point at existing docs instead of duplicating them
   strategy: openspec/strategy.md

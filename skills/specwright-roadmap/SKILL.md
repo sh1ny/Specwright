@@ -2,7 +2,7 @@
 name: specwright-roadmap
 description: "Project-level planning above OpenSpec changes: strategy, architecture baseline (foundational ADRs) and a milestone roadmap. Modes: init (turn a big project idea or brief into strategy, architecture and roadmap), next (start the next change of the current milestone), close (verify a milestone's exit criteria and plan the next one), status. Triggers: a project idea too big for one change, 'plan this project', 'create a roadmap', 'what's next on the roadmap', 'next change/milestone', 'close the milestone', 'roadmap status', or specwright-finish offering next/close."
 metadata:
-  version: 0.1.0
+  version: 0.1.1
 ---
 
 # Specwright Roadmap
@@ -25,7 +25,7 @@ Input: the user's project idea (any size), plus the repo if code exists.
 2. **Interview, briefly.** List the gaps that would change the architecture or the first milestone: users, platform, scope and non-goals, hard constraints, data and its sensitivity, success measures. Ask them in at most two batched rounds, each question with a recommended default. Everything else becomes a stated assumption.
 3. **Strategy** (`references/strategy.md`), one page.
 4. **Architecture baseline** (`references/architecture.md`). Run the design triage (T1-T6 from the schema's design instruction) for the whole system, not one change. Write the component diagram, state ownership, boundaries and contracts, resource bounds and failure visibility at system level - brief, a few lines per row. Record the foundational decisions as ADRs (process and isolate model, storage and formats, IPC and contracts, state management, external integrations), each with a rejected alternative and its reversal cost. Ground in the code if it exists; otherwise check claims about the stack against its docs.
-5. **Review** the strategy and architecture the same way a FULL design is reviewed (cross-model CLI, else the `specwright-reviewer` agent), into `openspec/architecture-review.md`, at most two rounds. This is the one place a review always runs: early architecture mistakes are the most expensive ones.
+5. **Review** the strategy and architecture the same way a FULL design is reviewed (cross-model CLI unless `review.cross_model` is `false`, else the `specwright-reviewer` agent), into `openspec/architecture-review.md`, at most two rounds. This is the one place a review always runs: early architecture mistakes are the most expensive ones.
 6. **Roadmap** (`references/roadmap.md`):
    - M1 is a walking skeleton: the thinnest end-to-end slice through the architecture, which proves the riskiest assumptions first.
    - Each milestone has a demoable outcome and exit criteria that can be checked, each marked agent- or user-verified.
