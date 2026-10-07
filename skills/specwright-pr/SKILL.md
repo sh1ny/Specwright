@@ -2,7 +2,7 @@
 name: specwright-pr
 description: "GitHub pull request workflow for Specwright projects, in three modes. ship: push the branch and open or update its PR with a good description, then request review. feedback: fetch all unresolved review threads and comments, judge them, fix, reply and resolve. watch: wait for CI and reviews in the background and handle what arrives until the PR is ready to merge. Triggers: 'open a PR', 'ship this', 'push and create PR', 'address/resolve PR comments', 'handle review feedback', 'babysit/watch the PR', 'fix CI on the PR', or the specwright-commit/specwright-finish skills handing off in pr mode."
 metadata:
-  version: 0.1.2
+  version: 0.1.3
 ---
 
 # Specwright PR
@@ -39,7 +39,7 @@ Before any push, run `pr.validate` if set. If it fails, fix or stop; never push 
 
 1. Round limit first: count earlier `address review feedback` commits on the branch (`git log <main>..HEAD`). If there are already two, do not fix again: report the recurring pattern and stop.
 2. `[as] bash scripts/pr-snapshot.sh [<pr>]` - one call returns everything. If `pending_review` is true, stop: the user has an unsubmitted review that would swallow replies. If `truncated` names anything other than `checks`, stop: report the lists and hand over to the user. A cut-off list hides feedback, and a thread cut off at 100 comments shows a stale last comment, so judging the visible page would answer the wrong thing.
-3. Items: each entry of `threads`, `comments` and `reviews`. Threads with `awaiting_reviewer: true` already have your reply - skip them unless the reviewer answered. A thread with `resolve_pending: true` is either a resolution that failed or a thread the reviewer reopened - the snapshot cannot tell. Run `[as] bash scripts/pr-reply.sh <pr> resolve <id>` only when `pr-reply.sh` reported that failure in this session; otherwise list the thread and ask the user, never re-resolve it silently. Drop non-actionable items (bot summaries, approvals, CI notices) with no reply, and remember their `id` and `rev` as dropped.
+3. Items: each entry of `threads`, `comments` and `reviews`. Threads with `awaiting_reviewer: true` already have your reply - skip them. It turns false when the reviewer replies, or edits an earlier comment after your reply (that comment's `edited` is newer than your reply's `at`) - an edit is an answer too. A thread with `resolve_pending: true` is either a resolution that failed or a thread the reviewer reopened - the snapshot cannot tell. Run `[as] bash scripts/pr-reply.sh <pr> resolve <id>` only when `pr-reply.sh` reported that failure in this session; otherwise list the thread and ask the user, never re-resolve it silently. Drop non-actionable items (bot summaries, approvals, CI notices) with no reply, and remember their `id` and `rev` as dropped.
 4. Judge the whole batch at once with `references/rubric.md` before changing anything. Group items that share a root cause and fix the class, not just the line.
 5. Apply all fixes. Run the project's tests and `pr.validate` once. Commit the changed files by name (`specwright-commit` rules) as `fix(<change-or-scope>): address review feedback`, then push.
 6. Reply to every handled item with a body file:
@@ -52,7 +52,7 @@ Before any push, run `pr.validate` if set. If it fails, fix or stop; never push 
 
 Loop until a stop condition:
 
-1. Wait in the background - one tool call, no tokens while waiting: `[as] bash scripts/pr-snapshot.sh <pr> --wait --timeout 1800 --interval 60` (Claude Code: `run_in_background`; other harnesses: their background or blocking exec). It prints `{"wake":"changed"|"timeout", "snapshot":{...}}`, or exits non-zero if GitHub could not be read.
+1. Wait in the background - one tool call, no tokens while waiting: `[as] bash scripts/pr-snapshot.sh <pr> --wait --timeout 1800 --interval 60` (Claude Code: `run_in_background`; other harnesses: their background or blocking exec). It prints `{"wake":"changed"|"timeout"|"incomplete", "snapshot":{...}}` (`incomplete`: the first snapshot was already cut off, so it did not wait), or exits non-zero if GitHub could not be read.
 2. On wake, in this order:
    - `state` MERGED or CLOSED → stop.
    - `complete` false → stop: report the `truncated` lists and hand over to the user. Only one page of each list is fetched, so readiness cannot be judged.
