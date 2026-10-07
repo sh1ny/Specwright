@@ -26,11 +26,34 @@ actual=$(gh api --hostname github.com user --jq .login 2>/dev/null) || actual=
 # account, so refuse rather than push as an unverified identity. The remote
 # must be named: a bare push goes wherever pushRemote/pushDefault/upstream
 # config says, which this check cannot see.
-if [ "$1" = git ] && [ "${2:-}" = push ]; then
+if [ "$1" = git ]; then
+  # Find the subcommand past git's global options (-C dir, -c k=v, ...), and
+  # keep those options so the URL lookup sees the same repo and config.
+  pre=() sub= rest=()
+  set -- "${@:2}"
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -C|-c|--git-dir|--work-tree|--namespace|--config-env) pre+=("$1" "${2:-}"); shift 2 || shift ;;
+      -*) pre+=("$1"); shift ;;
+      *) sub=$1; shift; rest=("$@"); break ;;
+    esac
+  done
+  set -- git "${pre[@]}" ${sub:+"$sub"} "${rest[@]}"
+fi
+if [ "${sub:-}" = push ]; then
   remote=
-  for a in "${@:3}"; do case $a in -*) ;; *) remote=$a; break ;; esac; done
+  while [ ${#rest[@]} -gt 0 ]; do
+    a=${rest[0]}; rest=("${rest[@]:1}")
+    case $a in
+      --repo=*) remote=${a#--repo=}; break ;;
+      --repo) remote=${rest[0]:-}; break ;;
+      -o|--push-option|--receive-pack|--exec) rest=("${rest[@]:1}") ;;
+      -*) ;;
+      *) remote=$a; break ;;
+    esac
+  done
   [ -n "$remote" ] || { echo "as.sh: name the remote (git push <remote> ...); a bare push may go elsewhere" >&2; exit 3; }
-  url=$(git remote get-url --push "$remote" 2>/dev/null) || url=
+  url=$(git "${pre[@]}" remote get-url --push "$remote" 2>/dev/null) || url=
   case $url in
     https://github.com/*) ;;
     *) echo "as.sh: push URL of '$remote' is '$url', not https://github.com/...; cannot pin the identity" >&2; exit 3 ;;

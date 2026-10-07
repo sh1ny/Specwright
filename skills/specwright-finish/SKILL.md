@@ -11,12 +11,12 @@ allowed-tools: Bash(git *) Bash(openspec *)
 
 Start only after the vanilla archive workflow reports success (for bulk archive: after all of it). If it failed, do nothing.
 
-Commit type: the branch prefix, except `bugfix` → `fix`. Archive paths: `openspec/changes/<change-name>/` (now removed), `openspec/changes/archive/<dated-name>/` and `openspec/specs/`. Other files are the user's: never stage them.
+Commit type: the branch prefix, except `bugfix` → `fix`. Archive paths: `openspec/changes/<change-name>/` (now removed), `openspec/changes/archive/<dated-name>/`, and for each delta `specs/<capability-path>/spec.md` inside the archived change, the main spec `openspec/specs/<capability-path>/spec.md` it updated or created - by file, never the whole `openspec/specs/` directory. Other files are the user's: never stage them.
 
 1. **Branch:** `git branch --show-current`. If the branch's change name differs from the archived change, confirm with the user. On main:
    - No archive changes left uncommitted (the archive already reached main) → report `Nothing to finish - archive is on <main>` and stop.
    - Otherwise (typically the PR merged before archive ran) → offer `git checkout -b chore/archive-<change-name>`; the uncommitted archive carries over. Continue from step 2 on that branch, or stop if the user declines. Never commit on main.
-2. **Archive commit**, one call: `git add -- <archive paths> && git commit -F <msgfile> -- <archive paths>` with `<type>(<change-name>): archive change`. Then `git status --porcelain`: nothing may be left under `openspec/changes/` or `openspec/specs/` (else stop and list it); other leftovers are the user's files - list them and continue. Bulk archive of several changes on one branch → one archive commit naming them all.
+2. **Archive commit**, one call: `git add -- <archive paths> && git commit -F <msgfile> -- <archive paths>` with `<type>(<change-name>): archive change`. Then `git status --porcelain`: nothing may be left under `openspec/changes/<change-name>/` or the archive directory, and none of the listed spec files (else stop and list it); other leftovers, including other files under `openspec/`, are the user's - list them and continue. Bulk archive of several changes on one branch → one archive commit naming them all.
 3. **Finish** per `finish` in `openspec/specwright.yaml` (default `local`). Main branch: `main_branch` setting, else `main`, else `master`, else ask.
 
 ## local
