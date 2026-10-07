@@ -29,7 +29,7 @@ When `github.login` is set, run **every** `gh` and `git push` command, and every
 
 Before any push, run `pr.validate` if set. If it fails, fix or stop; never push red.
 
-**Re-request review** - for reviewers that only run when tagged (Codex), not on new commits. Only when `review_request.body` is set and `review_request.after_fixes` is true, and only right after you pushed a fix commit: read `[as] gh pr view <n> --json comments` and the pushed commit's time (`git log -1 --format=%cI HEAD`). If no comment from `review_request.login` with that exact body was created after that commit, post it: `bash scripts/as.sh <review_request.login> gh pr comment <n> --body "<body>"`. At most once per pushed head: never on a wake with nothing new pushed, and never for commits someone else pushed.
+**Re-request review** - for reviewers that only run when tagged (Codex), not on new commits. Only when `review_request.body` is set and `review_request.after_fixes` is true, and only right after you pushed a fix commit. Compare GitHub timestamps only, never the local clock: get the push time of the new head from the repository you pushed to, `[as] gh api "repos/<owner>/<repo>/activity?ref=refs/heads/<branch>" --jq '[.[] | select(.after == "<head sha>")][0].timestamp'`, and the comments from `[as] gh pr view <n> --json comments`. Unless a comment from `review_request.login` with that exact body was created at or after that push time, post it: `bash scripts/as.sh <review_request.login> gh pr comment <n> --body "<body>"`. If the push time is not found, post anyway: a duplicate request costs less than an unreviewed fix. At most once per pushed head: never on a wake with nothing new pushed, and never for commits someone else pushed.
 
 ## ship
 
