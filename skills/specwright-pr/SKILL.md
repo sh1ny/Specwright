@@ -2,7 +2,7 @@
 name: specwright-pr
 description: "GitHub pull request workflow for Specwright projects, in three modes. ship: push the branch and open or update its PR with a good description, then request review. feedback: fetch all unresolved review threads and comments, judge them, fix, reply and resolve. watch: wait for CI and reviews in the background and handle what arrives until the PR is ready to merge. Triggers: 'open a PR', 'ship this', 'push and create PR', 'address/resolve PR comments', 'handle review feedback', 'babysit/watch the PR', 'fix CI on the PR', or the specwright-commit/specwright-finish skills handing off in pr mode."
 metadata:
-  version: 0.1.3
+  version: 0.1.4
 ---
 
 # Specwright PR
@@ -17,7 +17,10 @@ Read `openspec/specwright.yaml` if it exists:
 main_branch: <main>                              # omit to detect main, else master
 github:
   login: <account for push, PR, replies>        # empty = ambient gh account
-  review_request: { body: "@codex review", login: <account that posts it> }
+  review_request:
+    body: "@codex review"                       # empty = never request review
+    login: <account that posts it>
+    after_fixes: false                          # true = request again after each fix round you push
 pr:
   validate: "<command run before every push>"   # empty = none
 ```
@@ -25,6 +28,8 @@ pr:
 When `github.login` is set, run **every** `gh` and `git push` command, and every script below, through `bash scripts/as.sh <login> <command...>`. The commands below show this as `[as] ` - replace it with `bash scripts/as.sh <login> `, or drop it when `github.login` is empty. as.sh pins and verifies the identity per process and pushes over HTTPS only. If it exits 3, stop and tell the user; never fall back to another account. Never run `gh auth switch`.
 
 Before any push, run `pr.validate` if set. If it fails, fix or stop; never push red.
+
+**Re-request review** - for reviewers that only run when tagged (Codex), not on new commits. Only when `review_request.body` is set and `review_request.after_fixes` is true, and only right after you pushed a fix commit: read `[as] gh pr view <n> --json comments` and the pushed commit's time (`git log -1 --format=%cI HEAD`). If no comment from `review_request.login` with that exact body was created after that commit, post it: `bash scripts/as.sh <review_request.login> gh pr comment <n> --body "<body>"`. At most once per pushed head: never on a wake with nothing new pushed, and never for commits someone else pushed.
 
 ## ship
 
@@ -46,7 +51,8 @@ Before any push, run `pr.validate` if set. If it fails, fix or stop; never push 
    - thread: `[as] bash scripts/pr-reply.sh <pr> thread <id> <root_id> <file> --resolve` (omit `--resolve` for needs-human and for questions back to the reviewer)
    - comment or review body: `[as] bash scripts/pr-reply.sh <pr> comment <id> <file>`
    Exit 2 means a pending review appeared - stop and tell the user.
-7. Summarize: fixed / replied / declined / dropped / needs-human (with the options and your recommendation).
+7. If step 5 pushed a fix commit, **re-request review** (see Settings and identity).
+8. Summarize: fixed / replied / declined / dropped / needs-human (with the options and your recommendation).
 
 ## watch
 
@@ -57,7 +63,7 @@ Loop until a stop condition:
    - `state` MERGED or CLOSED → stop.
    - `complete` false → stop: report the `truncated` lists and hand over to the user. Only one page of each list is fetched, so readiness cannot be judged.
    - New feedback (anything not dropped at its current `rev`) → run **feedback** first. Never wait for CI before addressing reviews; the fix commit re-triggers CI anyway.
-   - Failing checks: only act if `head_oid` is still the head you pushed (otherwise the results are for a dead commit; wait again). Re-run the snapshot with `--logs` and handle **all** failing checks in one pass: infrastructure flake → `[as] gh run rerun <run_id> --failed`; real failure → `specwright-debug` in CI mode, which returns a verified fix without committing; you commit it by name as `fix(ci): <summary>` and push.
+   - Failing checks: only act if `head_oid` is still the head you pushed (otherwise the results are for a dead commit; wait again). Re-run the snapshot with `--logs` and handle **all** failing checks in one pass: infrastructure flake → `[as] gh run rerun <run_id> --failed`; real failure → `specwright-debug` in CI mode, which returns a verified fix without committing; you commit it by name as `fix(ci): <summary>`, push, and **re-request review**.
 3. Ready = `mergeable` MERGEABLE, `merge_state` CLEAN, `checks.pending` 0, no failing checks, no threads/comments/reviews other than dropped ones, and no new activity for one full wait. Report ready and stop; the user merges.
 4. Stop and report instead of looping when: the same check fails again after a fix on a new head, fixes alternate between two places, three CI fix rounds have passed, or about 2 hours of watching pass with no progress.
 

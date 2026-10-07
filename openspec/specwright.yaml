@@ -16,6 +16,9 @@ github:
   review_request:
     body: ""
     login: ""
+    # true = post it again after each fix round the agent pushes, for
+    # reviewers that only run when tagged (Codex). At most once per head.
+    after_fixes: false
 
 review:
   # Design reviews (FULL tier and the roadmap baseline) prefer a different
