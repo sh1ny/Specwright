@@ -2,7 +2,7 @@
 
 ## Test map
 
-<!-- Every #### Scenario in the change's specs. State starts red; apply flips it green. Untestable scenarios map to a mechanical check marked n/a with a reason. -->
+<!-- Every #### Scenario in the change's specs. New or changed behavior starts red; apply flips it green. An unchanged scenario carried in a MODIFIED requirement with a passing test starts green. Untestable scenarios map to a mechanical check marked n/a with a reason. -->
 
 | Requirement | Scenario | Test file | Test name | State |
 |---|---|---|---|---|

@@ -13,7 +13,7 @@
 | T5 Volume (grows without a fixed bound) | | |
 | T6 Risk (security, money, data loss, unrecoverable user data) | | |
 
-<!-- Exactly one of: TIER: LIGHT | TIER: FULL -->
+<!-- Replace <VALUE> with LIGHT or FULL. -->
 TIER: <VALUE>
 
 ## Context
