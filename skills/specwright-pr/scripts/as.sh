@@ -23,10 +23,13 @@ actual=$(gh api --hostname github.com user --jq .login 2>/dev/null) || actual=
 [ "$actual" = "$login" ] || { echo "as.sh: token resolves to '$actual', expected '$login'; refusing" >&2; exit 3; }
 
 # git push: the token fences HTTPS only. Over SSH the key SSH picks decides the
-# account, so refuse rather than push as an unverified identity.
+# account, so refuse rather than push as an unverified identity. The remote
+# must be named: a bare push goes wherever pushRemote/pushDefault/upstream
+# config says, which this check cannot see.
 if [ "$1" = git ] && [ "${2:-}" = push ]; then
-  remote=origin
+  remote=
   for a in "${@:3}"; do case $a in -*) ;; *) remote=$a; break ;; esac; done
+  [ -n "$remote" ] || { echo "as.sh: name the remote (git push <remote> ...); a bare push may go elsewhere" >&2; exit 3; }
   url=$(git remote get-url --push "$remote" 2>/dev/null) || url=
   case $url in
     https://github.com/*) ;;

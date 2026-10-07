@@ -38,8 +38,8 @@ Before any push, run `pr.validate` if set. If it fails, fix or stop; never push 
 ## feedback
 
 1. Round limit first: count earlier `address review feedback` commits on the branch (`git log <main>..HEAD`). If there are already two, do not fix again: report the recurring pattern and stop.
-2. `[as] bash scripts/pr-snapshot.sh [<pr>]` - one call returns everything. If `pending_review` is true, stop: the user has an unsubmitted review that would swallow replies. If `complete` is false, say which lists were cut off and judge only what you see.
-3. Items: each entry of `threads`, `comments` and `reviews`. Threads with `awaiting_reviewer: true` already have your reply - skip them unless the reviewer answered; if you meant to resolve one and it is still open, a resolution failed: run `[as] bash scripts/pr-reply.sh <pr> resolve <id>` only. Drop non-actionable items (bot summaries, approvals, CI notices) with no reply, and remember their `id` and `rev` as dropped.
+2. `[as] bash scripts/pr-snapshot.sh [<pr>]` - one call returns everything. If `pending_review` is true, stop: the user has an unsubmitted review that would swallow replies. If `complete` is false, say which lists (`truncated`) were cut off and judge only what you see.
+3. Items: each entry of `threads`, `comments` and `reviews`. Threads with `awaiting_reviewer: true` already have your reply - skip them unless the reviewer answered. A thread with `resolve_pending: true` is either a resolution that failed or a thread the reviewer reopened - the snapshot cannot tell. Run `[as] bash scripts/pr-reply.sh <pr> resolve <id>` only when `pr-reply.sh` reported that failure in this session; otherwise list the thread and ask the user, never re-resolve it silently. Drop non-actionable items (bot summaries, approvals, CI notices) with no reply, and remember their `id` and `rev` as dropped.
 4. Judge the whole batch at once with `references/rubric.md` before changing anything. Group items that share a root cause and fix the class, not just the line.
 5. Apply all fixes. Run the project's tests and `pr.validate` once. Commit the changed files by name (`specwright-commit` rules) as `fix(<change-or-scope>): address review feedback`, then push.
 6. Reply to every handled item with a body file:
@@ -55,9 +55,10 @@ Loop until a stop condition:
 1. Wait in the background - one tool call, no tokens while waiting: `[as] bash scripts/pr-snapshot.sh <pr> --wait --timeout 1800 --interval 60` (Claude Code: `run_in_background`; other harnesses: their background or blocking exec). It prints `{"wake":"changed"|"timeout", "snapshot":{...}}`, or exits non-zero if GitHub could not be read.
 2. On wake, in this order:
    - `state` MERGED or CLOSED → stop.
+   - `complete` false → stop: report the `truncated` lists and hand over to the user. Only one page of each list is fetched, so readiness cannot be judged.
    - New feedback (anything not dropped at its current `rev`) → run **feedback** first. Never wait for CI before addressing reviews; the fix commit re-triggers CI anyway.
    - Failing checks: only act if `head_oid` is still the head you pushed (otherwise the results are for a dead commit; wait again). Re-run the snapshot with `--logs` and handle **all** failing checks in one pass: infrastructure flake → `[as] gh run rerun <run_id> --failed`; real failure → `specwright-debug` in CI mode, which returns a verified fix without committing; you commit it by name as `fix(ci): <summary>` and push.
-3. Ready = `complete` true, `mergeable` MERGEABLE, `merge_state` CLEAN, `checks.pending` 0, no failing checks, no threads/comments/reviews other than dropped ones, and no new activity for one full wait. Report ready and stop; the user merges.
+3. Ready = `mergeable` MERGEABLE, `merge_state` CLEAN, `checks.pending` 0, no failing checks, no threads/comments/reviews other than dropped ones, and no new activity for one full wait. Report ready and stop; the user merges.
 4. Stop and report instead of looping when: the same check fails again after a fix on a new head, fixes alternate between two places, three CI fix rounds have passed, or about 2 hours of watching pass with no progress.
 
 ## Never
