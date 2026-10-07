@@ -8,6 +8,7 @@
 #   bash as.sh KintsugiBot git push -u origin HEAD
 #   bash as.sh KintsugiBot bash pr-snapshot.sh 12
 # Exit 3: no credential for <login>, or the token resolves to someone else.
+# Inside, git cannot use SSH or prompt; HTTPS credentials go to github.com only.
 set -euo pipefail
 
 login=${1:?usage: as.sh <login> <command> [args...]}
@@ -22,43 +23,14 @@ export GH_TOKEN=$token
 actual=$(gh api --hostname github.com user --jq .login 2>/dev/null) || actual=
 [ "$actual" = "$login" ] || { echo "as.sh: token resolves to '$actual', expected '$login'; refusing" >&2; exit 3; }
 
-# git push: the token fences HTTPS only. Over SSH the key SSH picks decides the
-# account, so refuse rather than push as an unverified identity. The remote
-# must be named: a bare push goes wherever pushRemote/pushDefault/upstream
-# config says, which this check cannot see.
-if [ "$1" = git ]; then
-  # Find the subcommand past git's global options (-C dir, -c k=v, ...), and
-  # keep those options so the URL lookup sees the same repo and config.
-  pre=() sub= rest=()
-  set -- "${@:2}"
-  while [ $# -gt 0 ]; do
-    case $1 in
-      -C|-c|--git-dir|--work-tree|--namespace|--config-env) pre+=("$1" "${2:-}"); shift 2 || shift ;;
-      -*) pre+=("$1"); shift ;;
-      *) sub=$1; shift; rest=("$@"); break ;;
-    esac
-  done
-  set -- git "${pre[@]}" ${sub:+"$sub"} "${rest[@]}"
-fi
-if [ "${sub:-}" = push ]; then
-  remote=
-  while [ ${#rest[@]} -gt 0 ]; do
-    a=${rest[0]}; rest=("${rest[@]:1}")
-    case $a in
-      --repo=*) remote=${a#--repo=}; break ;;
-      --repo) remote=${rest[0]:-}; break ;;
-      -o|--push-option|--receive-pack|--exec) rest=("${rest[@]:1}") ;;
-      -*) ;;
-      *) remote=$a; break ;;
-    esac
-  done
-  [ -n "$remote" ] || { echo "as.sh: name the remote (git push <remote> ...); a bare push may go elsewhere" >&2; exit 3; }
-  url=$(git "${pre[@]}" remote get-url --push "$remote" 2>/dev/null) || url=
-  case $url in
-    https://github.com/*) ;;
-    *) echo "as.sh: push URL of '$remote' is '$url', not https://github.com/...; cannot pin the identity" >&2; exit 3 ;;
-  esac
-fi
+# git: the identity is enforced at the transport, not by reading the command
+# line. SSH would authenticate with whatever key SSH picks, so it is disabled
+# (GIT_SSH_COMMAND overrides core.sshCommand, even one passed with -c); HTTPS
+# gets the pinned token for github.com only; nothing may prompt. Whatever
+# remote, push URLs or options a git command uses, it can authenticate as
+# <login> or not at all.
+export GIT_SSH_COMMAND='sh -c "echo as.sh: SSH is disabled - push over https://github.com so the identity can be pinned >&2; exit 1"'
+export GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_ASKPASS= SSH_ASKPASS=
 
 # Command-scoped git config: drop inherited credential helpers, then answer
 # with GH_TOKEN - for https://github.com only, never another host. Never
