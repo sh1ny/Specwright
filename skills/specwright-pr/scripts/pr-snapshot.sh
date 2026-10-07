@@ -134,6 +134,7 @@ def unhandled($h): (.lastEditedAt // .createdAt // .submittedAt // "") as $rev
             ($threads | map(.id + ":" + .rev) | join(",")),
             ($comments | map(.id + ":" + .rev) | join(",")),
             ($reviews | map(.id + ":" + .rev) | join(",")),
+            ($stale_verdicts | map(.author + ":" + .review_id) | join(",")),
             ($truncated | sort | join(",")) ] | join("|") | @base64)
   }
 | tojson
