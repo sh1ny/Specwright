@@ -85,12 +85,12 @@ query($owner:String!, $name:String!, $pr:Int!) {
     reviewThreads(first:100) { pageInfo { hasNextPage } nodes {
       id isResolved isOutdated path line originalLine
       comments(first:100) { totalCount nodes { id databaseId author { login } body createdAt lastEditedAt url
-                                               up: reactions(content:THUMBS_UP, last:20) { nodes { createdAt user { login } } } down: reactions(content:THUMBS_DOWN, last:20) { nodes { createdAt user { login } } } } }
+                                               reactionGroups { content viewerHasReacted } } }
     } }
     comments(last:100) { pageInfo { hasPreviousPage } nodes { id author { login } body createdAt lastEditedAt url
-                                                              up: reactions(content:THUMBS_UP, last:20) { nodes { createdAt user { login } } } down: reactions(content:THUMBS_DOWN, last:20) { nodes { createdAt user { login } } } } }
+                                                              reactionGroups { content viewerHasReacted } } }
     reviews(last:100) { pageInfo { hasPreviousPage } nodes { id author { login } body state submittedAt lastEditedAt url
-                                                             up: reactions(content:THUMBS_UP, last:20) { nodes { createdAt user { login } } } down: reactions(content:THUMBS_DOWN, last:20) { nodes { createdAt user { login } } } } }
+                                                             reactionGroups { content viewerHasReacted } } }
   } }
 }
 GQL
@@ -103,9 +103,12 @@ def unhandled($h): (.lastEditedAt // .createdAt // .submittedAt // "") as $rev
   | ($h[.id] == null) or ($rev > $h[.id]);
 # A 👍/👎 of yours answers an item too (the reaction-only answer to a
 # reviewer's follow-up), but only until the item is edited after it. Other
-# reactions (👀 and the like) answer nothing.
-def reacted($me): ([ (.up.nodes[]?, .down.nodes[]?) | select((.user.login // "") == $me) | .createdAt ] | max // "")
-  as $t | $t != "" and $t >= (.lastEditedAt // .createdAt // .submittedAt // "");
+# reactions (👀 and the like) answer nothing. reactionGroups say whether you
+# reacted but not when; rtimes (id -> time of your latest 👍/👎) is filled by a
+# second, small query only for the items in "recheck": reacted, then edited.
+# Fetching reaction lists in the main query would cost ~200 points a call.
+def thumbs: [ .reactionGroups[]? | select(.viewerHasReacted and (.content | IN("THUMBS_UP","THUMBS_DOWN"))) ] | length > 0;
+def reacted: thumbs and (.lastEditedAt == null or (rtimes[.id] // "") >= .lastEditedAt);
 def norm: sub("\\[bot\\]$"; "");
 .data.viewer.login as $me
 | .data.repository.pullRequest as $p
@@ -139,7 +142,7 @@ def norm: sub("\\[bot\\]$"; "");
      ([ .comments.nodes[] | select((.author.login // "") == $me) | .createdAt ] | max // "") as $replied |
      ([ .comments.nodes[] | select((.author.login // "") != $me and (.lastEditedAt // "") > $replied) ] | length > 0) as $edited |
      ([ .comments.nodes[] | select((.author.login // "") != $me
-          and (.lastEditedAt // .createdAt // "") > $replied and (reacted($me) | not)) ]) as $open |
+          and (.lastEditedAt // .createdAt // "") > $replied and (reacted | not)) ]) as $open |
      select((.isResolved | not) or ($open | length > 0)) |
      { id, root_id: .comments.nodes[0].databaseId, path, line: (.line // .originalLine),
        outdated: .isOutdated, resolved: .isResolved,
@@ -151,13 +154,13 @@ def norm: sub("\\[bot\\]$"; "");
        resolve_pending: ((.isResolved | not) and (($last.author.login // "") == $me) and ($edited | not)
          and (($last.body // "") | contains("specwright:handled " + $tid + " resolve"))),
        comments: [ .comments.nodes[] | { id, author: (.author.login // "ghost"), body: (.body | clip(2500)),
-                                        at: .createdAt, edited: .lastEditedAt, url, reacted: reacted($me) } ] } ]) as $threads
-| ([ $p.comments.nodes[] | select((.author.login // "") != $me and unhandled($handled) and (reacted($me) | not)) |
+                                        at: .createdAt, edited: .lastEditedAt, url, reacted: reacted } ] } ]) as $threads
+| ([ $p.comments.nodes[] | select((.author.login // "") != $me and unhandled($handled) and (reacted | not)) |
      { id, rev: (.lastEditedAt // .createdAt), author: (.author.login // "ghost"),
        waiting_owner: (($waiting[.id] // "") >= (.lastEditedAt // .createdAt)),
        body: (.body | clip(1200)), at: .createdAt, url } ]) as $comments
 | ([ $p.reviews.nodes[] | select(.state != "PENDING" and (.body // "") != ""
-       and (.author.login // "") != $me and unhandled($handled) and (reacted($me) | not)) |
+       and (.author.login // "") != $me and unhandled($handled) and (reacted | not)) |
      { id, rev: (.lastEditedAt // .submittedAt), author: (.author.login // "ghost"), state,
        waiting_owner: (($waiting[.id] // "") >= (.lastEditedAt // .submittedAt)),
        body: (.body | clip(1200)), at: .submittedAt, url } ]) as $reviews
@@ -223,6 +226,8 @@ def norm: sub("\\[bot\\]$"; "");
     fail_run_ids: ([ $checks[] | select(.state == "fail" and .run_id != null) | .run_id ] | unique),
     threads: $threads, comments: $comments, reviews: $reviews, stale_verdicts: $stale_verdicts,
     reviewers: $reviewers, head_pushed_at: $pushed,
+    recheck: [ ($p.comments.nodes[], $p.reviews.nodes[], $p.reviewThreads.nodes[].comments.nodes[])
+               | select(thumbs and .lastEditedAt != null and rtimes[.id] == null) | .id ],
     complete: ($truncated | length == 0), truncated: $truncated,
     # base64 keeps the signature free of quotes, so sig_of can cut it out safely
     sig: ([ $p.state, $p.headRefOid, $p.mergeStateStatus,
@@ -268,9 +273,27 @@ prepare_cfg() {
   CFG="def cfg: {reviewers: [$reviewers], head: \"$oid\", pushed: $pushed,
     now: (\"$date\" | strptime(\"%a, %d %b %Y %H:%M:%S GMT\") | mktime)};"
 }
-snapshot() {
+query_pr() {  # <rtimes def>
   gh api graphql -f query="$QUERY" -f owner="$owner" -f name="$name" -F pr="$pr" --jq "$CFG
+$1
 $SHAPE"
+}
+# One query (~1 point); a second pair only when an item you reacted to was
+# edited since, to learn whether your reaction is older than the edit.
+snapshot() {
+  local out ids rt
+  out=$(query_pr 'def rtimes: {};') || return 1
+  ids=$(printf '%s' "$out" | grep -o '"recheck":\[[^]]*\]' | sed 's/^"recheck"://' \
+    | grep -oE '"[A-Za-z0-9_=-]+"' | head -n 100 | paste -sd, -) || ids=
+  if [ -n "$ids" ]; then
+    rt=$(gh api graphql -f query="query{ viewer { login } nodes(ids:[$ids]) { id ... on Reactable {
+        up: reactions(content:THUMBS_UP, last:20) { nodes { createdAt user { login } } }
+        down: reactions(content:THUMBS_DOWN, last:20) { nodes { createdAt user { login } } } } } }" \
+      --jq '.data.viewer.login as $me | [ .data.nodes[] | select(. != null) | { (.id): ([ (.up.nodes[]?, .down.nodes[]?)
+        | select((.user.login // "") == $me) | .createdAt ] | max // "") } ] | add // {} | tojson') || return 1
+    out=$(query_pr "def rtimes: $rt;") || return 1
+  fi
+  printf '%s\n' "$out"
 }
 sig_of() { printf '%s' "$1" | grep -o '"sig":"[^"]*"' || true; }
 
