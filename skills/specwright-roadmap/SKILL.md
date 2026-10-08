@@ -15,7 +15,7 @@ Three project files sit above OpenSpec changes. Paths come from `project:` in `o
 | Architecture | `openspec/architecture.md` | System shape + index of in-force ADRs (`docs/adr/`) | When an ADR is added or superseded |
 | Roadmap | `openspec/roadmap.md` | Milestones: outcome, exit criteria, changes | At every milestone close |
 
-Status is derived, never stored: a change is done when the main branch holds it under `openspec/changes/archive/` (`git ls-tree -d --name-only <main> openspec/changes/archive/`; in pr mode that means its PR merged, not just that archive ran on the branch); a milestone is done when all its changes are done and every exit criterion has passed. In pr mode PRs merge on GitHub, so local `<main>` lags: run `git fetch origin <main>` first and read `origin/<main>` instead. If there is no `origin` or the fetch fails, read local `<main>` and say the status may be stale.
+Status is derived, never stored: a change is done when the planning repo's main branch holds its archive (**Planning repo** below; `git -C <planning toplevel> ls-tree -d --name-only <main> <P>/changes/archive/`, matched by the archive name; in pr mode that means its PR merged, not just that archive ran on the branch); a milestone is done when all its changes are done and every exit criterion has passed. In pr mode PRs merge on GitHub, so local `<main>` lags: run `git fetch origin <main>` first and read `origin/<main>` instead. If there is no `origin` or the fetch fails, read local `<main>` and say the status may be stale.
 
 **Committing project files** (init and close): start from a clean main (in pr mode, `git pull --ff-only origin <main>` first) and `git checkout -b <branch>` before writing anything, commit the files you wrote by name with a `docs(<branch-name>): ...` subject, then finish per `finish` in `openspec/specwright.yaml`: `local` → merge into main with `--no-ff` and subject `merge: <branch-name>`, delete the branch, never push; `pr` → `specwright-pr` **ship**. There is no change to archive, so `specwright-finish` does not apply.
 
@@ -59,3 +59,21 @@ One answer, no edits: current milestone, its changes (done / active / planned, d
 - Keep it small: the strategy is one page, the roadmap one or two, the architecture a few pages plus ADRs. Detail lives in OpenSpec changes, not here.
 - The roadmap is a plan, not a contract. Change it whenever a milestone teaches something; record why in the Done line.
 - Never mark a user-verified criterion passed on the user's behalf.
+
+## Planning repo
+
+OpenSpec decides where planning lives: in this repo, in a folder nested in it, or in a store (a separate git repo). Resolve it at the start of every run, before any write; never assume `./openspec/`.
+
+1. **Root:** `openspec list --json` from the code checkout, plus `--store <id>` when the session selected a store. It needs no change name, writes nothing and still works after archive. `root` null with an error whose `message` starts with `Declared in` or `Invalid store declaration in` → stop before any git or file write and show that `message` and `fix`.
+2. **Repo**, in one call: `git rev-parse --path-format=absolute --git-common-dir --show-toplevel && git -C "<root.path>" rev-parse --path-format=absolute --git-common-dir --show-toplevel`.
+   - The second fails (root not in a git work tree) → stop and ask: initialise git there, or abort.
+   - Different common dir → **store-backed**: the planning repo is the store checkout at its toplevel.
+   - Same common dir and toplevel → **repo-local** (including a root nested in this checkout, such as `planning/`): one repo, as before.
+   - Same common dir, different toplevel → the root is in another worktree of this repo, where a commit would land on that worktree's branch. Stop before any write, name both worktrees (path and branch) and ask.
+3. Announce once: `Code repo: <toplevel>; planning repo: <toplevel> (store <root.store_id>)` or `(same repo)`.
+
+**Paths.** `<P>` is `<root.path>/openspec` made relative to the planning repo's toplevel (`openspec` in the usual layout, `planning/openspec` for a nested root). Stage and `ls-tree` planning files as `<P>/...` in the planning repo.
+
+**Where commands run.** Git, `gh` and `as.sh` commands on the store run in one shell call that starts with `cd "<store toplevel>" &&` (`as.sh` only fences the repo it starts in). `openspec templates` and `openspec schema validate` have no root selection: run them with `cd "<root.path>" &&`. `git -C` is for read-only queries only (`rev-parse`, `status`, `log`, `ls-tree`).
+
+**Archive name.** Use `archivedAs` from the archive output when you have it. Otherwise it is the change name if that starts with `YYYY-MM-DD-`, else `YYYY-MM-DD-<change-name>`: `<P>/changes/archive/<archived-name>/`.

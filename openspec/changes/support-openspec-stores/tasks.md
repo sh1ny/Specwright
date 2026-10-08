@@ -96,7 +96,7 @@ Test kinds:
 ## 2. Planning repo resolution (D1, D2)
 
 - [x] 2.1 Add agent evals `eval-store-apply`, `eval-store-unregistered`, `eval-store-other-worktree`, `eval-nested-root-finish` and `eval-root-outside-git` (fixtures plus grade checks), and add the "only the code repo changed" check to `eval-apply-three-tasks`, `eval-finish-local` and `eval-branch-clean-main`. Run them against the current skills and confirm the new ones fail for the expected reason (for example, commit stops with "Specwright does not commit planning stores").
-- [ ] 2.2 Write the shared "Planning repo" procedure (D1, D2) and add it to `specwright-branch`, `-commit`, `-finish`, `-pr` and `-roadmap` SKILL.md:
+- [x] 2.2 Write the shared "Planning repo" procedure (D1, D2) and add it to `specwright-branch`, `-commit`, `-finish`, `-pr` and `-roadmap` SKILL.md:
   - `openspec list --json` (plus `--store` when the session selected one);
   - the `--git-common-dir` + `--show-toplevel` comparison, with the stop for another worktree;
   - the declared-store and outside-git stops;
