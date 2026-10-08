@@ -145,7 +145,7 @@ Test kinds:
 
 ## 6. PR-pair decisions script (D5 pr part, D7, D8, D6 identity)
 
-- [ ] 6.1 Write `evals/pr-pair/test_pr_pair.py` and `evals/pr-pair/test_as_sh.py` with every script-test row of the test map. Use real git repos with GitHub-form remotes, a local bare repo reached through `url.<bare>.insteadOf` only where a test needs a working push and does not exercise `identity`, and the fake `gh`. Confirm every test fails because `pr-pair.sh` does not exist yet, and that `test_scrubs_header_local_to_the_store` passes against today's `as.sh` when run inside the store (which documents the D1 requirement).
+- [x] 6.1 Write `evals/pr-pair/test_pr_pair.py` and `evals/pr-pair/test_as_sh.py` with every script-test row of the test map. Use real git repos with GitHub-form remotes, a local bare repo reached through `url.<bare>.insteadOf` only where a test needs a working push and does not exercise `identity`, and the fake `gh`. Confirm every test fails because `pr-pair.sh` does not exist yet, and that `test_scrubs_header_local_to_the_store` passes against today's `as.sh` when run inside the store (which documents the D1 requirement).
 - [ ] 6.2 Implement `skills/specwright-pr/scripts/pr-pair.sh` subcommands, each printing one JSON line:
   - `identity <dir>`: fetch URL plus every push URL → `<owner>/<name>`, or a mismatch or not-GitHub error;
   - `context`: per-repo login, main, validate and reviewers from `specwright.yaml` and `planning_store:`;

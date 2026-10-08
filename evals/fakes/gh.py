@@ -9,8 +9,10 @@ State is JSON at $FAKE_GH_STATE:
 Any call whose argv (joined by spaces) matches a `fail` pattern exits non-zero.
 Every call appends one JSON line {argv, cwd, gh_repo} to $FAKE_GH_LOG.
 
-Covers: auth token, api (user, pulls list/get, issue comments list/create/patch),
-pr create/view/comment/edit, repo view. Anything else exits 2.
+Optional per-repo "activity": [{"ref": "refs/heads/b", "after": "<sha>", "timestamp": "..."}]
+backs `api repos/<o>/<n>/activity?ref=...` (the push-time lookup).
+Covers: auth token (and its --help, which names --user), api (user, pulls list/get, activity,
+issue comments list/create/patch), pr create/view/comment/edit, repo view. Anything else exits 2.
 Like real gh, `api --paginate` prints each page's JSON one after another.
 """
 import json
@@ -18,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlsplit
 
 HOST = "https://github.com"
@@ -138,9 +141,13 @@ def find_pull(slug, repo, ref):
     raise Fail(f"GraphQL: Could not resolve to a PullRequest with the number of {ref}. (repository.pullRequest)")
 
 
+def now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def new_comment(st, slug, num, text, user):
     st["next_id"] = st.get("next_id", 1000) + 1
-    c = {"id": st["next_id"], "body": text, "user": {"login": user},
+    c = {"id": st["next_id"], "body": text, "user": {"login": user}, "created_at": now(),
          "html_url": f"{pull_url(slug, num)}#issuecomment-{st['next_id']}"}
     st["repos"][slug].setdefault("comments", {}).setdefault(str(num), []).append(c)
     return c
@@ -169,6 +176,11 @@ def graphql_view(p, slug):
 def cmd_auth(st, args):
     if args[:1] != ["token"]:
         raise Fail(f"fake gh: unsupported auth command {args[:1]}", 2)
+    if "--help" in args or "-h" in args[1:]:
+        print("Print the authentication token gh uses for a hostname and account.\n\nFLAGS\n"
+              "  -h, --hostname string   The hostname of the GitHub instance\n"
+              "  -u, --user string       The account to log out of")
+        return
     o, _ = parse(args[1:], {"--hostname": "hostname", "-h": "hostname", "--user": "user", "-u": "user"})
     login = one(o, "user") or st.get("user")
     tok = st.get("tokens", {}).get(login)
@@ -226,6 +238,9 @@ def cmd_api(st, args):
                  and (not head or p["head"]["label"] == head)
                  and (not query.get("base") or p["base"]["ref"] == query["base"])]
         return emit_pages(items, query, o, expr)
+    if rest == "activity" and method == "GET":
+        items = [a for a in repo.get("activity", []) if not query.get("ref") or a.get("ref") == query["ref"]]
+        return emit_pages(items, query, o, expr)
     m = re.fullmatch(r"pulls/(\d+)", rest)
     if m and method == "GET":
         return emit(find_pull(slug, repo, m.group(1)), expr)
@@ -267,7 +282,8 @@ def cmd_pr(st, args):
         n = max([p["number"] for p in pulls] + [0]) + 1
         pulls.append({"number": n, "html_url": pull_url(slug, n), "state": "open", "merged_at": None,
                       "title": one(o, "title", ""), "body": body_of(o) or "",
-                      "head": {"ref": ref, "label": f"{owner}:{ref}", "repo": {"full_name": f"{owner}/{slug.split('/')[1]}"}},
+                      "head": {"ref": ref, "label": f"{owner}:{ref}", "sha": f"{n:040x}",
+                               "repo": {"full_name": f"{owner}/{slug.split('/')[1]}"}},
                       "base": {"ref": one(o, "base") or repo.get("default_branch", "main")}})
         return print(pull_url(slug, n))
     if sub == "view":
