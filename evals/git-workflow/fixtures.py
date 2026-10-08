@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]  # specwright repo
@@ -195,11 +196,37 @@ def finished(code, root):
     write(root, "openspec/specs/greeting/spec.md", spec.replace("# Spec Delta", "# greeting Specification").replace("## ADDED Requirements", "## Requirements"))
 
 
+def gate_lock(store, when, change="other-change", checkout="C:/elsewhere/code"):
+    """Another session's gate lock in the store's git common dir, taken at `when` (a datetime)."""
+    r = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=store,
+                       check=True, capture_output=True, text=True)
+    lock = Path(r.stdout.strip()) / "specwright-gate.lock"
+    lock.mkdir()
+    (lock / "owner").write_text(f"time: {when.isoformat(timespec='seconds')}\nchange: {change}\ncheckout: {checkout}\n",
+                                encoding="utf-8", newline="\n")
+
+
 def build_store(name, dest):
     """Fixtures whose planning lives outside the code repo (or in a folder inside it)."""
     code, store = dest / "code", dest / "store"
     if name == "eval-store-branch-clean":
         store_base(dest)  # both repos clean on main, store registered, code points at it
+    elif name == "eval-store-branch-dirty":
+        store_base(dest)
+        with (store / "openspec/config.yaml").open("a", encoding="utf-8", newline="\n") as f:
+            f.write("# local edit, not committed\n")  # tracked store file outside the change dir
+    elif name == "eval-store-branch-busy":
+        store_base(dest)
+        git(store, "checkout", "-q", "-b", "feat/other-change")
+        write(store, "openspec/changes/other-change/proposal.md", "## Why\n\nAnother change in progress.\n")
+        git(store, "add", "-A")
+        git(store, "commit", "-q", "-m", "feat(other-change): add planning artifacts")
+    elif name == "eval-store-branch-locked":
+        store_base(dest)
+        gate_lock(store, datetime.now(timezone.utc))  # another session is in its gate right now
+    elif name == "eval-store-branch-stale-lock":
+        store_base(dest)
+        gate_lock(store, datetime.now(timezone.utc) - timedelta(days=2))  # left by an interrupted session
     elif name == "eval-store-apply":
         store_base(dest)
         for r in (code, store):

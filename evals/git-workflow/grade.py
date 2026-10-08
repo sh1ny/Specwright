@@ -317,6 +317,83 @@ def check_store(name, repo, run):
                   f".git exists={(store / '.git').exists()}"))
         ask = re.search(r"git init|initiali[sz]e", rep) and re.search(r"abort", rep)
         R.append(("The report asks whether to initialise git there or abort", bool(ask), f"report excerpt={rep[-200:]!r}"))
+
+    elif name.startswith("eval-store-branch-"):
+        R.extend(check_store_branch(name, code, store, rep))
+    return R
+
+
+def check_store_branch(name, code, store, rep):
+    """Store-branch evals: the gate runs on the code repo and the store; its lock is in the store's git common dir."""
+    R = []
+    on = lambda r: git(r, "branch", "--show-current")
+    bs = lambda r: (git(r, "branch", "--format=%(refname:short)") or "").splitlines()
+    cd = git(store, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    lock = Path(cd) / "specwright-gate.lock" if cd else None
+    no_lock = ("No gate lock is left in the store", lock is not None and not lock.exists(),
+               f"lock={lock} exists={lock.exists() if lock else None}")
+    dirs = [r / "openspec/changes/add-csv-export" for r in (code, store) if (r / "openspec/changes/add-csv-export").exists()]
+    mains = subjects(code, "main") == [INITIAL] and subjects(store, "main") == STORE_MAIN
+    new = "feat/add-csv-export"
+    if name == "eval-store-branch-clean":
+        tips = [git(r, "rev-parse", new) for r in (code, store)]
+        mtips = [git(r, "rev-parse", "main") for r in (code, store)]
+        R.append(("The code repo and the store are both on feat/add-csv-export",
+                  on(code) == on(store) == new, f"code={on(code)} store={on(store)}"))
+        R.append(("Each new branch starts at its repo's main with no new commits",
+                  all(tips) and tips == mtips, f"tips={tips} mains={mtips}"))
+        R.append(("Both mains are unchanged", mains, f"code main={subjects(code, 'main')} store main={subjects(store, 'main')}"))
+        d = store / "openspec/changes/add-csv-export"
+        R.append(("The change directory is scaffolded in the store and the code repo has no openspec/changes",
+                  d.is_dir() and not (code / "openspec/changes").exists(),
+                  f"store dir={d.is_dir()} code changes dir={(code / 'openspec/changes').exists()}"))
+        R.append(no_lock)
+        R.append(("The report names both repos", "code" in rep and "store" in rep, f"report excerpt={rep[-200:]!r}"))
+    elif name == "eval-store-branch-dirty":
+        stash = [git(r, "stash", "list") or "" for r in (code, store)]
+        R.append(("Both repos are still on main with only the main branch",
+                  on(code) == on(store) == "main" and bs(code) == bs(store) == ["main"],
+                  f"code={on(code)} {bs(code)} store={on(store)} {bs(store)}"))
+        st = status_of(store)
+        R.append(("The store's uncommitted edit is still there and unstashed",
+                  st == [" M openspec/config.yaml"] and not any(stash) and not status_of(code),
+                  f"store status={st} code status={status_of(code)} stash={stash}"))
+        R.append(("No change directory was created in either repo", not dirs, f"dirs={dirs}"))
+        R.append(no_lock)
+        hit = re.search(r"uncommitted|not clean|dirty|local changes|modified", rep)
+        opts = re.search(r"stash", rep) and re.search(r"commit", rep) and re.search(r"abort", rep)
+        R.append(("The report shows the store is not clean and offers commit, stash or abort",
+                  bool(hit) and bool(opts) and "store" in rep, f"match={hit.group(0) if hit else None} options={bool(opts)}"))
+    elif name == "eval-store-branch-busy":
+        R.append(("The code repo is still on main with only the main branch and no new commit",
+                  on(code) == "main" and bs(code) == ["main"] and subjects(code, "main") == [INITIAL],
+                  f"code={on(code)} {bs(code)}"))
+        R.append(("The store is still on feat/other-change and no new branch was created in it",
+                  on(store) == "feat/other-change" and sorted(bs(store)) == ["feat/other-change", "main"],
+                  f"store={on(store)} {bs(store)}"))
+        R.append(("No change directory add-csv-export was created in either repo", not dirs, f"dirs={dirs}"))
+        R.append(no_lock)
+        one = re.search(r"one (change|store)|at a time|in progress|busy", rep)
+        R.append(("The report names feat/other-change and says one store holds one change in progress at a time",
+                  "feat/other-change" in rep and bool(one), f"match={one.group(0) if one else None}"))
+    else:  # eval-store-branch-locked, eval-store-branch-stale-lock
+        R.append(("Both repos are still on main with only the main branch and no new commit",
+                  on(code) == on(store) == "main" and bs(code) == bs(store) == ["main"] and mains,
+                  f"code={on(code)} {bs(code)} store={on(store)} {bs(store)}"))
+        R.append(("No change directory was created in either repo", not dirs, f"dirs={dirs}"))
+        owner = lock / "owner" if lock else None
+        text = owner.read_text(encoding="utf-8") if owner and owner.is_file() else None
+        R.append(("The gate lock and its owner file are still there, unchanged",
+                  text is not None and "change: other-change" in text and "checkout: C:/elsewhere/code" in text, f"owner={text!r}"))
+        if name == "eval-store-branch-locked":
+            hit = re.search(r"lock|busy|another session", rep)
+            R.append(("The report says the gate is locked or busy and names the owning change other-change",
+                      bool(hit) and "other-change" in rep, f"match={hit.group(0) if hit else None}"))
+        else:
+            date = (re.search(r"time: (\d{4}-\d\d-\d\d)", text or "") or [None, ""])[1]
+            R.append(("The report shows the date the lock was taken", bool(date) and date in rep, f"date={date!r}"))
+            hit = re.search(r"confirm|remove the lock|stale", rep)
+            R.append(("The report asks the user to confirm before removing the lock", bool(hit), f"match={hit.group(0) if hit else None}"))
     return R
 
 

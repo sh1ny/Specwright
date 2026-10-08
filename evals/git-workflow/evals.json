@@ -173,6 +173,86 @@
         "The store directory is still not a git repository",
         "The report asks whether to initialise git there or abort"
       ]
+    },
+    {
+      "id": 11,
+      "name": "eval-store-branch-clean",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "Both the code repo and the store are clean on main: creates feat/add-csv-export in both with no commits, then scaffolds the change in the store, leaves no gate lock, and names both repos.",
+      "assertions": [
+        "The code repo and the store are both on feat/add-csv-export",
+        "Each new branch starts at its repo's main with no new commits",
+        "Both mains are unchanged",
+        "The change directory is scaffolded in the store and the code repo has no openspec/changes",
+        "No gate lock is left in the store",
+        "The report names both repos"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "eval-store-branch-dirty",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "The store has an uncommitted edit outside the change directory: creates no branch in either repo, shows the store's status, offers commit, stash or abort, and leaves no gate lock.",
+      "assertions": [
+        "Both repos are still on main with only the main branch",
+        "The store's uncommitted edit is still there and unstashed",
+        "No change directory was created in either repo",
+        "No gate lock is left in the store",
+        "The report shows the store is not clean and offers commit, stash or abort"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "eval-store-branch-busy",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "The store checkout is on another change's branch feat/other-change: creates no branch in either repo, names that branch, says one store holds one change in progress at a time, and leaves no gate lock.",
+      "assertions": [
+        "The code repo is still on main with only the main branch and no new commit",
+        "The store is still on feat/other-change and no new branch was created in it",
+        "No change directory add-csv-export was created in either repo",
+        "No gate lock is left in the store",
+        "The report names feat/other-change and says one store holds one change in progress at a time"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "eval-store-branch-locked",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "Another session holds the store's gate lock (taken just now): stops before touching either repo, reports it is locked or busy and who owns it, and leaves the lock in place.",
+      "assertions": [
+        "Both repos are still on main with only the main branch and no new commit",
+        "No change directory was created in either repo",
+        "The gate lock and its owner file are still there, unchanged",
+        "The report says the gate is locked or busy and names the owning change other-change"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "eval-store-branch-stale-lock",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "A gate lock two days old, left by an interrupted session: creates no branch, shows when the lock was taken, asks the user to confirm before removing it, and (with no user to confirm) leaves it in place.",
+      "assertions": [
+        "Both repos are still on main with only the main branch and no new commit",
+        "No change directory was created in either repo",
+        "The gate lock and its owner file are still there, unchanged",
+        "The report shows the date the lock was taken",
+        "The report asks the user to confirm before removing the lock"
+      ]
     }
   ]
 }
