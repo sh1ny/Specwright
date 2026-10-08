@@ -583,7 +583,38 @@ def build_store(name, dest):
         raise SystemExit(f"unknown eval {name}")
 
 
+def references_base(dest, registered=True, ref_id="team-plans"):
+    """<dest>/code keeps its own openspec/ root (schema, specs, config.yaml with `references: [team-plans]`),
+    so planning is repo-local; <dest>/team-plans is the referenced store: a git repo holding a shared spec,
+    clean on main, registered (with the isolated registry) when `registered`. Either way the code repo is on
+    feat/add-greeting with the change's planning artifacts uncommitted, and carries a scratch-notes.txt.
+    Unregistered: the referenced folder stays on disk (it holds the same files) but the registry is empty,
+    so OpenSpec reports the reference as unresolved."""
+    code, ref = dest / "code", dest / ref_id
+    base(code)
+    with (code / "openspec/config.yaml").open("a", encoding="utf-8", newline="\n") as f:
+        f.write(f"\nreferences:\n  - {ref_id}\n")
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "chore: declare references")
+    (dest / "bin").mkdir()
+    init(ref)
+    store_content(ref)
+    write(ref, "openspec/specs/audit/spec.md", "# audit Specification\n\n## Purpose\n\nShared audit rules from the platform team.\n\n## Requirements\n\n### Requirement: Audit trail\nThe system SHALL log every user-facing message.\n\n#### Scenario: Message logged\n- **WHEN** a message is sent\n- **THEN** an audit entry is written\n")
+    git(ref, "add", "-A")
+    git(ref, "commit", "-q", "-m", "chore: initial store")
+    if registered:
+        openspec(dest, "store", "register", posix(ref), "--id", ref_id, "--yes")
+        git(ref, "add", "-A")  # registration wrote .openspec-store/store.yaml
+        git(ref, "commit", "-q", "-m", "chore: register store")
+    env_file(dest)
+    git(code, "checkout", "-q", "-b", "feat/add-greeting")
+    change_artifacts(code)  # planning lives in the code repo, uncommitted
+    write(code, "scratch-notes.txt", "personal notes - not part of the change\n")
+
+
 def build(name, repo):
+    if name in ("eval-references-apply", "eval-references-unregistered"):
+        return references_base(repo, registered=name == "eval-references-apply")
     if name.startswith(("eval-store-", "eval-nested-", "eval-root-")):
         return build_store(name, repo)
     base(repo)

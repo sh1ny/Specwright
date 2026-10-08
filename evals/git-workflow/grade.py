@@ -499,6 +499,8 @@ def check_store(name, repo, run):
         ask = re.search(r"git init|initiali[sz]e", rep) and re.search(r"abort", rep)
         R.append(("The report asks whether to initialise git there or abort", bool(ask), f"report excerpt={rep[-200:]!r}"))
 
+    elif name.startswith("eval-references-"):
+        R.extend(check_references(name, repo, code, rep))
     elif name.startswith("eval-store-branch-"):
         R.extend(check_store_branch(name, code, store, rep))
     elif name.startswith(("eval-store-finish-", "eval-store-archive-on-main")):
@@ -507,6 +509,57 @@ def check_store(name, repo, run):
         R.extend(check_store_pr(name, repo, code, store, rep))
     elif name.startswith("eval-store-roadmap-"):
         R.extend(check_store_roadmap(name, repo, code, store, rep))
+    return R
+
+
+REF_ID = "team-plans"
+REF_MAIN = {"eval-references-apply": STORE_MAIN, "eval-references-unregistered": ["chore: initial store"]}  # the referenced store's main, as the fixture leaves it (newest first)
+UNRESOLVED = r"unresolved|not registered|isn't registered|is not registered|unregistered|could not (be )?(resolve|find|read)|couldn't (resolve|find|read)|cannot be resolved|not available|missing"
+
+
+def check_references(name, repo, code, rep):
+    """Grade eval-references-*: the code repo keeps its own openspec/ root and lists team-plans under
+    references:. Apply must land every commit in the code repo and leave <run>/repo/team-plans exactly
+    as the fixture built it; when the reference is not registered the report names it and apply goes on."""
+    ref = repo / REF_ID
+    R = []  # (text, passed, evidence)
+    want = REF_MAIN[name]
+    refs = (git(ref, "for-each-ref", "--format=%(refname)") or "").splitlines()
+    wts = (git(ref, "worktree", "list", "--porcelain") or "").count("worktree ")
+    R.append((f"The referenced store {REF_ID} has no new commit, branch, stash or worktree and no remote",
+              subjects(ref, "--all") == want and refs == ["refs/heads/main"] and git(ref, "branch", "--show-current") == "main"
+              and not git(ref, "stash", "list") and not git(ref, "remote") and wts == 1,
+              f"commits={subjects(ref, '--all')} refs={refs} branch={git(ref, 'branch', '--show-current')} worktrees={wts}"))
+    R.append((f"The referenced store {REF_ID} has no staged, modified or untracked file",
+              not status_of(ref) and (ref / "openspec/specs/audit/spec.md").is_file(), f"status={status_of(ref)}"))
+    base = ["chore: declare references", INITIAL]
+    csubs = subjects(code, "main..HEAD")
+    R.append(("The code repo is on feat/add-greeting and main is unchanged",
+              git(code, "branch", "--show-current") == FEAT and subjects(code, "main") == base,
+              f"branch={git(code, 'branch', '--show-current')} main={subjects(code, 'main')}"))
+    R.append(("A planning-artifacts commit exists in the code repo: feat(add-greeting): add planning artifacts",
+              PLAN_SUBJECT in csubs, f"subjects={csubs}"))
+    per = {t: [s for s in csubs if s.startswith(f"feat(add-greeting): task {t} ")] for t in TASKS}
+    R.append(("Exactly one code commit per task, subjects start with feat(add-greeting): task 1.1 / 1.2 / 2.1, and nothing else was committed",
+              all(len(v) == 1 for v in per.values()) and len(csubs) == 4, f"per-task={per} all={csubs}"))
+    long_ = [s for s in csubs if len(s) > 72]
+    R.append(("Every commit subject is 72 characters or fewer", bool(csubs) and not long_, f"too long={long_}"))
+    R.append(("All tasks in the code repo's tasks.md are ticked", sorted(ticked_tasks(code)) == list(TASKS), f"ticked={ticked_tasks(code)}"))
+    tr = subprocess.run([sys.executable, "-m", "unittest", "-q"], cwd=code, capture_output=True, text=True)
+    R.append(("The test suite passes in the code repo", tr.returncode == 0, (tr.stderr or tr.stdout).strip().splitlines()[-1:] or ["no output"]))
+    ever = git(code, "log", "--all", "--format=%h", "--", "scratch-notes.txt") or ""
+    R.append(("The code repo's working tree is clean apart from scratch-notes.txt, which was never committed",
+              status_of(code) == ["?? scratch-notes.txt"] and not ever, f"status={status_of(code)} commits touching scratch-notes.txt={ever!r}"))
+    am = amends(code)
+    R.append(("No commit was amended", not am, f"amend entries={am}"))
+    if name == "eval-references-unregistered":
+        pat = rf"{REF_ID}[^.\n]{{0,160}}({UNRESOLVED})|({UNRESOLVED})[^.\n]{{0,160}}{REF_ID}"
+        hit = re.search(pat, rep)
+        R.append((f"The report names the unresolved reference {REF_ID} and says it is not registered",
+                  bool(hit), f"match={hit.group(0) if hit else None} report excerpt={rep[-200:]!r}"))
+        R.append(("The task continued: the report does not say it stopped or is waiting for the reference",
+                  bool(rep) and not re.search(r"(stopp(ed|ing)|blocked|cannot continue|can't continue|unable to proceed|waiting for)[^.\n]{0,80}(reference|team-plans|register)", rep),
+                  f"report excerpt={rep[-200:]!r}"))
     return R
 
 

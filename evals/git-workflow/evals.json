@@ -567,6 +567,50 @@
         "No repo was modified: both repos are on main with no new commit, branch or stash and a clean tree, and code main still ends at the roadmap commit",
         "No commit was amended in either repo"
       ]
+    },
+    {
+      "id": 33,
+      "name": "eval-references-apply",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "The project keeps its own openspec/ root and lists the registered store team-plans under references:, so planning is repo-local. Applies the change entirely in the code repo (planning commit, one commit per task, tasks ticked). Reads team-plans only through openspec context --json / openspec show --store and never branches, commits, stashes, stages, writes files or pushes there.",
+      "assertions": [
+        "The referenced store team-plans has no new commit, branch, stash, worktree or remote",
+        "The referenced store team-plans has no staged, modified or untracked file",
+        "The code repo is on feat/add-greeting and main is unchanged",
+        "The code repo has a planning-artifacts commit feat(add-greeting): add planning artifacts",
+        "Exactly one code commit per task, subjects starting feat(add-greeting): task 1.1 / 1.2 / 2.1, and nothing else committed",
+        "Every commit subject is 72 characters or fewer",
+        "All tasks in the code repo's tasks.md are ticked",
+        "The test suite passes in the code repo",
+        "The code repo's working tree is clean apart from scratch-notes.txt, which was never committed",
+        "No commit was amended"
+      ]
+    },
+    {
+      "id": 34,
+      "name": "eval-references-unregistered",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Same project, but team-plans is not registered on this machine, so openspec context --json reports reference_unresolved. Continues the apply without that context, completes every task in the code repo, leaves the unregistered team-plans folder on disk untouched, and the report names the unresolved reference team-plans.",
+      "assertions": [
+        "The referenced store team-plans has no new commit, branch, stash, worktree or remote",
+        "The referenced store team-plans has no staged, modified or untracked file",
+        "The code repo is on feat/add-greeting and main is unchanged",
+        "The code repo has a planning-artifacts commit feat(add-greeting): add planning artifacts",
+        "Exactly one code commit per task, subjects starting feat(add-greeting): task 1.1 / 1.2 / 2.1, and nothing else committed",
+        "Every commit subject is 72 characters or fewer",
+        "All tasks in the code repo's tasks.md are ticked",
+        "The test suite passes in the code repo",
+        "The code repo's working tree is clean apart from scratch-notes.txt, which was never committed",
+        "No commit was amended",
+        "The report names the unresolved reference team-plans and says it is not registered",
+        "The task continued: the report does not say it stopped or is waiting for the reference"
+      ]
     }
   ]
 }
