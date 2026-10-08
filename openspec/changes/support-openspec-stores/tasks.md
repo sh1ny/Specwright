@@ -56,11 +56,11 @@ Test kinds:
 | planning-stores → PR finish pairs the store PR with the code PR | Fetch and push URLs name different repositories | evals/pr-pair/test_pr_pair.py | test_identity_fetch_push_mismatch | green |
 | planning-stores → PR finish pairs the store PR with the code PR | Matching PR beyond the first page | evals/pr-pair/test_pr_pair.py | test_discover_paginates_past_fork_prs | green |
 | planning-stores → PR finish pairs the store PR with the code PR | Inherited GH_REPO names the code repo | evals/pr-pair/test_pr_pair.py | test_gh_repo_env_ignored | green |
-| planning-stores → PR finish pairs the store PR with the code PR | Store push rejected | evals/git-workflow/evals.json | eval-store-ship-push-rejected | red |
+| planning-stores → PR finish pairs the store PR with the code PR | Store push rejected | evals/git-workflow/evals.json | eval-store-ship-push-rejected | green |
 | planning-stores → Watch covers the expected PR set | Code PR green, store PR waiting | evals/pr-pair/test_pr_pair.py | test_pair_state_waits_for_both | green |
 | planning-stores → Watch covers the expected PR set | Store PR alone is ready | evals/pr-pair/test_pr_pair.py | test_pair_state_single_store_pr_ready | green |
 | planning-stores → Watch covers the expected PR set | One PR of the pair merged | evals/pr-pair/test_pr_pair.py | test_pair_state_split_hands_off | green |
-| planning-stores → Watch covers the expected PR set | Archive before merge with no store PR | evals/git-workflow/evals.json | eval-store-archive-before-merge-local-store | red |
+| planning-stores → Watch covers the expected PR set | Archive before merge with no store PR | evals/git-workflow/evals.json | eval-store-archive-before-merge-local-store | green |
 | planning-stores → Feedback rounds span the PR pair | Spec fix requested on the code PR | evals/pr-pair/test_pr_pair.py | test_pass_plan_routes_spec_fix_to_store | green |
 | planning-stores → Feedback rounds span the PR pair | Round limit across both repos | evals/pr-pair/test_pr_pair.py | test_rounds_highest_across_branches | green |
 | planning-stores → Feedback rounds span the PR pair | Finishing an interrupted final pass | evals/pr-pair/test_pr_pair.py | test_pass_plan_final_pass_push_pending | green |
@@ -163,7 +163,7 @@ Test kinds:
 ## 7. specwright-pr wiring (D5, D6, D7, D8)
 
 - [x] 7.1 Add `evals/pr-pair/test_skill_text.py`. It checks mechanically that `skills/specwright-pr/SKILL.md` calls `pr-pair.sh identity` before any push, uses `discover` instead of `gh pr list` for change PRs, runs `link` after both PRs exist, and uses `pair-state`, `pass` and `cleanup-plan` in watch, feedback and cleanup. Add agent evals `eval-store-ship-push-rejected` (fake gh; the store push fails through an unreachable `http.proxy` in `eval.env`) and `eval-store-archive-before-merge-local-store`. Confirm they fail.
-- [ ] 7.2 Rewrite the ship, watch, feedback and after-limit sections of `skills/specwright-pr/SKILL.md` for the expected PR set:
+- [x] 7.2 Rewrite the ship, watch, feedback and after-limit sections of `skills/specwright-pr/SKILL.md` for the expected PR set:
   - store commands run inside the store with `planning_store` settings;
   - ship order: store first, then code, then link;
   - one wait per expected PR, with `--repo`;

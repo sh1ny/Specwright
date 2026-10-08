@@ -16,6 +16,11 @@ The diff is already on GitHub. The description explains what the diff cannot sho
 
 **For an OpenSpec change:** link the change (`openspec/changes/<name>/` or its archive path) instead of restating the proposal. Pull the "why" from proposal.md and the key decisions (with rejected alternatives) from design.md.
 
+**Store-backed changes** (planning in an OpenSpec store, so the change has a code PR and a store PR):
+- The **store PR** carries the planning: its body is the change summary (why and the key decisions from proposal.md and design.md) and links the change folder in the store. When there is no code PR (no code commits, no code PR in any state), say `No code changes: this change is planning-only.`
+- The **code PR** links the store PR instead of restating the proposal: `Planning: <store PR url>`. When no store PR is expected (the store has no GitHub remote), name the store branch to share instead.
+- Write each body once; `pr-pair.sh link` adds the cross-link marker comment when the peer PR did not exist yet.
+
 **Sections for large changes** (omit any that would be empty):
 - Why
 - What changed (grouped by area, not by file)

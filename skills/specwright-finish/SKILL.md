@@ -38,7 +38,7 @@ Commit type: the branch prefix, except `bugfix` → `fix`. Archive paths, in the
 ## pr
 - Run `specwright-pr` **ship**: it pushes the archive commit (pinning the GitHub identity and running `pr.validate`) and opens the PR if there is none, leaving an existing PR's description alone.
 - If `specwright-pr` **watch** started this archive, hand back to it: it waits for CI and reviews on the archive head before reporting ready. Otherwise report the PR URL and `Ready to merge on GitHub once checks and reviews are green.`, and offer **watch**. Never merge the PR.
-- **After the PR is merged** (the user says so, or `gh pr view <branch> --json state,headRefOid` shows MERGED): `git checkout <main> && git pull --ff-only && git branch -d <branch>`. If `-d` refuses because GitHub squashed or rebased, use `-D` only when the PR is MERGED and its `headRefOid` equals the local branch tip; otherwise ask.
+- **After the PR is merged** (the user says so, or `gh pr view <branch> --json state,headRefOid` shows MERGED): `git checkout <main> && git pull --ff-only && git branch -d <branch>`. If `-d` refuses because GitHub squashed or rebased, use `-D` only when the PR is MERGED and its `headRefOid` equals the local branch tip; otherwise ask. Store-backed: follow `specwright-pr` **Cleanup after merge** instead, which cleans both repos.
 
 If the roadmap (`project.roadmap`) exists, offer `specwright-roadmap` **next** (or **close** if this was the milestone's last change) once the change is on main: after the local merge, or after the PR is merged.
 
