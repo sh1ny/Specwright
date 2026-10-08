@@ -110,7 +110,7 @@ Test kinds:
 ## 3. Branch gate for stores (D3)
 
 - [x] 3.1 Add agent evals `eval-store-branch-clean`, `-dirty`, `-busy`, `-locked` and `-stale-lock`. Confirm they fail against the current `specwright-branch` (no store branch, no lock handling).
-- [ ] 3.2 Extend `specwright-branch`:
+- [x] 3.2 Extend `specwright-branch`:
   - take the gate lock (`mkdir <store common dir>/specwright-gate.lock` plus an `owner` file) before the store checks, and release it on every exit;
   - run the checks on both repos, with store main detection from `planning_store.main_branch`;
   - create the code branch, then the store branch, rolling back the code branch if the store fails;
