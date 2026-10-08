@@ -98,7 +98,13 @@ def body_of(opts):
 
 
 def jq(data, expr):
-    """Simple paths only: `.a.b`, `.[]`, `.[].a`, `.a[]`. Strings print raw."""
+    """Simple paths (`.a.b`, `.[]`, `.[].a`, `.a[]`) here; anything else (select, pipes, functions) goes to the real
+    `jq -r -c`, as gh's own --jq would evaluate it. Strings print raw."""
+    if not re.fullmatch(r"(\.(\[\]|[A-Za-z_][\w-]*))+|\.", expr.strip()):
+        r = subprocess.run(["jq", "-r", "-c", expr], input=json.dumps(data), capture_output=True, text=True, encoding="utf-8")
+        if r.returncode:
+            raise Fail(f"fake gh: jq failed: {r.stderr.strip()}", 1)
+        return r.stdout.rstrip("\n")
     cur = [data]
     for part in re.findall(r"\.?([^.\[\]]+|\[\])", expr.strip()):
         nxt = []

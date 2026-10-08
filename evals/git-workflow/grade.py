@@ -844,17 +844,24 @@ def name_re(n):
 
 
 def roadmap_rows(rep, names):
-    """name -> the report lines that are about that change: the line starts with the name (after list or table markup),
-    or it is the only roadmap change the line names."""
-    rows = {n: [] for n in names}
+    """name -> the report lines that give that change's status: the lines that start with its name (after list or table
+    markup), or, when there are none, the lines that name only that change. A clause that says another roadmap change is
+    done ("its prerequisite x is done", within one table cell or sentence) is removed, so it is not read as this one's."""
+    lead_rows, sole_rows = {n: [] for n in names}, {n: [] for n in names}
     for line in rep.splitlines():
         hit = [n for n in names if re.search(name_re(n), line)]
         # strip markup and a list or table number ("1.", "2)", "| 3 |"), but not the date of a dated change name
         lead = re.sub(r"^[\s|*\-+>#`(\[\]]*(?:\d+(?:[.)]|\s*\|)[\s|*`(\[\]]*)?", "", line)
         for n in hit:
-            if len(hit) == 1 or re.match(name_re(n), lead):
-                rows[n].append(line)
-    return rows
+            cut = line
+            for o in hit:
+                if o != n:
+                    cut = re.sub(name_re(o) + r"[^|.;\n]*?\bdone\b", " ", cut)
+            if re.match(name_re(n), lead):
+                lead_rows[n].append(cut)
+            elif len(hit) == 1:
+                sole_rows[n].append(cut)
+    return {n: lead_rows[n] or sole_rows[n] for n in names}
 
 
 def says_done(line):
@@ -880,10 +887,13 @@ def check_store_roadmap(name, repo, code, store, rep):
     rows = roadmap_rows(rep, list(want))
     check = {"done": says_done, "pending": says_pending}
     label = {"done": "done", "pending": "planning merged, code pending"}
+    # a row may add detail without repeating the status, but none may give the change another status
+    contra = {"done": lambda l: says_pending(l) or bool(re.search(r"\b(not|isn't|never)\b[^|.\n]{0,15}\bdone\b", l)),
+              "pending": says_done}
     for n, st in want.items():
         if st != "open":
             R.append((f"The report gives {n} the status {label[st]}: {ROADMAP_WHY[n]}",
-                      bool(rows[n]) and all(check[st](l) for l in rows[n]), f"lines={rows[n]}"))
+                      any(check[st](l) for l in rows[n]) and not any(contra[st](l) for l in rows[n]), f"lines={rows[n]}"))
     planned = [n for n, st in want.items() if st == "open"]
     R.append((f"The report does not call {', '.join(planned)} done: they are planned and have no archive",
               all(any(says_open(l) for l in rows[n]) and not any(says_done(l) for l in rows[n]) for n in planned), f"lines={ {n: rows[n] for n in planned} }"))

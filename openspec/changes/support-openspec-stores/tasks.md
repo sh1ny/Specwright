@@ -75,13 +75,13 @@ Test kinds:
 | planning-stores → Cleanup after merge covers every expected PR | Both PRs merged | evals/pr-pair/test_pr_pair.py | test_cleanup_plan_both_merged | green |
 | planning-stores → Cleanup after merge covers every expected PR | Only one PR merged | evals/pr-pair/test_pr_pair.py | test_cleanup_plan_split | green |
 | planning-stores → Cleanup after merge covers every expected PR | Cleanup re-run after the store PR merges | evals/pr-pair/test_pr_pair.py | test_cleanup_plan_rerun_code_branch_gone | green |
-| planning-stores → Roadmap status needs proof that the whole change merged | Both repos merged | evals/git-workflow/evals.json | eval-store-roadmap-local, eval-store-roadmap-pr | red |
-| planning-stores → Roadmap status needs proof that the whole change merged | Date-prefixed change merged | evals/git-workflow/evals.json | eval-store-roadmap-local | red |
-| planning-stores → Roadmap status needs proof that the whole change merged | Code partly integrated | evals/git-workflow/evals.json | eval-store-roadmap-pr | red |
-| planning-stores → Roadmap status needs proof that the whole change merged | Same branch name merged from a fork | evals/git-workflow/evals.json | eval-store-roadmap-pr | red |
-| planning-stores → Roadmap status needs proof that the whole change merged | Code PR merged into another branch | evals/git-workflow/evals.json | eval-store-roadmap-pr | red |
-| planning-stores → Roadmap status needs proof that the whole change merged | Planning-only change squash-merged | evals/git-workflow/evals.json | eval-store-roadmap-pr | red |
-| planning-stores → Roadmap status needs proof that the whole change merged | Store fetch fails | evals/git-workflow/evals.json | eval-store-roadmap-pr | red |
+| planning-stores → Roadmap status needs proof that the whole change merged | Both repos merged | evals/git-workflow/evals.json | eval-store-roadmap-local, eval-store-roadmap-pr | green |
+| planning-stores → Roadmap status needs proof that the whole change merged | Date-prefixed change merged | evals/git-workflow/evals.json | eval-store-roadmap-local | green |
+| planning-stores → Roadmap status needs proof that the whole change merged | Code partly integrated | evals/git-workflow/evals.json | eval-store-roadmap-pr | green |
+| planning-stores → Roadmap status needs proof that the whole change merged | Same branch name merged from a fork | evals/git-workflow/evals.json | eval-store-roadmap-pr | green |
+| planning-stores → Roadmap status needs proof that the whole change merged | Code PR merged into another branch | evals/git-workflow/evals.json | eval-store-roadmap-pr | green |
+| planning-stores → Roadmap status needs proof that the whole change merged | Planning-only change squash-merged | evals/git-workflow/evals.json | eval-store-roadmap-pr | green |
+| planning-stores → Roadmap status needs proof that the whole change merged | Store fetch fails | evals/git-workflow/evals.json | eval-store-roadmap-pr | green |
 | planning-stores → Referenced stores are read-only | Apply in a repo with references | evals/git-workflow/evals.json | eval-references-apply | red |
 | planning-stores → Referenced stores are read-only | Referenced store is not registered | evals/git-workflow/evals.json | eval-references-unregistered | red |
 | planning-stores → Install targets the resolved root | Install into a store-backed project | evals/git-workflow/evals.json | eval-install-store | red |
@@ -177,7 +177,7 @@ Test kinds:
 ## 8. Roadmap status (D9)
 
 - [x] 8.1 Add agent evals `eval-store-roadmap-local` and `eval-store-roadmap-pr`. Their fixtures hold several archived changes covering every roadmap row: merged with `merge: <name>`, date-prefixed, a cherry-picked task only, a fork PR with the same branch name, a merge into `integration`, planning-only squash-merged, and a fetch that cannot reach `origin`. Use the fake gh for PR proof. Confirm they fail against the current `specwright-roadmap`.
-- [ ] 8.2 Update `specwright-roadmap`:
+- [x] 8.2 Update `specwright-roadmap`:
   - read archives from the store's main by the archive-name rule;
   - proof is the marker, a first-parent `merge: <name>` (local), or complete discovery of a MERGED code PR into main from the code repo itself (pr);
   - report "planning merged, code pending", "code unverified" or "code state unknown";

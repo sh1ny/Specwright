@@ -15,7 +15,17 @@ Three project files sit above OpenSpec changes. Paths come from `project:` in `o
 | Architecture | `openspec/architecture.md` | System shape + index of in-force ADRs (`docs/adr/`) | When an ADR is added or superseded |
 | Roadmap | `openspec/roadmap.md` | Milestones: outcome, exit criteria, changes | At every milestone close |
 
-Status is derived, never stored: a change is done when the planning repo's main branch holds its archive (**Planning repo** below; `git -C <planning toplevel> ls-tree -d --name-only <main> <P>/changes/archive/`, matched by the archive name; in pr mode that means its PR merged, not just that archive ran on the branch); a milestone is done when all its changes are done and every exit criterion has passed. In pr mode PRs merge on GitHub, so local `<main>` lags: run `git fetch origin <main>` first and read `origin/<main>` instead. If there is no `origin` or the fetch fails, read local `<main>` and say the status may be stale.
+Status is derived, never stored. A milestone is done when all its changes are done and every exit criterion has passed. A change's status depends on where its planning lives (**Planning repo** below):
+
+- **Main branches.** In pr mode PRs merge on GitHub, so local `<main>` lags: run `git fetch origin <main>` in each repo (store-backed: the code repo and the store) and read `origin/<main>`. Where there is no `origin` or the fetch fails, read that repo's local `<main>` and say its status may be stale (`store status may be stale: fetch failed`). Local mode reads local `<main>`.
+- **Archive.** `git -C <planning toplevel> ls-tree -d --name-only <planning main> <P>/changes/archive/`, matched by the archive name (**Archive name** below: a change named `YYYY-MM-DD-...` is matched as is, never prefixed twice).
+- **Repo-local:** a change is **done** when the main branch holds its archive (in pr mode that means its PR merged, not just that archive ran on the branch); otherwise it is not done.
+- **Store-backed:** the archive on the store's main shows only that the planning merged. The change is **done** only when the store's main holds its archive and one of these proves the code side merged as a whole:
+  - the archive directory on the store's main holds `specwright-change.yaml` with `code_changes: none` (a planning-only change; `git -C <store toplevel> show <store main>:<P>/changes/archive/<archived-name>/specwright-change.yaml`);
+  - `local` mode: `git -C <code toplevel> log --first-parent --format=%s <code main>` has the exact subject `merge: <change-name>`;
+  - `pr` mode: a merged code PR from the code repo's own `<prefix>/<change-name>` branch into the code main. Find it with complete discovery, run from the code checkout (through `bash <specwright-pr>/scripts/as.sh <github.login>` when `github.login` is set, `<specwright-pr>` being that skill's folder): `gh api --paginate "repos/<owner>/<repo>/pulls?state=closed&base=<code main>&per_page=100" --jq '.[] | select(.merged_at != null and .head.repo.full_name == "<owner>/<repo>" and (.head.ref | endswith("/<change-name>"))) | .number'`, with `<owner>/<repo>` from the code repo's `origin` and `GH_REPO` unset. A PR merged into another base, or from a fork's same-named branch, is not proof.
+
+  A subject that merely contains `(<change-name>)` is not proof: a cherry-picked task commit has it while the rest of the change is unmerged. Without proof the change is **planning merged, code pending**. In pr mode, when `gh` is not available it is **planning merged, code unverified**, and when the discovery call fails (non-zero exit) it is **planning merged, code state unknown**. None of these counts as done, for status, **next** or **close**.
 
 **Committing project files** (init and close): start from a clean main (in pr mode, `git pull --ff-only origin <main>` first) and `git checkout -b <branch>` before writing anything, commit the files you wrote by name with a `docs(<branch-name>): ...` subject, then finish per `finish` in `openspec/specwright.yaml`: `local` → merge into main with `--no-ff` and subject `merge: <branch-name>`, delete the branch, never push; `pr` → `specwright-pr` **ship**. There is no change to archive, so `specwright-finish` does not apply.
 
@@ -38,7 +48,7 @@ Input: the user's project idea (any size), plus the repo if code exists. Work on
 
 1. Read the roadmap's Now section. Run `openspec list --json` for active changes, and derive done changes from the main branch as above.
 2. Active change in progress → offer to resume it instead.
-3. Otherwise pick the first planned change that is not done and whose prerequisites are done. If none is left but exit criteria still fail, propose a new change that closes the gap and add it to the roadmap.
+3. Otherwise pick the first planned change that has no archive and whose prerequisites are all **done** (a prerequisite that is planning merged, code pending, unverified or unknown is not done). An archived change whose code is pending is never started again: report it and what it is waiting for (its code PR or merge). If none is left but exit criteria still fail, propose a new change that closes the gap and add it to the roadmap.
 4. Start `/opsx:propose <change-name>` (`specwright-branch` runs first). Give the proposal its context: the milestone, the exit criteria this change serves, and the ADRs that constrain it. The proposal names its milestone.
 
 ## close
@@ -52,7 +62,7 @@ Input: the user's project idea (any size), plus the repo if code exists. Work on
 
 ## status
 
-One answer, no edits: current milestone, its changes (done / active / planned, derived as above), exit criteria state, and what **next** would start.
+One answer, no edits: current milestone, its changes (done / planning merged, code pending / code unverified / code state unknown / active / planned, derived as above, one status per change with its proof), the stale note when a fetch failed, exit criteria state, and what **next** would start.
 
 ## Rules
 
