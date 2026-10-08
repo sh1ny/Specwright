@@ -131,7 +131,7 @@ Loop until a stop condition:
 ## Cleanup after merge
 
 When the user says the PRs merged, or watch reached `cleanup`:
-- Store-backed: `bash scripts/pr-pair.sh cleanup-plan --code <code toplevel> --store <store toplevel> --branch <branch>`. For each repo it lists, run its commands in its `cwd` (check out main, `pull --ff-only`, `branch -d`); `-D` only where it says `force_delete_allowed` (the PR is MERGED and its head equals the local tip). An empty code branch is deleted with `-d` once every expected PR merged. Repos in `keep` (PR open or closed unmerged) keep their branch: report them.
+- Store-backed: `bash scripts/pr-pair.sh cleanup-plan --code <code toplevel> --store <store toplevel> --branch <branch>`. For each repo it lists, run its commands in its `cwd` (check out main, `pull --ff-only`, `branch -d`); `-D` only where it says `force_delete_allowed` (the PR is MERGED and its head equals the local tip). An empty code branch is deleted with `-d` once every expected PR merged. Repos in `keep` (PR open or closed unmerged, or `SHARE_BY_HAND`: a store with no GitHub origin, whose branch no PR merges) keep their branch: report them, and for `SHARE_BY_HAND` remind the user the store branch is still theirs to share or merge.
 - Repo-local: `git checkout <main> && git pull --ff-only && git branch -d <branch>`. If `-d` refuses because GitHub squashed or rebased, use `-D` only when the PR is MERGED and its `headRefOid` equals the local branch tip; otherwise ask.
 
 ## Never

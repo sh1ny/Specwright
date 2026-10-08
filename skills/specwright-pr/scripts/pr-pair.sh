@@ -77,7 +77,8 @@ def usage(msg):
 
 
 def emit(obj, code=0):
-    print(json.dumps(obj, ensure_ascii=False))
+    # U+2028/U+2029 stay escaped: line splitters treat them as line ends, and every subcommand prints ONE JSON line
+    print(json.dumps(obj, ensure_ascii=False).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
     sys.exit(code)
 
 
@@ -245,7 +246,7 @@ def scalar(v):
 
 
 YAML_ESCAPES = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n", "v": "\v", "f": "\f", "r": "\r",
-                "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", "N": "\x85", "_": "\xa0", "L": " ", "P": " "}
+                "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", "N": "\x85", "_": "\xa0", "L": "\u2028", "P": "\u2029"}
 
 
 def unquote(k):
@@ -896,11 +897,18 @@ def pass_write(argv):
     if path.exists():
         raise Stop("record_exists", f"a feedback pass record exists at {path}; resume that pass before starting another", path=str(path))
     seen = set()
+    if not isinstance(intent["findings"], list) or not all(isinstance(f, dict) for f in intent["findings"]):
+        raise Stop("invalid_intent", "findings must be a list of objects", code=2)
     for f in intent["findings"]:
-        for key in ("id", "source", "destination", "edits", "disposition", "revision"):
+        # everything `pass plan` reads from a finding is checked here: a record it cannot read would block every later pass
+        for key in ("id", "item", "source", "destination", "edits", "disposition", "revision"):
             if key not in f:
                 raise Stop("invalid_intent", f"finding {f.get('id')} lacks '{key}'", code=2)
-        if f["id"] in seen or f["destination"] not in ("code", "store", "both") or f["source"] not in ("code", "store") or not f["edits"]:
+        if (f["id"] in seen or f["destination"] not in ("code", "store", "both") or f["source"] not in ("code", "store")
+                or not isinstance(f["item"], str) or not f["item"] or f.get("kind", "thread") not in ("thread", "comment", "review")
+                or not isinstance(f["disposition"], dict) or not isinstance(f["revision"], dict)
+                or not isinstance(f["edits"], list) or not f["edits"]
+                or not all(isinstance(e, dict) and isinstance(e.get("file"), str) and e["file"] for e in f["edits"])):
             raise Stop("invalid_intent", f"finding {f['id']} is duplicated or malformed", code=2)
         seen.add(f["id"])
         for e in f["edits"]:
@@ -1191,6 +1199,8 @@ def cmd_cleanup(argv):
         elif side["expected"]:
             keep.append({"repo": k, "slug": side["repo"], "state": pr["state"] if pr else "NONE", "branch": branch,
                          "url": pr["url"] if pr else None})
+        elif k == "store" and exists and side["reason"] == "no_github_origin":  # no PR can merge it: the user shares it by hand
+            keep.append({"repo": k, "slug": None, "state": "SHARE_BY_HAND", "branch": branch, "url": None})
         elif k == "code" and exists and all_merged:  # the empty code branch, kept until now
             cur = git(d, "branch", "--show-current").stdout.strip()
             ent["commands"] = ([cmd("git", "checkout", main)] if cur == branch else []) + [cmd("git", "branch", "-d", branch)]

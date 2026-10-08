@@ -280,10 +280,10 @@ class Context(Base):
         # quoted values are decoded as YAML does: escapes in double quotes, '' in single quotes
         self.settings("github:\n  login: 'sh1ny'\n"
                       "planning_store:\n  validate: 'echo ''ok'' # still the value'\n"
-                      "pr:\n  validate: \"python -c \\\"print('ok')\\\" # not a comment\\tdone\\x21\"\n"
+                      "pr:\n  validate: \"python -c \\\"print('ok')\\\" # not a comment\\tdone\\x21\\L\\P\"\n"
                       "  reviewers:\n    chatgpt-codex-connector: { role: required, request: \"@codex \\\"review, now\\\"\" }\n")
         c = self.pp("context", "--code", self.code, "--store", self.store)
-        self.assertEqual(c["code"]["validate"], "python -c \"print('ok')\" # not a comment\tdone!")
+        self.assertEqual(c["code"]["validate"], "python -c \"print('ok')\" # not a comment\tdone!\u2028\u2029")
         self.assertEqual(c["store"]["validate"], "echo 'ok' # still the value")
         self.assertEqual(c["code"]["reviewers"]["chatgpt-codex-connector"]["request"], "@codex \"review, now\"")
 
@@ -1188,6 +1188,14 @@ class PassPlan(PassBase):
         self.assertEqual(rr["state"], "todo")
         self.assertIn("push_time", rr)
 
+    def test_pass_write_refuses_findings_pass_plan_cannot_read(self):
+        # a record `pass plan` cannot read would block every later pass, so it is never written
+        good = self.finding()
+        for bad in ({k: v for k, v in good.items() if k != "item"}, {**good, "item": ""}, {**good, "kind": "issue"},
+                    {**good, "disposition": "fixed"}, {**good, "revision": None}, {**good, "edits": [{"contains": ["x"]}]}):
+            self.assertEqual(self.write_record([bad], expect=2)["error"], "invalid_intent", bad)
+        self.assertFalse(self.record_path().exists())
+
     def test_pass_write_both_needs_a_repo_per_edit(self):
         bad = self.finding("F1", dest="both", edits=[{"file": "greet.py", "contains": ["x"]}])
         self.assertEqual(self.write_record([bad], expect=2)["error"], "invalid_intent")
@@ -1275,6 +1283,15 @@ class Cleanup(Base):
         self.assertFalse(p["code"]["expected"])
         self.assertEqual(self.cmds(p["code"]), [["git", "branch", "-d", BRANCH]])
         self.assertIsNone(p["code"].get("force_delete"))
+
+    def test_cleanup_plan_keeps_a_store_branch_shared_by_hand(self):
+        # no GitHub origin on the store: no PR merges its branch, so cleanup must not finish silently
+        self.git(self.store, "remote", "remove", "origin")
+        self.add_pull(CODE, 5, state="closed", merged=self.merged)
+        p = self.plan()
+        self.assertEqual(self.cmds(p["code"])[-1], ["git", "branch", "-d", BRANCH])
+        self.assertEqual(p["store"]["commands"], [])
+        self.assertEqual([(k["repo"], k["state"], k["branch"]) for k in p["keep"]], [("store", "SHARE_BY_HAND", BRANCH)])
 
     def test_cleanup_plan_open_pr_keeps_everything(self):
         self.add_pull(STORE, 2)
