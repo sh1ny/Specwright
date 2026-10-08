@@ -16,3 +16,4 @@ __pycache__/
 /openspec/config.yaml
 /openspec/specs/.gitkeep
 /openspec/changes/archive/.gitkeep
+/openspec/specwright.yaml

@@ -2,7 +2,7 @@
 name: specwright-roadmap
 description: "Project-level planning above OpenSpec changes: strategy, architecture baseline (foundational ADRs) and a milestone roadmap. Modes: init (turn a big project idea or brief into strategy, architecture and roadmap), next (start the next change of the current milestone), close (verify a milestone's exit criteria and plan the next one), status. Triggers: a project idea too big for one change, 'plan this project', 'create a roadmap', 'what's next on the roadmap', 'next change/milestone', 'close the milestone', 'roadmap status', or specwright-finish offering next/close."
 metadata:
-  version: 0.1.7
+  version: 0.1.8
 ---
 
 # Specwright Roadmap
@@ -15,7 +15,17 @@ Three project files sit above OpenSpec changes. Paths come from `project:` in `o
 | Architecture | `openspec/architecture.md` | System shape + index of in-force ADRs (`docs/adr/`) | When an ADR is added or superseded |
 | Roadmap | `openspec/roadmap.md` | Milestones: outcome, exit criteria, changes | At every milestone close |
 
-Status is derived, never stored: a change is done when the main branch holds it under `openspec/changes/archive/` (`git ls-tree -d --name-only <main> openspec/changes/archive/`; in pr mode that means its PR merged, not just that archive ran on the branch); a milestone is done when all its changes are done and every exit criterion has passed. In pr mode PRs merge on GitHub, so local `<main>` lags: run `git fetch origin <main>` first and read `origin/<main>` instead. If there is no `origin` or the fetch fails, read local `<main>` and say the status may be stale.
+Status is derived, never stored. A milestone is done when all its changes are done and every exit criterion has passed. A change's status depends on where its planning lives (**Planning repo** below):
+
+- **Main branches.** In pr mode PRs merge on GitHub, so local `<main>` lags: run `git fetch origin <main>` in each repo (store-backed: the code repo and the store) and read `origin/<main>`. Where there is no `origin` or the fetch fails, read that repo's local `<main>` and say its status may be stale (`store status may be stale: fetch failed`). Local mode reads local `<main>`.
+- **Archive.** `git -C <planning toplevel> ls-tree -d --name-only <planning main> <P>/changes/archive/`, matched by the archive name (**Archive name** below: a change named `YYYY-MM-DD-...` is matched as is, never prefixed twice).
+- **Repo-local:** a change is **done** when the main branch holds its archive (in pr mode that means its PR merged, not just that archive ran on the branch); otherwise it is not done.
+- **Store-backed:** the archive on the store's main shows only that the planning merged. The change is **done** only when the store's main holds its archive and one of these proves the code side merged as a whole:
+  - the archive directory on the store's main holds `specwright-change.yaml` with `code_changes: none` (a planning-only change; `git -C <store toplevel> show <store main>:<P>/changes/archive/<archived-name>/specwright-change.yaml`);
+  - `local` mode: `git -C <code toplevel> log --first-parent --format=%s <code main>` has the exact subject `merge: <change-name>`;
+  - `pr` mode: a merged code PR from the code repo's own `<prefix>/<change-name>` branch into the code main, `<prefix>` derived from the change name exactly as `specwright-branch` does (step 6). Find it with complete discovery, run from the code checkout (through `bash <specwright-pr>/scripts/as.sh <github.login>` when `github.login` is set, `<specwright-pr>` being that skill's folder): `gh api --paginate "repos/<owner>/<repo>/pulls?state=closed&base=<code main>&per_page=100" --jq '.[] | select(.merged_at != null and .head.repo.full_name == "<owner>/<repo>" and .head.ref == "<prefix>/<change-name>") | .number'`, with `<owner>/<repo>` from the code repo's `origin` and `GH_REPO` unset. A PR merged into another base, from a fork's same-named branch, or from another prefix's branch (`docs/<change-name>` for a `feat` change) is not proof.
+
+  A subject that merely contains `(<change-name>)` is not proof: a cherry-picked task commit has it while the rest of the change is unmerged. Without proof the change is **planning merged, code pending**. In pr mode, when `gh` is not available it is **planning merged, code unverified**, and when the discovery call fails (non-zero exit) it is **planning merged, code state unknown**. None of these counts as done, for status, **next** or **close**.
 
 **Committing project files** (init and close): start from a clean main (in pr mode, `git pull --ff-only origin <main>` first) and `git checkout -b <branch>` before writing anything, commit the files you wrote by name with a `docs(<branch-name>): ...` subject, then finish per `finish` in `openspec/specwright.yaml`: `local` → merge into main with `--no-ff` and subject `merge: <branch-name>`, delete the branch, never push; `pr` → `specwright-pr` **ship**. There is no change to archive, so `specwright-finish` does not apply.
 
@@ -38,7 +48,7 @@ Input: the user's project idea (any size), plus the repo if code exists. Work on
 
 1. Read the roadmap's Now section. Run `openspec list --json` for active changes, and derive done changes from the main branch as above.
 2. Active change in progress → offer to resume it instead.
-3. Otherwise pick the first planned change that is not done and whose prerequisites are done. If none is left but exit criteria still fail, propose a new change that closes the gap and add it to the roadmap.
+3. Otherwise pick the first planned change that has no archive and whose prerequisites are all **done** (a prerequisite that is planning merged, code pending, unverified or unknown is not done). An archived change whose code is pending is never started again: report it and what it is waiting for (its code PR or merge). If none is left but exit criteria still fail, propose a new change that closes the gap and add it to the roadmap.
 4. Start `/opsx:propose <change-name>` (`specwright-branch` runs first). Give the proposal its context: the milestone, the exit criteria this change serves, and the ADRs that constrain it. The proposal names its milestone.
 
 ## close
@@ -52,10 +62,30 @@ Input: the user's project idea (any size), plus the repo if code exists. Work on
 
 ## status
 
-One answer, no edits: current milestone, its changes (done / active / planned, derived as above), exit criteria state, and what **next** would start.
+One answer, no edits: current milestone, its changes (done / planning merged, code pending / code unverified / code state unknown / active / planned, derived as above, one status per change with its proof), the stale note when a fetch failed, exit criteria state, and what **next** would start.
 
 ## Rules
 
 - Keep it small: the strategy is one page, the roadmap one or two, the architecture a few pages plus ADRs. Detail lives in OpenSpec changes, not here.
 - The roadmap is a plan, not a contract. Change it whenever a milestone teaches something; record why in the Done line.
 - Never mark a user-verified criterion passed on the user's behalf.
+
+## Planning repo
+
+OpenSpec decides where planning lives: in this repo, in a folder nested in it, or in a store (a separate git repo). Resolve it at the start of every run, before any write; never assume `./openspec/`.
+
+1. **Root:** `openspec list --json` from the code checkout, plus `--store <id>` when the session selected a store. It needs no change name, writes nothing and still works after archive. `root` null with an error whose `message` starts with `Declared in` or `Invalid store declaration in` → stop before any git or file write and show that `message` and `fix`.
+2. **Repo**, in one call: `git rev-parse --path-format=absolute --git-common-dir --show-toplevel && git -C "<root.path>" rev-parse --path-format=absolute --git-common-dir --show-toplevel`.
+   - The second fails (root not in a git work tree) → stop and ask: initialise git there, or abort.
+   - Different common dir → **store-backed**: the planning repo is the store checkout at its toplevel.
+   - Same common dir and toplevel → **repo-local** (including a root nested in this checkout, such as `planning/`): one repo, as before.
+   - Same common dir, different toplevel → the root is in another worktree of this repo, where a commit would land on that worktree's branch. Stop before any write, name both worktrees (path and branch) and ask.
+3. Announce once: `Code repo: <toplevel>; planning repo: <toplevel> (store <root.store_id>)` or `(same repo)`.
+
+**Paths.** `<P>` is `<root.path>/openspec` made relative to the planning repo's toplevel (`openspec` in the usual layout, `planning/openspec` for a nested root). Stage and `ls-tree` planning files as `<P>/...` in the planning repo.
+
+**Where commands run.** Git, `gh` and `as.sh` commands on the store run in one shell call that starts with `cd "<store toplevel>" &&` (`as.sh` only fences the repo it starts in). `openspec templates` and `openspec schema validate` have no root selection: run them with `cd "<root.path>" &&`. `git -C` is for read-only queries only (`rev-parse`, `status`, `log`, `ls-tree`).
+
+**Archive name.** Use `archivedAs` from the archive output when you have it. Otherwise it is the change name if that starts with `YYYY-MM-DD-`, else `YYYY-MM-DD-<change-name>`: `<P>/changes/archive/<archived-name>/`.
+
+**Referenced stores.** A `references:` list in the root's `config.yaml` does not move the planning root: a repo with its own root stays repo-local. Referenced stores are read-only: never branch, commit, stash, push, open a PR or write a file in one. Read them only through `openspec context --json` (each `members` entry with `role: referenced_store` gives its `path` and a `fetch` command such as `openspec show <spec-id> --type spec --store <id>`). A member whose `status` has `reference_unresolved` (the store is not registered on this machine) is named in the report as `unresolved reference: <id>` with its `fix`, and the step continues without it; never guess its path.

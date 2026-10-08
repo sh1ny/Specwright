@@ -2,26 +2,63 @@
 name: specwright-branch
 description: "MANDATORY gate when a new OpenSpec change starts: /opsx:new, /opsx:propose, /opsx:ff, openspec-new-change, openspec-propose, openspec-ff-change, `openspec new change`, or the user asks to start/propose a change. Runs BEFORE any change file exists: checks the repo is on a clean main branch, then creates <prefix>/<change-name>."
 metadata:
-  version: 0.1.7
+  version: 0.1.8
 user-invocable: false
 allowed-tools: Bash(git *) Bash(openspec *)
 ---
 
 # Specwright Branch
 
-Insert a git gate in front of the vanilla change-creation workflow. Run nothing from `openspec` until the gate passes. Stop and ask at every failed check; never proceed silently.
+Insert a git gate in front of the vanilla change-creation workflow. Run no OpenSpec command that writes until the gate passes (`openspec list --json` only reads). Stop and ask at every failed check; never proceed silently.
 
-1. **Inspect in one call:** `git rev-parse --is-inside-work-tree && git branch --show-current && git status --porcelain`. Not a repo → stop and ask (recommend abort).
+1. **Planning repo** (below) first: a stop there creates no branch. **Inspect in one call:** `git rev-parse --is-inside-work-tree && git branch --show-current && git status --porcelain`. Not a repo → stop and ask (recommend abort).
 2. **Change name:** use the user's kebab-case name verbatim; otherwise derive one from the description (lowercase, spaces to hyphens, drop other characters). This name is authoritative: pass it verbatim to `openspec new change` and the triggering workflow; never let them derive another.
 3. **Main branch:** `main_branch` in `openspec/specwright.yaml`, else `main`, else `master` (`git rev-parse --verify`), else ask.
+   - **Used once:** an earlier change may have been merged from another checkout, so refresh the planning repo's main first when it has an `origin`: `git fetch -q origin <main>` (it moves only `origin/<main>`; if it fails, say the check used local refs only). Then list its archive on `<main>` and, when it exists, on `origin/<main>` (`git ls-tree -d --name-only <ref> -- <P>/changes/archive/`), with the planning repo's main: this step's main when planning is in this repo; when store-backed, run it in the store with the store's main (`planning_store.main_branch` in this repo's `openspec/specwright.yaml`, else `main`, else `master`, as in store step 2). An entry named `<change-name>` or `YYYY-MM-DD-<change-name>` means a change of this name was already archived → stop, since PR, merge and archive proofs match changes by name and would take the earlier one for this one. Offer another name (suggest `<change-name>-2`) or abort.
 4. **Not on main** → stop. Offer: switch to main (only if the tree is clean apart from step 5's carry-over), or abort.
-5. **Dirty tree:** untracked files only under `openspec/changes/<change-name>/` are this change's artifacts, created before the gate ran (or when apply found the change on main): they carry over to the new branch, so continue. Anything else → stop and show `git status --short`. Offer: commit first, stash (`git stash push -u -m "specwright-branch: pre-<change-name>" -- <those paths>`, report the ref), or abort.
+5. **Dirty tree:** untracked files only under `<P>/changes/<change-name>/` are this change's artifacts, created before the gate ran (or when apply found the change on main): they carry over to the new branch, so continue. Anything else → stop and show `git status --short`. Offer: commit first, stash (`git stash push -u -m "specwright-branch: pre-<change-name>" -- <those paths>`, report the ref), or abort.
 6. **Prefix** from the name's first token: add/feat/feature/implement/introduce → `feat`; fix/bugfix/hotfix/patch/resolve → `bugfix`; refactor/restructure/cleanup → `refactor`; docs/doc/document → `docs`; chore/bump/deps/ci/build → `chore`; anything else → `feat` (say so in one line).
-7. **Existing branch** `<prefix>/<change-name>` → stop. Offer: switch to it and resume the change (do not re-scaffold), pick another name, or abort.
-8. `git checkout -b <prefix>/<change-name>`, announce `On branch <prefix>/<change-name> (from <main>)`, then hand back to the triggering workflow. If the change directory already exists, tell the workflow to continue it rather than create it again.
+7. **Existing branch** `<prefix>/<change-name>` → stop (store-backed: note it and go on; store step 2 decides once both repos are inspected). Offer: switch to it and resume the change (do not re-scaffold), pick another name, or abort.
+8. Store-backed → continue with **Store-backed changes** (below) instead of this step. Otherwise `git checkout -b <prefix>/<change-name>`, announce `On branch <prefix>/<change-name> (from <main>)`, then hand back to the triggering workflow. If the change directory already exists, tell the workflow to continue it rather than create it again.
 
 If the roadmap (`project.roadmap`, default `openspec/roadmap.md`) exists and the user did not say which milestone this change serves, ask, so the proposal can name it.
 
 One working tree holds one change at a time: this skill switches the branch of the whole checkout. When several agents work on the project at once, each change needs its own `git worktree`.
 
 Never commit or push here.
+
+## Store-backed changes
+
+When the **Planning repo** is a store, the gate covers both repos and both get the same branch name. Steps 1–7 run on the code repo as written, except that an existing branch in step 7 is only noted: whether it stops depends on the store too. Then:
+
+1. **Lock** the store gate before touching the store. Every command that uses the lock starts with `cd "<store toplevel>" && L="$(git rev-parse --path-format=absolute --git-common-dir)/specwright-gate.lock" &&`: shell variables do not survive between calls, so `$L` is set again in each one. Take it in one call: `cd "<store toplevel>" && L="$(git rev-parse --path-format=absolute --git-common-dir)/specwright-gate.lock" && mkdir "$L" && printf 'time: %s\nchange: %s\ncode: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<change-name>" "<code toplevel>" > "$L/owner"`. `mkdir` is atomic and fails when the lock exists. When it succeeds, you hold the lock: go on to step 2. When `mkdir` fails, stop before touching either repo: show `owner` (when the lock was taken, for which change, from which checkout) and say another session may be in its gate for this store. A lock left by an interrupted session is never removed automatically: ask the user to confirm that no other session is in its gate, and only then remove it (`cd "<store toplevel>" && L=... && rm -r "$L"`, `L` set as above) and rerun the gate.
+2. **Store checks**, with the lock held: run steps 1, 3, 4, 5 and 7 on the store (in `cd "<store toplevel>" &&` calls). Main is `planning_store.main_branch` in this repo's `openspec/specwright.yaml`, else `main`, else `master`. Step 5's carry-over is `<P>/changes/<change-name>/` in the store.
+   - Store on another change's branch → **busy**: stop, name that branch, and say one store holds one change in progress at a time on this machine (finish or archive that change first). Do not offer to switch it.
+   - Store dirty → stop and show the store's `git status --short`, with the same offers as step 5, run in the store.
+   - `<prefix>/<change-name>` exists in both repos → stop with step 7's offers.
+   - `<prefix>/<change-name>` exists in only one repo (the code repo's, noted in step 7, or the store's) → stop. Offer to resume it and create the missing one, pick another name, or abort.
+3. **Create** only after both repos pass: `git checkout -b <prefix>/<change-name>` in the code repo, then in the store. If the store creation fails, remove the empty code branch (`git checkout <main> && git branch -d <prefix>/<change-name>`) and stop.
+4. **Release** the lock right after both branches exist, in one call that sets `L` again: `cd "<store toplevel>" && L="$(git rev-parse --path-format=absolute --git-common-dir)/specwright-gate.lock" && rm -r "$L"`. Every stop from step 1 onwards releases it first, unless the stop is that the lock was held by someone else.
+5. Announce `On branch <prefix>/<change-name> in the code repo (<code toplevel>, from <main>) and the store (<store toplevel>, from <store main>)`, then hand back to the triggering workflow. It scaffolds the change in the store, since the root resolves there.
+
+Once a store branch exists, any later gate sees the store as busy, so the lock only covers the gate itself.
+
+## Planning repo
+
+OpenSpec decides where planning lives: in this repo, in a folder nested in it, or in a store (a separate git repo). Resolve it at the start of every run, before any write; never assume `./openspec/`.
+
+1. **Root:** `openspec list --json` from the code checkout, plus `--store <id>` when the session selected a store. It needs no change name, writes nothing and still works after archive. `root` null with an error whose `message` starts with `Declared in` or `Invalid store declaration in` → stop before any git or file write and show that `message` and `fix`.
+2. **Repo**, in one call: `git rev-parse --path-format=absolute --git-common-dir --show-toplevel && git -C "<root.path>" rev-parse --path-format=absolute --git-common-dir --show-toplevel`.
+   - The second fails (root not in a git work tree) → stop and ask: initialise git there, or abort.
+   - Different common dir → **store-backed**: the planning repo is the store checkout at its toplevel.
+   - Same common dir and toplevel → **repo-local** (including a root nested in this checkout, such as `planning/`): one repo, as before.
+   - Same common dir, different toplevel → the root is in another worktree of this repo, where a commit would land on that worktree's branch. Stop before any write, name both worktrees (path and branch) and ask.
+3. Announce once: `Code repo: <toplevel>; planning repo: <toplevel> (store <root.store_id>)` or `(same repo)`.
+
+**Paths.** `<P>` is `<root.path>/openspec` made relative to the planning repo's toplevel (`openspec` in the usual layout, `planning/openspec` for a nested root). Stage and `ls-tree` planning files as `<P>/...` in the planning repo.
+
+**Where commands run.** Git, `gh` and `as.sh` commands on the store run in one shell call that starts with `cd "<store toplevel>" &&` (`as.sh` only fences the repo it starts in). `openspec templates` and `openspec schema validate` have no root selection: run them with `cd "<root.path>" &&`. `git -C` is for read-only queries only (`rev-parse`, `status`, `log`, `ls-tree`).
+
+**Archive name.** Use `archivedAs` from the archive output when you have it. Otherwise it is the change name if that starts with `YYYY-MM-DD-`, else `YYYY-MM-DD-<change-name>`: `<P>/changes/archive/<archived-name>/`.
+
+**Referenced stores.** A `references:` list in the root's `config.yaml` does not move the planning root: a repo with its own root stays repo-local. Referenced stores are read-only: never branch, commit, stash, push, open a PR or write a file in one. Read them only through `openspec context --json` (each `members` entry with `role: referenced_store` gives its `path` and a `fetch` command such as `openspec show <spec-id> --type spec --store <id>`). A member whose `status` has `reference_unresolved` (the store is not registered on this machine) is named in the report as `unresolved reference: <id>` with its `fix`, and the step continues without it; never guess its path.

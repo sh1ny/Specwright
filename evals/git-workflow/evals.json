@@ -29,7 +29,8 @@
         "Branch bugfix/fix-login-timeout exists and is checked out",
         "The branch starts at main's HEAD with no new commits",
         "The change directory openspec/changes/fix-login-timeout exists",
-        "main is unchanged"
+        "main is unchanged",
+        "Only the code repo changed"
       ]
     },
     {
@@ -50,7 +51,8 @@
         "The test suite passes",
         "Working tree is clean apart from scratch-notes.txt",
         "The report does not treat the pre-existing scratch-notes.txt as blocking",
-        "No commit was amended"
+        "No commit was amended",
+        "Only the code repo changed"
       ]
     },
     {
@@ -68,7 +70,8 @@
         "Branch feat/add-greeting was deleted",
         "Working tree is clean",
         "No commit was amended",
-        "The merge commit carries the same trailers as the branch's archive commit"
+        "The merge commit carries the same trailers as the branch's archive commit",
+        "Only the code repo changed"
       ]
     },
     {
@@ -82,6 +85,616 @@
       "assertions": [
         "No commit was added to main",
         "The report flags that apply started on main and offers to create a branch"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "eval-store-apply",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Planning artifacts are committed in the store, every task is committed in both the code repo and the store with identical subjects, the user's scratch-notes.txt is untouched, and the report gives per-repo completion without asking whether a task was a no-op.",
+      "assertions": [
+        "Both repos are still on feat/add-greeting and both mains are unchanged",
+        "The store has a planning-artifacts commit feat(add-greeting): add planning artifacts touching only openspec/changes/add-greeting/ paths",
+        "The code repo has no planning commit and no openspec/changes path in its history",
+        "Exactly one code commit and one store commit per task, with identical subjects starting feat(add-greeting): task 1.1 / 1.2 / 2.1",
+        "Each store task commit touches only tasks.md and its diff ticks only its own task",
+        "Every commit subject in both repos is 72 characters or fewer",
+        "All tasks in the store's tasks.md are ticked",
+        "The test suite passes in the code repo",
+        "Both working trees are clean, the code repo apart from scratch-notes.txt",
+        "scratch-notes.txt was never committed",
+        "The report does not ask whether any task was a no-op",
+        "The report gives per-repo completion for the code repo and the store",
+        "The report's completion check gives the task commits and a clean tree separately for the code repo and the store",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "eval-store-unregistered",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "The code repo declares store team-plans but nothing is registered: stops before any git or file write and shows OpenSpec's error and fix.",
+      "assertions": [
+        "Still on main with no new branch or commit in the code repo",
+        "The code repo has no new files and no openspec/changes directory",
+        "No store directory was created next to the code repo",
+        "The report quotes OpenSpec's error about the declared store team-plans",
+        "The report gives OpenSpec's fix: register the store"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "eval-store-other-worktree",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "The planning root is another worktree of the code repo: stops before any write, names both worktrees, and commits nothing on either branch.",
+      "assertions": [
+        "No new commit on any branch: main, feat/add-greeting and plans are at their fixture tips",
+        "The planning artifacts are still uncommitted in the worktree",
+        "The code checkout is unchanged",
+        "The report names both worktrees and says it stopped"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "eval-nested-root-finish",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "The planning root is a folder committed inside the code repo: the archive commit stages planning/openspec/... paths in the code repo, then merges to main with a single branch.",
+      "assertions": [
+        "The archive commit feat(add-greeting): archive change stages only planning/openspec/changes/ paths and planning/openspec/specs/greeting/spec.md",
+        "Now on main",
+        "main HEAD is a merge commit with two parents and subject merge: add-greeting",
+        "Branch feat/add-greeting was deleted",
+        "Working tree is clean",
+        "Only the code repo's main branch remains and no gh call was made",
+        "No commit was amended"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "eval-root-outside-git",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "The planning root is a plain directory outside every git repository: stops before any write and asks whether to initialise git there or abort.",
+      "assertions": [
+        "No commit was added in the code repo and its tree is clean",
+        "The store directory is still not a git repository",
+        "The report asks whether to initialise git there or abort"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "eval-store-branch-clean",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "Both the code repo and the store are clean on main: creates feat/add-csv-export in both with no commits, then scaffolds the change in the store, leaves no gate lock, and names both repos.",
+      "assertions": [
+        "The code repo and the store are both on feat/add-csv-export",
+        "Each new branch starts at its repo's main with no new commits",
+        "Both mains are unchanged",
+        "The change directory is scaffolded in the store and the code repo has no openspec/changes",
+        "No gate lock is left in the store",
+        "The report names both repos"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "eval-store-branch-dirty",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "The store has an uncommitted edit outside the change directory: creates no branch in either repo, shows the store's status, offers commit, stash or abort, and leaves no gate lock.",
+      "assertions": [
+        "Both repos are still on main with only the main branch",
+        "The store's uncommitted edit is still there and unstashed",
+        "No change directory was created in either repo",
+        "No gate lock is left in the store",
+        "The report shows the store is not clean and offers commit, stash or abort"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "eval-store-branch-busy",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "The store checkout is on another change's branch feat/other-change: creates no branch in either repo, names that branch, says one store holds one change in progress at a time, and leaves no gate lock.",
+      "assertions": [
+        "The code repo is still on main with only the main branch and no new commit",
+        "The store is still on feat/other-change and no new branch was created in it",
+        "No change directory add-csv-export was created in either repo",
+        "No gate lock is left in the store",
+        "The report names feat/other-change and says one store holds one change in progress at a time"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "eval-store-branch-locked",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "Another session holds the store's gate lock (taken just now): stops before touching either repo, reports it is locked or busy and who owns it, and leaves the lock in place.",
+      "assertions": [
+        "Both repos are still on main with only the main branch and no new commit",
+        "No change directory was created in either repo",
+        "The gate lock and its owner file are still there, unchanged",
+        "The report says the gate is locked or busy and names the owning change other-change"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "eval-store-branch-stale-lock",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "A gate lock two days old, left by an interrupted session: creates no branch, shows when the lock was taken, asks the user to confirm before removing it, and (with no user to confirm) leaves it in place.",
+      "assertions": [
+        "Both repos are still on main with only the main branch and no new commit",
+        "No change directory was created in either repo",
+        "The gate lock and its owner file are still there, unchanged",
+        "The report shows the date the lock was taken",
+        "The report asks the user to confirm before removing the lock"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "eval-store-apply-wrong-branch",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "The code repo is on the change branch but the store is on main, with the planning artifacts uncommitted there: commits nothing in either repo, ticks nothing, and names the store's current branch.",
+      "assertions": [
+        "No new commit in either repo: the code repo and the store are at their fixture tips",
+        "The store is still on main, the code repo on feat/add-greeting, and no branch was created in either",
+        "The planning artifacts are still uncommitted in the store and the code repo is clean",
+        "The report names the store's current branch main and the change branch feat/add-greeting",
+        "The report says it stopped without committing"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "eval-store-apply-reconcile",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Task 1.1 has its code commit but its tick is uncommitted in the store (the store commit failed): before ticking 1.2, commits that tick in the store with 1.1's original subject, without asking about a no-op, then finishes 1.2 and 2.1 as normal pairs.",
+      "assertions": [
+        "Both repos are still on feat/add-greeting and both mains are unchanged",
+        "Exactly one code commit and one store commit per task, with identical subjects, and task 1.1 keeps its original subject",
+        "Each store task commit touches only tasks.md and its diff ticks only its own task, including the reconcile commit for 1.1",
+        "The store's task 1.1 commit comes before any task 1.2 or 2.1 commit in the store",
+        "Every commit subject in both repos is 72 characters or fewer",
+        "All tasks in the store's tasks.md are ticked",
+        "The test suite passes in the code repo",
+        "Both working trees are clean",
+        "The report does not ask whether any task was a no-op",
+        "The report's completion check gives the task commits and a clean tree separately for the code repo and the store",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 18,
+      "name": "eval-store-apply-multi-gap",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "The store's uncommitted tasks.md ticks tasks 1.1 and 1.2, both with code commits and no store commits: makes no commit in either repo, lists both tasks and asks how to record them.",
+      "assertions": [
+        "No new commit in either repo",
+        "The store's tasks.md still has both ticks uncommitted and nothing else changed, and the code repo is clean",
+        "The report lists tasks 1.1 and 1.2 as ticked without a store commit",
+        "The report asks the user how to record them",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 19,
+      "name": "eval-store-apply-orphan-tick",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Task 1.2 is ticked in the store with no code commit while its code changes sit uncommitted in the code repo (a fresh session after a stop): commits nothing, ticks nothing further, and asks whether 1.2 changed code.",
+      "assertions": [
+        "No new commit in either repo",
+        "Task 1.2 is the only uncommitted tick in the store and nothing further is ticked",
+        "The code repo is exactly as the fixture left it: task 1.2's code changes are still uncommitted",
+        "The report names task 1.2 and asks whether it changed code",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 20,
+      "name": "eval-store-apply-noop-gap",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "A verification-only task 2.1 is ticked in the store with no code commit and no store commit: never assumes it is a code no-op, commits nothing, ticks nothing further and asks whether it changed no code.",
+      "assertions": [
+        "No new commit in either repo",
+        "Task 2.1 is the only uncommitted tick in the store and nothing further is ticked",
+        "The code repo is exactly as the fixture left it: clean",
+        "The report names task 2.1 and asks whether it changed code",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 21,
+      "name": "eval-store-complete-gap",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Every task is ticked and has a code commit, but the last tick (2.1) is uncommitted in the store: reconciles it with a store commit carrying 2.1's original subject and reports per-repo completion, or reports the gap and stops; either way it does not hand off to archive or PR while the gap is open.",
+      "assertions": [
+        "Both repos are still on feat/add-greeting and both mains are unchanged",
+        "The store has a commit for task 2.1 that touches only tasks.md and ticks only 2.1, or no commit was made and the report names the gap",
+        "Tasks 1.1 and 1.2 keep exactly one code and one store commit, and task 2.1 has one code commit and at most one store commit",
+        "Either both trees are clean, or only the store's tasks.md tick of 2.1 is uncommitted",
+        "If reconciled, the report gives the task commits and a clean tree separately for the code repo and the store; if not, it states a stop and does not hand off",
+        "The test suite passes in the code repo",
+        "The report does not ask whether any task was a no-op",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 22,
+      "name": "eval-store-finish-local",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "Store-backed change, fully applied, archive just ran in the store: commits the archive in the store (staged by file, leaving the user's store-notes.txt alone), then merges the store and the code repo into their mains with --no-ff in that order, deletes both branches, writes no planning-only marker, pushes nothing and names both repos and both merge commits.",
+      "assertions": [
+        "The store has an archive commit feat(add-greeting): archive change that stages only the removed change directory, the archive directory and openspec/specs/greeting/spec.md",
+        "The archive directory openspec/changes/archive/<date>-add-greeting/ exists on the store's main and the original change directory is gone",
+        "The code repo has no archive or planning path in its history and no archive commit",
+        "The store's main HEAD is a merge commit with two parents and subject merge: add-greeting",
+        "The code repo's main HEAD is a merge commit with two parents and subject merge: add-greeting, made after the store's merge",
+        "Both repos are on main with only main left, so feat/add-greeting was deleted in each",
+        "store-notes.txt was never committed and is still untracked, and the code repo is clean",
+        "No specwright-change.yaml was written, because the code branch has commits",
+        "The report names the code repo and the store, both merge commits, and says nothing was pushed",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 23,
+      "name": "eval-store-finish-dated",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for 2026-10-07-add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "The change name already starts with a date and has no code commits: finds the archive under its exact name (no second date prefix), writes specwright-change.yaml with code_changes: none into it as part of the store's archive commit, merges the store with --no-ff, leaves the code main unchanged and deletes the empty code branch with -d.",
+      "assertions": [
+        "The store's archive commit feat(2026-10-07-add-greeting): archive change stages only archive paths and includes specwright-change.yaml with code_changes: none inside the archive directory",
+        "The archive directory is exactly openspec/changes/archive/2026-10-07-add-greeting/ with no second date prefix, and the original change directory is gone",
+        "The store's main HEAD is a merge commit with two parents and subject merge: 2026-10-07-add-greeting, and the store is on main with only main left",
+        "The code repo's main is unchanged: no merge commit and no new commit",
+        "The empty code branch feat/2026-10-07-add-greeting was deleted and the code repo is on main",
+        "Both working trees are clean",
+        "The report names the archive directory 2026-10-07-add-greeting and no doubled date prefix",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 24,
+      "name": "eval-store-finish-planning-only",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "The code branch has no commits: the store's archive commit carries specwright-change.yaml (code_changes: none) inside the archive directory, the store merges into main with --no-ff, the code main does not change, the empty code branch is deleted with -d and the report says the change had no code changes.",
+      "assertions": [
+        "The store's archive commit feat(add-greeting): archive change stages only archive paths and includes specwright-change.yaml with code_changes: none inside the archive directory",
+        "The archive directory openspec/changes/archive/<date>-add-greeting/ exists on the store's main and the original change directory is gone",
+        "The store's main HEAD is a merge commit with two parents and subject merge: add-greeting, and the store is on main with only main left",
+        "The code repo's main is unchanged: no merge commit and no new commit",
+        "The empty code branch feat/add-greeting was deleted and the code repo is on main",
+        "Both working trees are clean",
+        "The code repo has no archive or planning path in its history and no archive commit",
+        "The report says the change had no code changes and names the store's merge commit",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 25,
+      "name": "eval-store-finish-store-conflict",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "Store main gained a conflicting greeting spec after the branch point: commits the archive on the store branch, the store merge conflicts, so it stops, lists the conflicting store file, offers manual resolution or git merge --abort, never resolves the conflict itself and leaves the code repo unmerged on its change branch.",
+      "assertions": [
+        "The store's archive commit feat(add-greeting): archive change is on feat/add-greeting, staged by file, and not on main",
+        "The store's main still ends at the conflicting commit docs(greeting): add greeting spec on main with no merge commit, and feat/add-greeting still exists in the store",
+        "The conflict was left for the user: the store merge is in progress with only openspec/specs/greeting/spec.md unmerged, or it was aborted, and no conflict markers were committed",
+        "The code repo is not merged: it is still on feat/add-greeting, main has only the initial commit and no merge commit, and the tree is clean",
+        "The report lists openspec/specs/greeting/spec.md as conflicting and offers manual resolution or git merge --abort",
+        "The report says the code repo was left unmerged on feat/add-greeting",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 26,
+      "name": "eval-store-finish-code-conflict",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "The store merges cleanly but code main gained a conflicting greet.py: stops at the code conflict without resolving it, keeps the store merge, lists greet.py and reports the split state (the store's main has the change, the code repo does not).",
+      "assertions": [
+        "The store's archive commit feat(add-greeting): archive change is on the store's main, staged by file",
+        "The store's main HEAD is a merge commit with two parents and subject merge: add-greeting, and the store's working tree is clean",
+        "The code repo's main still ends at the conflicting commit feat: add formal greeting with no merge commit, and feat/add-greeting still exists in the code repo",
+        "The conflict was left for the user: the code merge is in progress with only greet.py unmerged, or it was aborted, and no conflict markers were committed",
+        "The report lists greet.py as conflicting and says the store's main has the change while the code repo does not",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 27,
+      "name": "eval-store-archive-on-main",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "Archive ran while the store was on main (both branches were already merged): makes no commit directly on the store's main, carries the archive on chore/archive-add-greeting in the store (or offers it), writes no planning-only marker, touches no code repo state and names the recovery branch.",
+      "assertions": [
+        "No commit was made directly on the store's main: its non-merge commits are the fixture's",
+        "The archive is carried on chore/archive-add-greeting in the store, staged by file, or is still uncommitted on main with the report offering that branch",
+        "No specwright-change.yaml was written in the store, in history or in the working tree",
+        "The code repo is untouched: on main with only main, no new commit, and the tree is clean",
+        "The report names the recovery branch chore/archive-add-greeting",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 28,
+      "name": "eval-store-archive-on-main-pr-open",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "Archive ran with the store on main while the code PR (#7) is still open: carries the archive on chore/archive-add-greeting in the store (or offers it) with no specwright-change.yaml, makes no code branch or PR for it, does not touch the open code PR or the code branches, and says the code PR is still open.",
+      "assertions": [
+        "No commit was made directly on the store's main: its non-merge commits are the fixture's",
+        "The archive is carried on chore/archive-add-greeting in the store, staged by file, or is still uncommitted on main with the report offering that branch",
+        "No specwright-change.yaml was written in the store, in history or in the working tree",
+        "The code repo is untouched: still on feat/add-greeting with its task commits, main has only the initial commit, and the tree is clean",
+        "No gh call created or changed a pull request, and the open code PR is still the only PR, open and unchanged",
+        "The report says the code PR is still open",
+        "The report names the recovery branch chore/archive-add-greeting",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 29,
+      "name": "eval-store-ship-push-rejected",
+      "skills": [
+        "specwright-pr"
+      ],
+      "prompt": "Ship the add-greeting change: push it and open the pull requests.",
+      "expected_output": "Both repos have a GitHub origin and finish is pr, so the expected set is a store PR and a code PR. The store push fails (git cannot reach GitHub): ships the store first, reports the store push error, opens and changes no pull request in either repo (no code PR without the store PR, no link comment), does not fall back to another account, does not call the change ready, and leaves both repos' branches, commits and trees as they were.",
+      "assertions": [
+        "No gh call created or changed a pull request or a comment in either repo, and neither fake repo has a pull request",
+        "No gh call switched accounts (gh auth switch) or asked for another login's token; only the configured account eval-bot was used",
+        "Both repos are still on feat/add-greeting with no new commit, no new branch and a clean tree, and both mains are unchanged",
+        "No commit was amended in either repo",
+        "The report names the store push as the step that failed and shows its error (unreachable, could not connect, proxy or rejected)",
+        "The report says no pull request was opened (for the store, and the code PR was not opened without it)",
+        "The report does not call the change ready or give a pull request URL"
+      ]
+    },
+    {
+      "id": 30,
+      "name": "eval-store-archive-before-merge-local-store",
+      "skills": [
+        "specwright-pr",
+        "specwright-finish"
+      ],
+      "prompt": "The code PR for add-greeting (#7) passed CI and every review, so watch reports it ready. Yes, archive add-greeting on this branch now, as watch asks before merge. The store is a local checkout with no GitHub remote.",
+      "expected_output": "The store has no GitHub origin, so no store PR is expected: archives add-greeting in the store, commits the archive on the store's feat/add-greeting branch (staged by file, no specwright-change.yaml because the code branch has commits), makes no push and no review request, does not touch the open code PR #7 or the code repo, and reports the store branch feat/add-greeting to be shared by hand.",
+      "assertions": [
+        "The store has an archive commit feat(add-greeting): archive change on feat/add-greeting that stages only the removed change directory, the archive directory and openspec/specs/greeting/spec.md, and no specwright-change.yaml was written",
+        "The store is still on feat/add-greeting, its main is unchanged, it has no remote and no remote-tracking branch, and its tree is clean",
+        "The code repo is untouched: still on feat/add-greeting with its task commits, main has only the initial commit, and the tree is clean",
+        "No gh call created or changed a pull request or a comment, and code PR #7 is still the only PR, open and unchanged (no review request was posted)",
+        "The report names the store branch feat/add-greeting and says it must be shared by hand because there is no store PR or GitHub remote",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 31,
+      "name": "eval-store-roadmap-local",
+      "skills": [
+        "specwright-roadmap"
+      ],
+      "prompt": "Show me the roadmap status. For every change on the roadmap, say whether it is done, and tell me which change `next` would start. Read only: don't start, edit or commit anything.",
+      "expected_output": "Local mode, planning in a store. The store's main archives add-greeting, 2026-10-08-add-logging and add-farewell. Reports add-greeting and 2026-10-08-add-logging as done (code main's first-parent history has merge: <name>; the date-prefixed name is not prefixed twice), add-farewell as planning merged, code pending (only its task 1.1 was cherry-picked, no merge: add-farewell), and add-shout and add-metrics as planned. next starts add-metrics (its prerequisite 2026-10-08-add-logging is done) and not add-shout (its prerequisite add-farewell is not done). Changes nothing in either repo.",
+      "assertions": [
+        "The report gives add-greeting the status done: its archive is on the store's main and its code side merged as a whole",
+        "The report gives 2026-10-08-add-logging the status done: its archive 2026-10-08-add-logging (no second date prefix) is on the store's main and code main has merge: 2026-10-08-add-logging",
+        "The report gives add-farewell the status planning merged, code pending: only task 1.1 was cherry-picked onto code main; the rest of the change is unmerged",
+        "The report does not call add-shout, add-metrics done: they are planned and have no archive",
+        "`next` uses only done changes as prerequisites: it names add-metrics and does not recommend add-shout",
+        "No repo was modified: both repos are on main with no new commit, branch or stash and a clean tree, and code main still ends at the roadmap commit",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 32,
+      "name": "eval-store-roadmap-pr",
+      "skills": [
+        "specwright-roadmap"
+      ],
+      "prompt": "Show me the roadmap status. For every change on the roadmap, say whether it is done, and tell me which change `next` would start. Read only: don't start, edit or commit anything.",
+      "expected_output": "PR mode, planning in a store whose git fetch cannot reach origin. Reads the store's local main and says the store status may be stale. The code side comes from the fake gh (complete discovery of PRs from acme:feat/<name>). Reports add-greeting (PR #1 merged into main) and plan-release (planning-only: specwright-change.yaml with code_changes: none in the archive, squash-merged) as done; add-farewell (task 1.1 cherry-picked, PR #2 open), add-shout (own PR #3 open; the merged PR #4 is a fork's same-named branch) and add-metrics (PR #5 merged into integration, not main) as planning merged, code pending; add-share, add-report and add-export as planned. next starts add-export (prerequisite plan-release is done) and neither add-share nor add-report. Changes nothing in either repo and creates or changes no PR.",
+      "assertions": [
+        "The report gives add-greeting the status done: its archive is on the store's main and its code side merged as a whole",
+        "The report gives add-farewell the status planning merged, code pending: only task 1.1 was cherry-picked onto code main; the rest of the change is unmerged",
+        "The report gives add-shout the status planning merged, code pending: its own code PR #3 is open; the merged PR #4 is a fork's same-named branch",
+        "The report gives add-metrics the status planning merged, code pending: its code PR #5 was merged into integration, not main",
+        "The report gives plan-release the status done: its archive holds specwright-change.yaml with code_changes: none and there is no code PR",
+        "The report does not call add-share, add-report, add-export done: they are planned and have no archive",
+        "`next` uses only done changes as prerequisites: it names add-export and does not recommend add-share or add-report",
+        "The report says the store status may be stale because the fetch failed",
+        "The code-side proof came from gh: the fake gh was asked for the code repo's pull requests",
+        "No gh call created or changed anything: the five fixture pull requests are as they were",
+        "No repo was modified: both repos are on main with no new commit, branch or stash and a clean tree, and code main still ends at the roadmap commit",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 33,
+      "name": "eval-references-apply",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "The project keeps its own openspec/ root and lists the registered store team-plans under references:, so planning is repo-local. Applies the change entirely in the code repo (planning commit, one commit per task, tasks ticked). Reads team-plans only through openspec context --json / openspec show --store and never branches, commits, stashes, stages, writes files or pushes there.",
+      "assertions": [
+        "The referenced store team-plans has no new commit, branch, stash, worktree or remote",
+        "The referenced store team-plans has no staged, modified or untracked file",
+        "The code repo is on feat/add-greeting and main is unchanged",
+        "The code repo has a planning-artifacts commit feat(add-greeting): add planning artifacts",
+        "Exactly one code commit per task, subjects starting feat(add-greeting): task 1.1 / 1.2 / 2.1, and nothing else committed",
+        "All tasks in the code repo's tasks.md are ticked",
+        "The test suite passes in the code repo",
+        "The code repo's working tree is clean apart from scratch-notes.txt, which was never committed",
+        "No commit was amended"
+      ]
+    },
+    {
+      "id": 34,
+      "name": "eval-references-unregistered",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Same project, but team-plans is not registered on this machine, so openspec context --json reports reference_unresolved. Continues the apply without that context, completes every task in the code repo, leaves the unregistered team-plans folder on disk untouched, and the report names the unresolved reference team-plans.",
+      "assertions": [
+        "The referenced store team-plans has no new commit, branch, stash, worktree or remote",
+        "The referenced store team-plans has no staged, modified or untracked file",
+        "The code repo is on feat/add-greeting and main is unchanged",
+        "The code repo has a planning-artifacts commit feat(add-greeting): add planning artifacts",
+        "Exactly one code commit per task, subjects starting feat(add-greeting): task 1.1 / 1.2 / 2.1, and nothing else committed",
+        "All tasks in the code repo's tasks.md are ticked",
+        "The test suite passes in the code repo",
+        "The code repo's working tree is clean apart from scratch-notes.txt, which was never committed",
+        "No commit was amended",
+        "The report names the unresolved reference team-plans and says it is not registered",
+        "The task continued: the report does not say it stopped or is waiting for the reference"
+      ]
+    },
+    {
+      "id": 35,
+      "name": "eval-install-store",
+      "skills": [],
+      "prompt": "Install Specwright into this project by following the Install / Update prompt in F:/Dev/specwright/README.md (the text block under \"Install / Update\"). Use the local checkout at F:/Dev/specwright as the downloaded copy instead of cloning from GitHub. I use Claude Code only: skills go in .claude/skills/ and agents in .claude/agents/. For Step 6: finish mode local, no GitHub login, no review-request comment, review.cross_model off, no pre-push command, and keep the default project: paths. The current directory is the project's code checkout.",
+      "expected_output": "The code repo declares the registered store team-plans, whose root is the store repo. Runs openspec list --json first, then installs the specwright schema and the config.yaml schema and context into the store's openspec/, and specwright.yaml, skills and agents into the code repo. Creates no openspec/specs or openspec/changes in the code repo, validates the schema inside the store, leaves the store files uncommitted and lists them in the report.",
+      "assertions": [
+        "The store has openspec/schemas/specwright/ identical to the downloaded schemas/specwright/",
+        "The store's openspec/config.yaml has schema: specwright and every Specwright context line exactly once",
+        "The code repo has openspec/specwright.yaml with every key of the template, every specwright-* skill in .claude/skills/ and both agents in .claude/agents/",
+        "Every new or changed file in the store is under openspec/",
+        "openspec schema validate specwright passes when run in the store",
+        "openspec list --json from the code repo still reports the store as the root",
+        "Nothing was committed, branched, stashed or pushed in either repo, and no gh call was made",
+        "The code repo has no openspec/specs, openspec/changes or openspec/schemas directory",
+        "The code repo's openspec/config.yaml still points at the store (store: team-plans) and holds no Specwright context",
+        "The report lists the store's uncommitted files (schemas/specwright and config.yaml) and says they are not committed",
+        "The report says openspec schema validate specwright was run in the store and passed"
+      ]
+    },
+    {
+      "id": 36,
+      "name": "eval-install-store-other-schema",
+      "skills": [],
+      "prompt": "Install Specwright into this project by following the Install / Update prompt in F:/Dev/specwright/README.md (the text block under \"Install / Update\"). Use the local checkout at F:/Dev/specwright as the downloaded copy instead of cloning from GitHub. I use Claude Code only: skills go in .claude/skills/ and agents in .claude/agents/. For Step 6: finish mode local, no GitHub login, no review-request comment, review.cross_model off, no pre-push command, and keep the default project: paths. The current directory is the project's code checkout.",
+      "expected_output": "Same project, but the store's config.yaml already names the project-local schema team-flow and a context line of the team's own. The install does not replace the schema silently: it asks the user before changing it and stops with the question, naming team-flow. The store's schema line and the team's context line stay as they were, and the code repo gets no openspec/specs or openspec/changes.",
+      "assertions": [
+        "The store's openspec/config.yaml still names schema: team-flow and keeps the team's own context line",
+        "The store's team-flow schema is untouched and nothing in the store outside openspec/ changed",
+        "The code repo has no openspec/specs, openspec/changes or openspec/schemas directory",
+        "The code repo's openspec/config.yaml still points at the store (store: team-plans) and holds no Specwright context",
+        "Nothing was committed, branched, stashed or pushed in either repo, and no gh call was made",
+        "The report asks the user whether to change the schema from team-flow to specwright",
+        "The report does not say the schema was set to specwright or that the install completed"
+      ]
+    },
+    {
+      "id": 37,
+      "name": "eval-install-nested-store",
+      "skills": [],
+      "prompt": "Install Specwright into this project by following the Install / Update prompt in F:/Dev/specwright/README.md (the text block under \"Install / Update\"). Use the local checkout at F:/Dev/specwright as the downloaded copy instead of cloning from GitHub. I use Claude Code only: skills go in .claude/skills/ and agents in .claude/agents/. For Step 6: finish mode local, no GitHub login, no review-request comment, review.cross_model off, no pre-push command, and keep the default project: paths. The current directory is the project's code checkout.",
+      "expected_output": "The store's root is planning/ inside the store repo, so the root path is not the store's top level. Installs the schema and config.yaml under planning/openspec/, runs openspec schema validate specwright inside planning/, and leaves nothing at the store repo's own top-level openspec/. specwright.yaml, skills and agents go in the code repo, and the report lists the uncommitted files in planning/.",
+      "assertions": [
+        "The store has planning/openspec/schemas/specwright/ identical to the downloaded schemas/specwright/",
+        "The store's planning/openspec/config.yaml has schema: specwright and every Specwright context line exactly once",
+        "The store repo's top level has no openspec directory",
+        "The code repo has openspec/specwright.yaml with every key of the template, every specwright-* skill in .claude/skills/ and both agents in .claude/agents/",
+        "Every new or changed file in the store is under planning/openspec/",
+        "openspec schema validate specwright passes when run in planning/",
+        "openspec list --json from the code repo still reports planning/ as the root",
+        "Nothing was committed, branched, stashed or pushed in either repo, and no gh call was made",
+        "The code repo has no openspec/specs, openspec/changes or openspec/schemas directory",
+        "The code repo's openspec/config.yaml still points at the store (store: team-plans) and holds no Specwright context",
+        "The report lists the uncommitted files under planning/ and says they are not committed",
+        "The report says openspec schema validate specwright was run in planning/ and passed"
+      ]
+    },
+    {
+      "id": 38,
+      "name": "eval-store-branch-reused-name",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "The store's main already holds openspec/changes/archive/2026-09-01-add-csv-export/: creates no branch in either repo, scaffolds nothing, leaves no gate lock, says the name was used by an archived change and offers another name or abort.",
+      "assertions": [
+        "Both repos are still on main with only the main branch and no new commit",
+        "No change directory add-csv-export was created in either repo",
+        "No gate lock is left in the store",
+        "The report says the name belongs to an archived change and offers another name"
+      ]
+    },
+    {
+      "id": 39,
+      "name": "eval-store-branch-reused-name-origin",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "An earlier add-csv-export was archived and merged from another checkout, so only the store's origin/main holds openspec/changes/archive/2026-09-01-add-csv-export/: the gate fetches, finds it, creates no branch in either repo, scaffolds nothing, leaves no gate lock and the local mains unchanged, says the name was used by an archived change and offers another name or abort.",
+      "assertions": [
+        "Both repos are still on main with only the main branch and no new commit",
+        "No change directory add-csv-export was created in either repo",
+        "No gate lock is left in the store",
+        "The report says the name belongs to an archived change and offers another name"
       ]
     }
   ]

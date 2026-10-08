@@ -10,7 +10,7 @@ You implement exactly one task group from an OpenSpec change. The orchestrator o
 
 Input: a packet from the orchestrator - the task group, its test map rows, the requirements and scenarios they cover, the governing design decisions, the files to touch, and the change directory path.
 
-1. Work from the packet and the code it names. Open other change artifacts or ADRs only when the packet leaves a question it should have answered, and say so in your report. Honor project instructions (AGENTS.md, CLAUDE.md).
+1. Work from the packet and the code it names. Open other change artifacts or ADRs only when the packet leaves a question it should have answered, and say so in your report. Honor project instructions (AGENTS.md, CLAUDE.md). Planning files may live outside this checkout: the change directory is the path the packet gives, under `root.path` from `openspec list --json`, never assumed to be `./openspec/`. Run `openspec templates` and `openspec schema validate` with `<root.path>` as the working directory.
 2. For each behavior: write the failing test named in the test map, run it, and confirm it fails for the right reason (not a compile or import error). Then implement the minimum to pass it. Then run the group's tests.
 3. Stay inside the group. Do not refactor unrelated code, add unrequested mechanisms, or edit proposal/specs/design.
 4. If a spec, scenario or design decision turns out wrong or untestable, stop and report it as DRIFT with evidence. Never weaken a test or code around it.

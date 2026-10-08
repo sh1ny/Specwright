@@ -1,6 +1,6 @@
 # Specwright
 
-![version](https://img.shields.io/badge/version-0.1.7-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
+![version](https://img.shields.io/badge/version-0.1.8-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
 
 A lightweight spec-driven development bundle for AI coding agents, built on [OpenSpec](https://github.com/Fission-AI/OpenSpec). It keeps OpenSpec's small artifact set and adds what OpenSpec leaves out — **architecture reasoning scaled to the change**, test discipline, a git and GitHub PR workflow, and project-level planning — as one custom schema plus a handful of auto-activating skills. No OpenSpec core changes.
 
@@ -54,8 +54,20 @@ also repairs an interrupted or partial install.
 Step 1 - Check prerequisites
 - Run `openspec --version`. If it fails, tell the user to install it
   (`npm i -g @fission-ai/openspec`) and STOP.
-- If there is no `openspec/` directory, tell the user to run `openspec init`
-  first and STOP.
+- Run `openspec list --json` in the code checkout and read `root`.
+  - `"root": null`: if the error names this project's `openspec/config.yaml`
+    (it starts with `Declared in` or `Invalid store declaration in`), show
+    its message and fix and STOP. Otherwise tell the user to run
+    `openspec init` first and STOP.
+  - Otherwise `<root>` below means `root.path`. It is the code checkout
+    for a repo-local project, or a store checkout (OpenSpec stores, 1.14.1
+    or later) elsewhere. Say which.
+- The schema and `config.yaml` go in `<root>/openspec/`. `specwright.yaml`,
+  `.specwright/VERSION`, skills and agents go in the code checkout. When
+  `<root>` is not the code checkout, never create `openspec/specs/`,
+  `openspec/changes/` or `openspec/schemas/` in the code checkout (a real
+  `openspec/` root there would override the store), and leave its
+  `openspec/config.yaml` (the `store:` pointer) as it is.
 
 Step 2 - Choose targets
 Ask which agents this project uses (several may apply) and confirm the paths:
@@ -82,18 +94,19 @@ Step 4 - Install files (track new vs updated)
   and `agents/omp/*.md` into `.omp/agents/` if OMP was chosen. If an
   installed agent file has a different `model:` value than the downloaded
   one, the user changed it: keep their value and say so.
-- Replace `openspec/schemas/specwright/` with the downloaded
+- Replace `<root>/openspec/schemas/specwright/` with the downloaded
   `schemas/specwright/`.
 - Legacy openspec-git-flow: if `openspec-git-branch`, `openspec-git-commit` or
   `openspec-git-merge` skill directories exist in a chosen skills directory,
   or `openspec/.git-flow/` exists, list them and ask before removing them.
 - Do not write `openspec/.specwright/VERSION` yet; Step 7 does, last.
 
-Step 5 - Merge openspec/config.yaml (never remove unrelated content)
+Step 5 - Merge <root>/openspec/config.yaml (never remove unrelated content)
 - If it does not exist, copy the downloaded `templates/openspec/config.yaml`.
 - Otherwise:
   - `schema:` - if it is missing or `spec-driven`, set it to `specwright`. If
-    it names another schema, ask the user before changing it; if they
+    it names another schema, ask the user before changing it (in a store,
+    say the change applies to everyone who uses that store); if they
     decline, keep it.
   - `context:` - if there is no `context:` key, add `context: |` holding the
     lines from the downloaded `templates/openspec/config.yaml` (leave any
@@ -106,7 +119,7 @@ Step 5 - Merge openspec/config.yaml (never remove unrelated content)
     `openspec-git-merge`. Leave every other line alone, including the
     project's own lines that mention Specwright.
 
-Step 6 - Settings (openspec/specwright.yaml)
+Step 6 - Settings (openspec/specwright.yaml in the code checkout)
 - If it does not exist, copy the downloaded
   `templates/openspec/specwright.yaml`, then ask the user for:
   finish mode (`local` merges to main locally; `pr` goes through GitHub PRs),
@@ -124,13 +137,13 @@ Step 6 - Settings (openspec/specwright.yaml)
   file no longer has, list them and ask before removing them.
 
 Step 7 - Verify, stamp the version, clean up
-- Run `openspec schema validate specwright`.
+- Run `openspec schema validate specwright` inside `<root>`.
 - Every file of the downloaded `skills/specwright-*` directories exists,
   with the same content, in every chosen skills directory, and nothing else
   is in them.
 - Every downloaded agent file exists in each chosen agents directory (the
   `model:` line may differ, per Step 4).
-- `openspec/config.yaml` has `schema: specwright` (or the schema the user
+- `<root>/openspec/config.yaml` has `schema: specwright` (or the schema the user
   chose to keep - then report "installed, but not the default schema"),
   every downloaded context line exactly once, and no other managed line.
 - `openspec/specwright.yaml` has every key in the downloaded
@@ -144,8 +157,11 @@ Step 7 - Verify, stamp the version, clean up
 Step 8 - Report briefly: version change (fresh, <old> → <new>, or
 reinstall), directories used, skills and agents installed (new vs updated,
 models kept), config and settings created/merged/unchanged (keys added or
-removed), legacy files removed, and the result of each Step 7 check. Tell the
-user to restart their agent so new skills and agents load.
+removed), legacy files removed, and the result of each Step 7 check. When `<root>`
+is a store, list the files this install left uncommitted there (by path,
+from `git status --porcelain` in the store) and say the user commits them in
+the store; this prompt never commits. Tell the user to restart their agent
+so new skills and agents load.
 ```
 
 ## ⚡ First Steps After Install
@@ -253,6 +269,20 @@ Reviewers: `role` is `required` (default) or `advisory`, `timeout` defaults to 2
 
 ---
 
+## 🗄️ Stores
+
+Specwright works with [OpenSpec stores](https://github.com/Fission-AI/OpenSpec) (OpenSpec 1.14.1 or later): planning kept in a standalone repo registered on the machine (`openspec store setup` / `openspec store register <path> --id <id>`), while the code lives in its own repo.
+
+- **Which root is used.** Every skill reads `root.path` from `openspec list --json` and never assumes `./openspec/`. OpenSpec resolves it from a `store: <id>` pointer in the code repo's `openspec/config.yaml`, the global `defaultStore` (`openspec config set defaultStore <id>`), or `--store <id>` on a command. Prefer the pointer or `defaultStore`: a `--store`-only session is not seen by a later session without the flag. A root in another git repository is a store; a root in the code repo (top level or a nested folder) is repo-local and works as before.
+- **One change in progress per store per machine.** OpenSpec registers one checkout per store, so a store on another change's branch is busy: the branch gate stops and names that branch. Finish or archive that change first. The gate itself holds a lock (`specwright-gate.lock` in the store's git dir) while it creates both branches; a lock left by an interrupted session is removed only after you confirm no other session is in its gate.
+- **The PR pair.** A store-backed change has the same branch name in both repos and, in `finish: pr`, up to two PRs: the store PR (planning) and the code PR, linked to each other. The expected PR set is the PRs the change can have: a planning-only change (no code commits, marked with `specwright-change.yaml`) expects only the store PR. Watch, feedback and cleanup act on the expected PRs only, and the roadmap counts a store-backed change done only with proof that its code is merged too, or that it is planning-only; otherwise it shows "planning merged, code pending".
+- **Store settings.** `planning_store:` in the code repo's `openspec/specwright.yaml` holds the store's `main_branch`, `login`, `validate` (runs in `<root.path>`; `pr.validate` never runs in the store) and `reviewers`. Each defaults to the code repo's value; see the commented block in the template.
+- **Install.** The install prompt puts the schema and the `context:` lines in `<root.path>/openspec/` and leaves those files uncommitted in the store for you to commit; `specwright.yaml`, skills and agents go in the code repo.
+- **References.** Stores listed under `references:` in a project's `config.yaml` are read-only: the skills may read their specs (`openspec context --json`) but never branch, commit or push there. An unresolved reference is named in the report, and the work goes on.
+- **`Feedback-Round` trailer.** Review-fix commits now carry a `Feedback-Round: <n>` trailer, in repo-local projects too, so the round limit counts the same in one repo or two. Branches from before this count their `address review feedback` commits as before.
+
+---
+
 ## 📖 Behavior Reference
 
 <details>
@@ -321,6 +351,10 @@ Files are always staged by name — never `git add -A`, never all of `openspec/`
 ## 🧪 Evals
 
 [`evals/git-workflow/`](evals/git-workflow/) holds scripted evals for the git skills: [`fixtures.py`](evals/git-workflow/fixtures.py) builds scratch repos, [`evals.json`](evals/git-workflow/evals.json) lists the cases, and [`grade.py`](evals/git-workflow/grade.py) checks the resulting git state. Run with [skill-creator](https://github.com/anthropics/skills) (with-skill vs. baseline runs), then `python evals/git-workflow/grade.py <iteration-dir>`.
+
+Store evals (`eval-store-*`) need two repos, so the fixture is a directory, not a repo: `code/` is the project, `store/` is its OpenSpec store. The fixture also writes `eval.env`. The agent under test must run `source <repo>/eval.env` first and work from `<repo>/code`. The file points the OpenSpec registry and config (`XDG_DATA_HOME`, `XDG_CONFIG_HOME`) and Specwright's watch state (`SPECWRIGHT_STATE_DIR`) at the run directory, and puts a fake `gh` first on `PATH`. Your own registry and state are never touched. The fake `gh` ([`evals/fakes/gh.py`](evals/fakes/gh.py)) keeps its state in `gh-state.json` and logs every call to `gh-log.jsonl`; `grade.py` reads both repos and that log.
+
+Test the fake `gh` with `python -m unittest discover evals/pr-pair`.
 
 ---
 

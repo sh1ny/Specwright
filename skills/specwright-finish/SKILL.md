@@ -2,30 +2,62 @@
 name: specwright-finish
 description: "MANDATORY after the OpenSpec archive workflow completes: /opsx:archive, /opsx:bulk-archive, openspec-archive-change, `openspec archive`, or the user asks to archive/finish a change. Commits the archive move, then merges locally (finish: local) or pushes to the PR (finish: pr). Also handles 'the PR was merged' cleanup."
 metadata:
-  version: 0.1.7
+  version: 0.1.8
 user-invocable: false
 allowed-tools: Bash(git *) Bash(openspec *)
 ---
 
 # Specwright Finish
 
-Start only after the vanilla archive workflow reports success (for bulk archive: after all of it). If it failed, do nothing.
+Start only after the vanilla archive workflow reports success (for bulk archive: after all of it). If it failed, do nothing. Then resolve the **Planning repo** (below); a stop there writes nothing.
 
-Commit type: the branch prefix, except `bugfix` → `fix`. Archive paths: `openspec/changes/<change-name>/` (now removed), `openspec/changes/archive/<dated-name>/`, and for each delta `specs/<capability-path>/spec.md` inside the archived change, the main spec `openspec/specs/<capability-path>/spec.md` it updated or created - by file, never the whole `openspec/specs/` directory. Other files are the user's: never stage them.
+Commit type: the branch prefix, except `bugfix` → `fix`. Archive paths, in the planning repo: `<P>/changes/<change-name>/` (now removed), `<P>/changes/archive/<archived-name>/`, and for each delta `specs/<capability-path>/spec.md` inside the archived change, the main spec `<P>/specs/<capability-path>/spec.md` it updated or created - by file, never the whole `<P>/specs/` directory. Other files are the user's: never stage them.
 
 1. **Branch:** `git branch --show-current`. If the branch's change name differs from the archived change, confirm with the user. On main:
    - No archive changes left uncommitted (the archive already reached main) → report `Nothing to finish - archive is on <main>` and stop.
    - Otherwise (the PR merged before archive ran; normally `specwright-pr` **watch** archives on the PR branch first) → offer `git checkout -b chore/archive-<change-name>`; the uncommitted archive carries over. Continue from step 2 on that branch, or stop if the user declines. Never commit on main.
-2. **Archive commit**, one call: `git add -- <archive paths> && git commit -F <msgfile> -- <archive paths>` with `<type>(<change-name>): archive change`. Then `git status --porcelain`: nothing may be left under `openspec/changes/<change-name>/` or the archive directory, and none of the listed spec files (else stop and list it); other leftovers, including other files under `openspec/`, are the user's - list them and continue. Bulk archive of several changes on one branch → one archive commit naming them all.
-3. **Finish** per `finish` in `openspec/specwright.yaml` (default `local`). Main branch: `main_branch` setting, else `main`, else `master`, else ask.
+   - Store-backed: check each repo. The archive lives in the store, so the recovery branch is created there only (`cd "<store toplevel>" && git checkout -b chore/archive-<change-name>`), never a code branch or code PR for it; the code repo stays as it is. It carries only the archive: the planning-only test below still decides the marker, and step 4 then finishes only the store branch - the code repo's branch and PR go their own way.
+2. **Planning-only test** (store-backed only), before the archive commit, with `<prefix>/<change-name>` as the code branch (on a recovery branch, the code repo's local branch ending in `/<change-name>`, if any). The change has code work when any of these holds, and is planning-only otherwise:
+   - `git -C "<code toplevel>" log --oneline <main>..<prefix>/<change-name>` lists a commit (an absent branch lists none);
+   - `git -C "<code toplevel>" log --first-parent --format=%s <main>` has the exact subject `merge: <change-name>` - this change's own merge, so the code was already merged, as on a recovery branch. A subject that merely contains `(<change-name>): ` is not proof: another change or branch can carry that scope;
+   - `pr` mode only: a code PR from that branch into the code main branch exists in any state (a PR into another base, such as `integration`, is not this change's code PR). Parse `<owner>/<repo>` from the code checkout's `git remote get-url origin`, then from the code checkout with `GH_REPO` unset: `[as] gh api --paginate "repos/<owner>/<repo>/pulls?state=all&head=<owner>:<prefix>/<change-name>&per_page=100" --jq '.[] | select(.head.repo.full_name == "<owner>/<repo>" and .base.ref == "<main>") | .number'` (`[as]` as in `specwright-pr`). A non-zero exit means unknown: stop, write no marker and say why. `local` mode skips this lookup.
+
+   Planning-only → write `<P>/changes/archive/<archived-name>/specwright-change.yaml` containing `code_changes: none` and add it to the archive paths. Otherwise never write it, on the change branch or a `chore/archive-<change-name>` branch alike.
+3. **Archive commit**, one call in the planning repo (store-backed: start it with `cd "<store toplevel>" && test "$(git branch --show-current)" = <branch> &&`): `git add -- <archive paths> && git commit -F <msgfile> -- <archive paths>` with `<type>(<change-name>): archive change`. Then `git status --porcelain`: nothing may be left under `<P>/changes/<change-name>/` or the archive directory, and none of the listed spec files (else stop and list it); other leftovers, including other files under `<P>/`, are the user's - list them and continue. Bulk archive of several changes on one branch → one archive commit naming them all.
+4. **Finish** per `finish` in `openspec/specwright.yaml` (default `local`). Main branch: `main_branch` setting, else `main`, else `master`, else ask.
 
 ## local
 - Write the merge message to a file first - subject `merge: <change-name>` plus any trailers the user's commit rules require - because fixing a commit afterwards means amending, which this workflow never does unprompted. Then one call: `git checkout <main> && git merge --no-ff <branch> -F <msgfile>`. On conflict: stop, list the files, offer manual resolution or `git merge --abort`. Never resolve conflicts yourself.
 - `git branch -d <branch>` (never `-D`). Report the merge commit and `Local only - push <main> when ready.` Never push.
+- **Store-backed:** the store first, then the code repo, each with the steps above run in that repo (store: one call starting `cd "<store toplevel>" &&`, main from `planning_store.main_branch`, else main, else master):
+  1. Merge and delete the store branch. On conflict, stop there: list the store files, offer manual resolution or `git merge --abort`, and report that the code repo was left unmerged on `<branch>`.
+  2. Code branch with commits after `<main>` → merge and delete it the same way. On conflict, stop: list the code files, offer manual resolution or `git merge --abort`, and report the split state - the store's main has the change, the code repo's main does not.
+  3. Code branch with no commits → `git checkout <main> && git branch -d <branch>`, no merge. Report that the change had no code changes.
+  4. Report both repos: each merge commit (or "no code changes"), the deleted branches, and `Local only - push <main> when ready.`
 
 ## pr
 - Run `specwright-pr` **ship**: it pushes the archive commit (pinning the GitHub identity and running `pr.validate`) and opens the PR if there is none, leaving an existing PR's description alone.
 - If `specwright-pr` **watch** started this archive, hand back to it: it waits for CI and reviews on the archive head before reporting ready. Otherwise report the PR URL and `Ready to merge on GitHub once checks and reviews are green.`, and offer **watch**. Never merge the PR.
-- **After the PR is merged** (the user says so, or `gh pr view <branch> --json state,headRefOid` shows MERGED): `git checkout <main> && git pull --ff-only && git branch -d <branch>`. If `-d` refuses because GitHub squashed or rebased, use `-D` only when the PR is MERGED and its `headRefOid` equals the local branch tip; otherwise ask.
+- **After the PR is merged** (the user says so, or `gh pr view <branch> --json state,headRefOid` shows MERGED): `git checkout <main> && git pull --ff-only && git branch -d <branch>`. If `-d` refuses because GitHub squashed or rebased, use `-D` only when the PR is MERGED and its `headRefOid` equals the local branch tip; otherwise ask. Store-backed: follow `specwright-pr` **Cleanup after merge** instead, which cleans both repos.
 
 If the roadmap (`project.roadmap`) exists, offer `specwright-roadmap` **next** (or **close** if this was the milestone's last change) once the change is on main: after the local merge, or after the PR is merged.
+
+## Planning repo
+
+OpenSpec decides where planning lives: in this repo, in a folder nested in it, or in a store (a separate git repo). Resolve it at the start of every run, before any write; never assume `./openspec/`.
+
+1. **Root:** `openspec list --json` from the code checkout, plus `--store <id>` when the session selected a store. It needs no change name, writes nothing and still works after archive. `root` null with an error whose `message` starts with `Declared in` or `Invalid store declaration in` → stop before any git or file write and show that `message` and `fix`.
+2. **Repo**, in one call: `git rev-parse --path-format=absolute --git-common-dir --show-toplevel && git -C "<root.path>" rev-parse --path-format=absolute --git-common-dir --show-toplevel`.
+   - The second fails (root not in a git work tree) → stop and ask: initialise git there, or abort.
+   - Different common dir → **store-backed**: the planning repo is the store checkout at its toplevel.
+   - Same common dir and toplevel → **repo-local** (including a root nested in this checkout, such as `planning/`): one repo, as before.
+   - Same common dir, different toplevel → the root is in another worktree of this repo, where a commit would land on that worktree's branch. Stop before any write, name both worktrees (path and branch) and ask.
+3. Announce once: `Code repo: <toplevel>; planning repo: <toplevel> (store <root.store_id>)` or `(same repo)`.
+
+**Paths.** `<P>` is `<root.path>/openspec` made relative to the planning repo's toplevel (`openspec` in the usual layout, `planning/openspec` for a nested root). Stage and `ls-tree` planning files as `<P>/...` in the planning repo.
+
+**Where commands run.** Git, `gh` and `as.sh` commands on the store run in one shell call that starts with `cd "<store toplevel>" &&` (`as.sh` only fences the repo it starts in). `openspec templates` and `openspec schema validate` have no root selection: run them with `cd "<root.path>" &&`. `git -C` is for read-only queries only (`rev-parse`, `status`, `log`, `ls-tree`).
+
+**Archive name.** Use `archivedAs` from the archive output when you have it. Otherwise it is the change name if that starts with `YYYY-MM-DD-`, else `YYYY-MM-DD-<change-name>`: `<P>/changes/archive/<archived-name>/`.
+
+**Referenced stores.** A `references:` list in the root's `config.yaml` does not move the planning root: a repo with its own root stays repo-local. Referenced stores are read-only: never branch, commit, stash, push, open a PR or write a file in one. Read them only through `openspec context --json` (each `members` entry with `role: referenced_store` gives its `path` and a `fetch` command such as `openspec show <spec-id> --type spec --store <id>`). A member whose `status` has `reference_unresolved` (the store is not registered on this machine) is named in the report as `unresolved reference: <id>` with its `fix`, and the step continues without it; never guess its path.
