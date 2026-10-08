@@ -26,6 +26,7 @@ pr:
   max_fix_rounds: 2                             # address-review-feedback commits allowed
   after_limit: ask                              # ask | issues | stop
   react: true                                   # 👍/👎 on every finding you answer (default false)
+  poll_interval: 5m                             # how often watch polls GitHub (default 5m; s/m/h)
   reviewers:                                    # keyed by login, without [bot]; omit = review_request only
     chatgpt-codex-connector: { role: required, request: "@codex review" }
     kody-ai:      { role: advisory, timeout: 15m }
@@ -81,7 +82,7 @@ Then summarize the issues filed. Under **watch**, carry on toward ready.
 
 Loop until a stop condition:
 
-1. Wait in the background - one tool call, no tokens while waiting: `[as] bash scripts/pr-snapshot.sh <pr> <reviewers> --wait --timeout 1800 --interval 60` (Claude Code: `run_in_background`; other harnesses: their background or blocking exec). It prints `{"wake":"changed"|"timeout"|"incomplete", "snapshot":{...}}` (`incomplete`: the first snapshot was already cut off, so it did not wait), or exits non-zero if GitHub could not be read.
+1. Wait in the background - one tool call, no tokens while waiting: `[as] bash scripts/pr-snapshot.sh <pr> <reviewers> --wait --timeout 1800 --interval <pr.poll_interval in seconds, default 300>` (Claude Code: `run_in_background`; other harnesses: their background or blocking exec). It prints `{"wake":"changed"|"timeout"|"incomplete", "snapshot":{...}}` (`incomplete`: the first snapshot was already cut off, so it did not wait), or exits non-zero if GitHub could not be read.
 2. On wake, in this order:
    - `state` MERGED or CLOSED → stop.
    - `complete` false → stop: report the `truncated` lists and hand over to the user. Only one page of each list is fetched, so readiness cannot be judged.

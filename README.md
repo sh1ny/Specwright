@@ -236,6 +236,7 @@ pr:
   max_fix_rounds: 2             # address-review-feedback commits allowed per PR
   after_limit: ask              # at the limit: ask = reply "waiting on owner" and stop, issues = file each new finding as an issue and reply with the link, stop = like ask, without offering more rounds
   react: true                   # 👍/👎 on every finding answered (right / wrong); default false
+  poll_interval: 5m             # how often watch polls GitHub; default 5m
   reviewers:                    # keyed by login, without [bot]; replaces github.review_request
     chatgpt-codex-connector: { role: required, request: "@codex review" }   # runs only when tagged
     kody-ai:      { role: advisory, timeout: 15m }   # reviews every push

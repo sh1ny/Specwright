@@ -12,14 +12,14 @@
 #   --wait    poll inside this process; print {"wake":..., "snapshot":...}
 #             once anything changes (checks, threads, comments, reviews, head,
 #             state, edits, a list getting cut off) or the timeout passes
-#             (default 1800s, interval 60s); "incomplete" at once if the first
+#             (default 1800s, interval 300s); "incomplete" at once if the first
 #             snapshot is already cut off; exits 1 if the last poll failed
 # "complete": false means a list was cut off at its page size - do not treat
 # missing items as absent.
 # Wrap with as.sh to pin the GitHub identity.
 set -euo pipefail
 
-pr= repo= logs=0 wait=0 timeout=1800 interval=60 reviewers=
+pr= repo= logs=0 wait=0 timeout=1800 interval=300 reviewers=
 while [ $# -gt 0 ]; do
   case $1 in
     --repo) repo=${2:?--repo needs owner/name}; shift 2 ;;
@@ -32,7 +32,10 @@ while [ $# -gt 0 ]; do
     --logs) logs=1; shift ;;
     --wait) wait=1; shift ;;
     --timeout) timeout=${2:?--timeout needs seconds}; shift 2 ;;
-    --interval) interval=${2:?--interval needs seconds}; shift 2 ;;
+    --interval)
+      interval=${2:?--interval needs seconds}
+      printf '%s' "$interval" | grep -Eq '^[1-9][0-9]*$'         || { echo "pr-snapshot: bad --interval '$2' (want whole seconds > 0)" >&2; exit 2; }
+      shift 2 ;;
     https://*/pull/*)
       repo=$(printf '%s' "$1" | sed -E 's#https://[^/]+/([^/]+/[^/]+)/pull/.*#\1#')
       pr=$(printf '%s' "$1" | sed -E 's#.*/pull/([0-9]+).*#\1#'); shift ;;

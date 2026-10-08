@@ -47,6 +47,9 @@ pr:
   # true = put a thumbs up (finding right) or down (wrong) on every finding
   # answered, alongside the one reply.
   react: false
+  # How often watch polls GitHub (s/m/h). Each poll spends GraphQL points
+  # from the account's hourly budget, shared with every tool using it.
+  poll_interval: 5m
   # Reviewers keyed by login (without [bot]). role: required | advisory,
   # timeout: wait per head (default 20m), request: comment that triggers a
   # reviewer that only runs when tagged. Replaces github.review_request.
