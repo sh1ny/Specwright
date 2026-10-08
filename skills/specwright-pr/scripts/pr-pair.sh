@@ -935,6 +935,9 @@ def dirty_paths(d):
 
 
 def fix_commit(d, head0, branch, n):
+    # a reset, rebase or force-update can drop the recorded head while `head0..branch` still resolves
+    if git(d, "merge-base", "--is-ancestor", head0, f"refs/heads/{branch}").returncode != 0:
+        return None, False
     commits = branch_log(d, f"{head0}..refs/heads/{branch}", None)
     if commits is None:
         return None, False
@@ -996,18 +999,24 @@ def pass_plan(argv):
         files = sorted({norm(e["file"]) for e in edits})
         row = {"step": "fix_commit", "repo": k, "state": "done" if sha else "todo", "sha": sha, "trailer": f"Feedback-Round: {n}",
                "files": files}
+        # judged even when a trailer commit exists: an interrupted pass can commit and push only part of its edits
+        verdicts = [(e, judge(d, e)) for e in edits]
+        pending = [{"file": norm(e["file"]), "finding": e["finding"], "reason": "not_made"} for e, v in verdicts if v == "pending"]
+        for e, v in verdicts:
+            if v == "unjudgeable":
+                stops.append({"reason": "edit_unjudgeable", "repo": k, "finding": e["finding"], "file": norm(e["file"]),
+                              "detail": "the recorded edit has no contains/absent/deleted check, so it cannot be judged done"})
+        dirty = dirty_paths(d)
+        extra = sorted(dirty - set(files))
+        if extra:
+            stops.append({"reason": "unrecorded_change", "repo": k, "files": extra,
+                          "detail": "the working tree has changes outside the files this pass recorded"})
+        uncommitted = sorted(dirty & set(files))
+        blocked = bool(pending) or any(v == "unjudgeable" for _, v in verdicts) or bool(extra)
+        if sha and (blocked or uncommitted):  # the trailer commit holds only part of the pass: commit the rest under it
+            sha = None
+            row.update(state="todo", sha=None, partial_commit=row["sha"])
         if not sha:
-            verdicts = [(e, judge(d, e)) for e in edits]
-            pending = [{"file": norm(e["file"]), "finding": e["finding"], "reason": "not_made"} for e, v in verdicts if v == "pending"]
-            for e, v in verdicts:
-                if v == "unjudgeable":
-                    stops.append({"reason": "edit_unjudgeable", "repo": k, "finding": e["finding"], "file": norm(e["file"]),
-                                  "detail": "the recorded edit has no contains/absent/deleted check, so it cannot be judged done"})
-            extra = sorted(dirty_paths(d) - set(files))
-            if extra:
-                stops.append({"reason": "unrecorded_change", "repo": k, "files": extra,
-                              "detail": "the working tree has changes outside the files this pass recorded"})
-            blocked = bool(pending) or any(v == "unjudgeable" for _, v in verdicts) or bool(extra)
             row.update({"pending_edits": pending, "committable": not blocked,
                         "action": "finish_edits" if pending else ("ask" if blocked else "validate_and_commit")})
         fix[k] = sha

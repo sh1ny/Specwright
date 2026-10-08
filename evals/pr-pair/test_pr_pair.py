@@ -937,6 +937,37 @@ class PassPlan(PassBase):
         self.assertEqual(fix["pending_edits"], [])
         self.assertEqual(sorted(fix["files"]), sorted([SPEC_ARCHIVED, SPEC_MAIN]))
 
+    def test_pass_plan_trailer_commit_with_part_of_the_edits_is_not_done(self):
+        # an interrupted pass committed and pushed the archived delta only: the trailer commit is not the whole fix
+        self.write_record([self.finding()])
+        self.commit(self.store, {SPEC_ARCHIVED: f"{NEW_TEXT} by name.\n"},
+                    "fix(add-greeting): address review feedback\n\nFeedback-Round: 2")
+        self.push_all(self.store)
+        partial = self.tip(self.store)
+        p = self.plan(code=snap(threads=[thread()]))
+        fix = self.row(p, "fix_commit", "store")
+        self.assertEqual((fix["state"], fix["sha"], fix["partial_commit"]), ("todo", None, partial))
+        self.assertEqual(fix["action"], "finish_edits")
+        self.assertEqual([e["file"] for e in fix["pending_edits"]], [SPEC_MAIN])
+        self.assertTrue(self.row(p, "push", "store")["blocked"])
+        self.assertEqual(self.row(p, "reply", finding="F1")["state"], "todo")
+        # the rest made but not committed: still todo, now committable
+        self.write(f"store/{SPEC_MAIN}", f"{NEW_TEXT} by name.\n")
+        fix = self.row(self.plan(code=snap(threads=[thread()])), "fix_commit", "store")
+        self.assertEqual((fix["state"], fix["committable"], fix["action"]), ("todo", True, "validate_and_commit"))
+        sha = self.commit(self.store, {SPEC_MAIN: f"{NEW_TEXT} by name.\n"},
+                          "fix(add-greeting): address review feedback\n\nFeedback-Round: 2")
+        fix = self.row(self.plan(code=snap(threads=[thread()])), "fix_commit", "store")
+        self.assertEqual((fix["state"], fix["sha"]), ("done", sha))
+
+    def test_pass_plan_recorded_head_dropped_from_the_branch_stops(self):
+        self.write_record([self.finding("F1", dest="code", source="code", edits=[{"file": "greet.py", "contains": ["strip()"]}])])
+        self.git(self.code, "reset", "-q", "--hard", "HEAD~1")  # the recorded head is gone from the branch
+        self.fix_code()
+        p = self.plan(code=snap(threads=[thread()]))
+        self.assertIn("head_unreachable", [s["reason"] for s in p["stops"]])
+        self.assertNotEqual(self.row(p, "fix_commit", "code")["state"], "done")
+
     def test_pass_plan_unrecorded_change_stops(self):
         self.write_record([self.finding()])
         self.write(f"store/{SPEC_ARCHIVED}", f"{NEW_TEXT} by name.\n")

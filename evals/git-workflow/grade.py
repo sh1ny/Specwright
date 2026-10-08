@@ -1165,10 +1165,12 @@ def check_store_branch(name, code, store, rep):
         one = re.search(r"one (change|store)|at a time|in progress|busy", rep)
         R.append(("The report names feat/other-change and says one store holds one change in progress at a time",
                   "feat/other-change" in rep and bool(one), f"match={one.group(0) if one else None}"))
-    elif name == "eval-store-branch-reused-name":
+    elif name in ("eval-store-branch-reused-name", "eval-store-branch-reused-name-origin"):
+        # local: the earlier archive is on the store's main; origin: on origin/main only, and a fetch moves origin/main only
+        store_main = STORE_MAIN if name.endswith("-origin") else ["merge: add-csv-export", *STORE_MAIN]
         R.append(("Both repos are still on main with only the main branch and no new commit",
                   on(code) == on(store) == "main" and bs(code) == bs(store) == ["main"] and subjects(code, "main") == [INITIAL]
-                  and subjects(store, "main") == STORE_MAIN,  # a fetch moves origin/main only
+                  and subjects(store, "main") == store_main,
                   f"code={on(code)} {bs(code)} store={on(store)} {bs(store)} store main={subjects(store, 'main')}"))
         R.append(("No change directory add-csv-export was created in either repo", not dirs, f"dirs={dirs}"))
         R.append(no_lock)

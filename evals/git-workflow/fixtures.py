@@ -315,6 +315,7 @@ CONFLICT_SPEC = "# greeting Specification\n\n## Purpose\n\nGreetings, as another
 CONFLICT_STORE = "docs(greeting): add greeting spec on main"
 CONFLICT_CODE = "feat: add formal greeting"
 PR_SLUG = "acme/greeter"
+ARCHIVED_CSV = "## Why\n\nAn earlier CSV export, shipped and archived.\n"
 
 
 def merge_into_main(repo, branch="feat/add-greeting", name="add-greeting"):
@@ -493,18 +494,23 @@ def build_store(name, dest):
         git(store, "add", "-A")
         git(store, "commit", "-q", "-m", "feat(other-change): add planning artifacts")
     elif name == "eval-store-branch-reused-name":
+        store_base(dest)
+        write(store, "openspec/changes/archive/2026-09-01-add-csv-export/proposal.md", ARCHIVED_CSV)
+        git(store, "add", "-A")
+        git(store, "commit", "-q", "-m", "merge: add-csv-export")  # an earlier change of the same name, archived on main
+    elif name == "eval-store-branch-reused-name-origin":
         # an earlier change of the same name was archived and merged from another checkout: it is on the store's
         # origin main only, and this checkout's local main has not been pulled
         store_base(dest)
-        bare = dest / "store-origin.git"
+        bare = dest / "so.git"  # short: Windows paths under the eval run dir near MAX_PATH
         git(dest, "init", "-q", "--bare", "-b", "main", posix(bare))
         git(store, "remote", "add", "origin", posix(bare))
         git(store, "push", "-q", "origin", "main")
-        other = dest / "other-checkout"
+        other = dest / "oc"
         git(dest, "clone", "-q", posix(bare), posix(other))
         for k, v in (("user.name", "Other Bot"), ("user.email", "other@example.invalid"), ("commit.gpgsign", "false")):
             git(other, "config", k, v)
-        write(other, "openspec/changes/archive/2026-09-01-add-csv-export/proposal.md", "## Why\n\nAn earlier CSV export, shipped and archived.\n")
+        write(other, "openspec/changes/archive/2026-09-01-add-csv-export/proposal.md", ARCHIVED_CSV)
         git(other, "add", "-A")
         git(other, "commit", "-q", "-m", "merge: add-csv-export")
         git(other, "push", "-q", "origin", "main")
