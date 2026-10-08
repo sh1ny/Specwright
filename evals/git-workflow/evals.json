@@ -29,7 +29,8 @@
         "Branch bugfix/fix-login-timeout exists and is checked out",
         "The branch starts at main's HEAD with no new commits",
         "The change directory openspec/changes/fix-login-timeout exists",
-        "main is unchanged"
+        "main is unchanged",
+        "Only the code repo changed"
       ]
     },
     {
@@ -50,7 +51,8 @@
         "The test suite passes",
         "Working tree is clean apart from scratch-notes.txt",
         "The report does not treat the pre-existing scratch-notes.txt as blocking",
-        "No commit was amended"
+        "No commit was amended",
+        "Only the code repo changed"
       ]
     },
     {
@@ -68,7 +70,8 @@
         "Branch feat/add-greeting was deleted",
         "Working tree is clean",
         "No commit was amended",
-        "The merge commit carries the same trailers as the branch's archive commit"
+        "The merge commit carries the same trailers as the branch's archive commit",
+        "Only the code repo changed"
       ]
     },
     {
@@ -82,6 +85,93 @@
       "assertions": [
         "No commit was added to main",
         "The report flags that apply started on main and offers to create a branch"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "eval-store-apply",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Planning artifacts are committed in the store, every task is committed in both the code repo and the store with identical subjects, the user's scratch-notes.txt is untouched, and the report gives per-repo completion without asking whether a task was a no-op.",
+      "assertions": [
+        "Both repos are still on feat/add-greeting and both mains are unchanged",
+        "The store has a planning-artifacts commit feat(add-greeting): add planning artifacts touching only openspec/changes/add-greeting/ paths",
+        "The code repo has no planning commit and no openspec/changes path in its history",
+        "Exactly one code commit and one store commit per task, with identical subjects starting feat(add-greeting): task 1.1 / 1.2 / 2.1",
+        "Each store task commit touches only tasks.md and its diff ticks only its own task",
+        "Every commit subject in both repos is 72 characters or fewer",
+        "All tasks in the store's tasks.md are ticked",
+        "The test suite passes in the code repo",
+        "Both working trees are clean, the code repo apart from scratch-notes.txt",
+        "scratch-notes.txt was never committed",
+        "The report does not ask whether any task was a no-op",
+        "The report gives per-repo completion for the code repo and the store",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "eval-store-unregistered",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "The code repo declares store team-plans but nothing is registered: stops before any git or file write and shows OpenSpec's error and fix.",
+      "assertions": [
+        "Still on main with no new branch or commit in the code repo",
+        "The code repo has no new files and no openspec/changes directory",
+        "No store directory was created next to the code repo",
+        "The report quotes OpenSpec's error about the declared store team-plans",
+        "The report gives OpenSpec's fix: register the store"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "eval-store-other-worktree",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "The planning root is another worktree of the code repo: stops before any write, names both worktrees, and commits nothing on either branch.",
+      "assertions": [
+        "No new commit on any branch: main, feat/add-greeting and plans are at their fixture tips",
+        "The planning artifacts are still uncommitted in the worktree",
+        "The code checkout is unchanged",
+        "The report names both worktrees and says it stopped"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "eval-nested-root-finish",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "The planning root is a folder committed inside the code repo: the archive commit stages planning/openspec/... paths in the code repo, then merges to main with a single branch.",
+      "assertions": [
+        "The archive commit feat(add-greeting): archive change stages only planning/openspec/changes/ paths and planning/openspec/specs/greeting/spec.md",
+        "Now on main",
+        "main HEAD is a merge commit with two parents and subject merge: add-greeting",
+        "Branch feat/add-greeting was deleted",
+        "Working tree is clean",
+        "Only the code repo's main branch remains and no gh call was made",
+        "No commit was amended"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "eval-root-outside-git",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "The planning root is a plain directory outside every git repository: stops before any write and asks whether to initialise git there or abort.",
+      "assertions": [
+        "No commit was added in the code repo and its tree is clean",
+        "The store directory is still not a git repository",
+        "The report asks whether to initialise git there or abort"
       ]
     }
   ]

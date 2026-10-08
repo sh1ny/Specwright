@@ -87,28 +87,71 @@ def install_fake_gh(dest):
     env_file(dest, FAKE_GH_STATE=posix(dest / "gh-state.json"), FAKE_GH_LOG=posix(dest / "gh-log.jsonl"))
 
 
-def store_base(dest, store_id="team-plans", pointer=True):
-    """<dest>/code (the project; its openspec/config.yaml points at the store when `pointer`,
-    otherwise the store is the global defaultStore) and <dest>/store (a registered store
-    holding the schema, trigger config and specs). Both are clean on main."""
-    code, store = dest / "code", dest / "store"
+def code_repo(code, store_id="team-plans", pointer=True):
+    """The project repo: Specwright settings, an optional config.yaml pointing at the store
+    (otherwise the store is the global defaultStore) and the tiny project. No openspec specs/changes."""
     init(code)
     write(code, "openspec/specwright.yaml", "finish: local\n")
     if pointer:
         write(code, "openspec/config.yaml", f"store: {store_id}\n")
     project(code)
-    init(store)
-    shutil.copytree(ROOT / "schemas" / "specwright", store / "openspec" / "schemas" / "specwright")
-    shutil.copy(ROOT / "openspec" / "config.yaml", store / "openspec" / "config.yaml")
-    write(store, "openspec/specs/.gitkeep", "")
-    git(store, "add", "-A")
-    git(store, "commit", "-q", "-m", "chore: initial store")
-    (dest / "bin").mkdir()
-    openspec(dest, "store", "register", posix(store), "--id", store_id, "--yes")
+
+
+def store_content(root):
+    """What a planning root holds: the schema, trigger config and specs (not yet committed)."""
+    shutil.copytree(ROOT / "schemas" / "specwright", root / "openspec" / "schemas" / "specwright")
+    shutil.copy(ROOT / "openspec" / "config.yaml", root / "openspec" / "config.yaml")
+    write(root, "openspec/specs/.gitkeep", "")
+
+
+def register(dest, root, store_id, pointer=True):
+    openspec(dest, "store", "register", posix(root), "--id", store_id, "--yes")
     if not pointer:
         openspec(dest, "config", "set", "defaultStore", store_id)
-    git(store, "add", "-A")  # registration wrote .openspec-store/store.yaml
-    git(store, "commit", "-q", "-m", "chore: register store")
+
+
+def store_base(dest, store_id="team-plans", pointer=True, registered=True, store_git=True, store_worktree=False):
+    """<dest>/code (the project; its openspec/config.yaml points at the store when `pointer`,
+    otherwise the store is the global defaultStore) and <dest>/store (a registered store
+    holding the schema, trigger config and specs). Both are clean on main.
+    registered=False: no store at all, the pointer dangles (the registry is empty).
+    store_git=False: <dest>/store is a plain directory, not a git repo.
+    store_worktree: <dest>/store is a worktree of the code repo on branch `plans`."""
+    code, store = dest / "code", dest / "store"
+    code_repo(code, store_id, pointer)
+    (dest / "bin").mkdir()
+    if not registered:
+        return env_file(dest)
+    if store_worktree:
+        git(code, "worktree", "add", "-q", "--orphan", "-b", "plans", posix(store))
+        git(store, "config", "commit.gpgsign", "false")
+    elif store_git:
+        init(store)
+    else:
+        store.mkdir()
+    store_content(store)
+    if store_git:
+        git(store, "add", "-A")
+        git(store, "commit", "-q", "-m", "chore: initial store")
+    register(dest, store, store_id, pointer)
+    if store_git:
+        git(store, "add", "-A")  # registration wrote .openspec-store/store.yaml
+        git(store, "commit", "-q", "-m", "chore: register store")
+    env_file(dest)
+
+
+def nested_base(dest, store_id="team-plans"):
+    """<dest>/code only: the planning root is <dest>/code/planning, registered as a store and
+    committed inside the code repo. The top-level openspec/ holds only the pointer config."""
+    code = dest / "code"
+    code_repo(code, store_id)
+    (dest / "bin").mkdir()
+    store_content(code / "planning")
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "chore: add planning root")
+    register(dest, code / "planning", store_id)
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "chore: register store")
     env_file(dest)
 
 
@@ -131,9 +174,58 @@ def implemented(repo):
     write(repo, "README.md", "# greeter\n\nA tiny greeting library.\n\n- `greet(name)` returns `Hello, <name>!`.\n- `farewell(name)` returns `Goodbye, <name>!`.\n")
 
 
-def build(name, repo):
+def finished(code, root):
+    """On feat/add-greeting: planning commit, implementation commit with ticked tasks, then a
+    simulated completed vanilla archive (change moved, spec synced) left uncommitted.
+    `root` is the planning root: the code repo itself, or a folder inside it."""
+    change = root / CHANGE
+    git(code, "checkout", "-q", "-b", "feat/add-greeting")
+    change_artifacts(root)
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "feat(add-greeting): add planning artifacts")
+    implemented(code)
+    tasks = (change / "tasks.md").read_text(encoding="utf-8")
+    write(root, f"{CHANGE}/tasks.md", tasks.replace("- [ ]", "- [x]").replace("| red |", "| green |"))
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "feat(add-greeting): implement tasks 1.1-2.1")
+    archive = root / "openspec/changes/archive/2026-10-07-add-greeting"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(change), str(archive))
+    spec = (archive / "specs/greeting/spec.md").read_text(encoding="utf-8")
+    write(root, "openspec/specs/greeting/spec.md", spec.replace("# Spec Delta", "# greeting Specification").replace("## ADDED Requirements", "## Requirements"))
+
+
+def build_store(name, dest):
+    """Fixtures whose planning lives outside the code repo (or in a folder inside it)."""
+    code, store = dest / "code", dest / "store"
     if name == "eval-store-branch-clean":
-        return store_base(repo)  # both repos clean on main, store registered, code points at it
+        store_base(dest)  # both repos clean on main, store registered, code points at it
+    elif name == "eval-store-apply":
+        store_base(dest)
+        for r in (code, store):
+            git(r, "checkout", "-q", "-b", "feat/add-greeting")
+        change_artifacts(store)  # planning lives in the store, uncommitted
+        write(code, "scratch-notes.txt", "personal notes - not part of the change\n")
+    elif name == "eval-store-unregistered":
+        store_base(dest, registered=False)  # config.yaml says `store: team-plans`; nothing is registered
+    elif name == "eval-store-other-worktree":
+        store_base(dest, store_worktree=True)  # the store is the `plans` worktree of the code repo
+        git(code, "checkout", "-q", "-b", "feat/add-greeting")
+        change_artifacts(store)
+    elif name == "eval-nested-root-finish":
+        nested_base(dest)
+        finished(code, code / "planning")
+    elif name == "eval-root-outside-git":
+        store_base(dest, store_git=False)  # the store is a plain directory
+        git(code, "checkout", "-q", "-b", "feat/add-greeting")
+        change_artifacts(store)
+    else:
+        raise SystemExit(f"unknown eval {name}")
+
+
+def build(name, repo):
+    if name.startswith(("eval-store-", "eval-nested-", "eval-root-")):
+        return build_store(name, repo)
     base(repo)
     if name == "eval-branch-dirty-main":
         write(repo, "README.md", "# greeter\n\nA tiny greeting library. WIP edit.\n")
@@ -145,21 +237,7 @@ def build(name, repo):
         change_artifacts(repo)  # left uncommitted: the planning commit is under test
         write(repo, "scratch-notes.txt", "personal notes - not part of the change\n")
     elif name == "eval-finish-local":
-        git(repo, "checkout", "-q", "-b", "feat/add-greeting")
-        change_artifacts(repo)
-        git(repo, "add", "-A")
-        git(repo, "commit", "-q", "-m", "feat(add-greeting): add planning artifacts")
-        implemented(repo)
-        tasks = (repo / CHANGE / "tasks.md").read_text(encoding="utf-8")
-        write(repo, f"{CHANGE}/tasks.md", tasks.replace("- [ ]", "- [x]").replace("| red |", "| green |"))
-        git(repo, "add", "-A")
-        git(repo, "commit", "-q", "-m", "feat(add-greeting): implement tasks 1.1-2.1")
-        # Simulate a completed vanilla archive: change moved, spec synced, uncommitted.
-        archive = repo / "openspec/changes/archive/2026-10-07-add-greeting"
-        archive.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(repo / CHANGE), str(archive))
-        spec = (archive / "specs/greeting/spec.md").read_text(encoding="utf-8")
-        write(repo, "openspec/specs/greeting/spec.md", spec.replace("# Spec Delta", "# greeting Specification").replace("## ADDED Requirements", "## Requirements"))
+        finished(repo, repo)
     else:
         raise SystemExit(f"unknown eval {name}")
 
