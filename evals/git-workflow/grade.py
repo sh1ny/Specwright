@@ -161,6 +161,12 @@ def asks_about(rep, topic):
     return any(re.search(topic, s) and re.search(ask, s) for s in re.split(r"(?<=[.?!])\s+|\n", rep))
 
 
+def offers(rep, topic):
+    """asks_about, or one paragraph block (text between blank lines) names `topic` and has a question: an offer whose
+    question and option list sit on adjacent lines, such as "Shall I create the branch?" over "- Yes: git checkout -b <topic>"."""
+    return asks_about(rep, topic) or any(re.search(topic, b) and "?" in b for b in re.split(r"\n\s*\n", rep))
+
+
 def report(run):
     p = run / "outputs" / "report.md"
     return p.read_text(encoding="utf-8").lower() if p.exists() else ""
@@ -697,7 +703,7 @@ def check_store_finish(name, repo, code, store, rep):
             ev = f"branches containing it={git(store, 'branch', '--all', '--contains', arch)!r}; {ev}"
         else:
             pending = status_of(store)
-            ok = any(l.startswith("?? openspec/changes/archive/") for l in pending) and asks_about(rep, re.escape(branch)) and on(store) == "main"
+            ok = any(l.startswith("?? openspec/changes/archive/") for l in pending) and offers(rep, re.escape(branch)) and on(store) == "main"
             ev = f"no archive commit; store on {on(store)} status={pending[:3]}"
         R.append((f"The archive is carried on {branch} in the store, staged by file, or is still uncommitted on main with the report offering that branch", ok, ev))
         R.append(("No specwright-change.yaml was written in the store, in history or in the working tree",

@@ -10,8 +10,8 @@ Test kinds:
 |---|---|---|---|---|
 | planning-stores → Planning root comes from OpenSpec | Store selected by a project pointer | evals/git-workflow/evals.json | eval-store-apply | green |
 | planning-stores → Planning root comes from OpenSpec | Repo-local project is unchanged | evals/git-workflow/evals.json | eval-apply-three-tasks, eval-finish-local, eval-branch-clean-main (new check: only the code repo changed) | green |
-| planning-stores → Planning root comes from OpenSpec | Root found after archive | evals/git-workflow/evals.json | eval-store-finish-local | red |
-| planning-stores → Planning root comes from OpenSpec | Date-prefixed change name found after archive | evals/git-workflow/evals.json | eval-store-finish-dated | red |
+| planning-stores → Planning root comes from OpenSpec | Root found after archive | evals/git-workflow/evals.json | eval-store-finish-local | green |
+| planning-stores → Planning root comes from OpenSpec | Date-prefixed change name found after archive | evals/git-workflow/evals.json | eval-store-finish-dated | green |
 | planning-stores → Planning root comes from OpenSpec | Declared store cannot be resolved | evals/git-workflow/evals.json | eval-store-unregistered | green |
 | planning-stores → Planning root comes from OpenSpec | Root in another worktree of the code repo | evals/git-workflow/evals.json | eval-store-other-worktree | green |
 | planning-stores → Planning paths are relative to the resolved root | Root nested in the code repo | evals/git-workflow/evals.json | eval-nested-root-finish | green |
@@ -31,16 +31,16 @@ Test kinds:
 | planning-stores → A tick without a code commit is confirmed | No-op task's store commit failed | evals/git-workflow/evals.json | eval-store-apply-noop-gap | green |
 | planning-stores → Completion check covers both repos | All tasks committed in both repos | evals/git-workflow/evals.json | eval-store-apply | green |
 | planning-stores → Completion check covers both repos | Store has uncommitted tasks.md | evals/git-workflow/evals.json | eval-store-complete-gap | green |
-| planning-stores → Planning-only changes are recorded in the archive | Planning-only archive | evals/git-workflow/evals.json | eval-store-finish-planning-only | red |
-| planning-stores → Planning-only changes are recorded in the archive | Planning-only archive of a date-prefixed change | evals/git-workflow/evals.json | eval-store-finish-dated | red |
+| planning-stores → Planning-only changes are recorded in the archive | Planning-only archive | evals/git-workflow/evals.json | eval-store-finish-planning-only | green |
+| planning-stores → Planning-only changes are recorded in the archive | Planning-only archive of a date-prefixed change | evals/git-workflow/evals.json | eval-store-finish-dated | green |
 | planning-stores → Planning-only changes are recorded in the archive | Code work appears after the marker | evals/pr-pair/test_pr_pair.py | test_pass_plan_removes_marker_before_code_fix | red |
-| planning-stores → Archive commit goes to the store | Archive committed in the store | evals/git-workflow/evals.json | eval-store-finish-local | red |
-| planning-stores → Archive commit goes to the store | Archive ran with the store on main | evals/git-workflow/evals.json | eval-store-archive-on-main | red |
-| planning-stores → Archive commit goes to the store | Archive recovery while the code PR is open | evals/git-workflow/evals.json | eval-store-archive-on-main-pr-open | red |
-| planning-stores → Local finish merges the repos that have work | Both merges succeed | evals/git-workflow/evals.json | eval-store-finish-local | red |
-| planning-stores → Local finish merges the repos that have work | Planning-only change in local mode | evals/git-workflow/evals.json | eval-store-finish-planning-only | red |
-| planning-stores → Local finish merges the repos that have work | Store merge conflicts | evals/git-workflow/evals.json | eval-store-finish-store-conflict | red |
-| planning-stores → Local finish merges the repos that have work | Code merge conflicts after the store merged | evals/git-workflow/evals.json | eval-store-finish-code-conflict | red |
+| planning-stores → Archive commit goes to the store | Archive committed in the store | evals/git-workflow/evals.json | eval-store-finish-local | green |
+| planning-stores → Archive commit goes to the store | Archive ran with the store on main | evals/git-workflow/evals.json | eval-store-archive-on-main | green |
+| planning-stores → Archive commit goes to the store | Archive recovery while the code PR is open | evals/git-workflow/evals.json | eval-store-archive-on-main-pr-open | green |
+| planning-stores → Local finish merges the repos that have work | Both merges succeed | evals/git-workflow/evals.json | eval-store-finish-local | green |
+| planning-stores → Local finish merges the repos that have work | Planning-only change in local mode | evals/git-workflow/evals.json | eval-store-finish-planning-only | green |
+| planning-stores → Local finish merges the repos that have work | Store merge conflicts | evals/git-workflow/evals.json | eval-store-finish-store-conflict | green |
+| planning-stores → Local finish merges the repos that have work | Code merge conflicts after the store merged | evals/git-workflow/evals.json | eval-store-finish-code-conflict | green |
 | planning-stores → Commands run where they resolve correctly | Store push with a repository-local auth header | evals/pr-pair/test_as_sh.py | test_scrubs_header_local_to_the_store | red |
 | planning-stores → Commands run where they resolve correctly | Store login override | evals/pr-pair/test_pr_pair.py | test_context_login_per_repo | red |
 | planning-stores → Commands run where they resolve correctly | Schema lookup with a root nested in the store repo | evals/git-workflow/evals.json | eval-install-nested-store | red |
@@ -134,7 +134,7 @@ Test kinds:
 ## 5. Finish: archive, planning-only marker, local merge (D5 local part, D2 archive rule)
 
 - [x] 5.1 Add agent evals `eval-store-finish-local`, `-dated`, `-planning-only`, `-store-conflict`, `-code-conflict`, `eval-store-archive-on-main` and `-archive-on-main-pr-open`; the last one uses a fake-gh open code PR. Confirm they fail against the current `specwright-finish`.
-- [ ] 5.2 Update `specwright-finish`:
+- [x] 5.2 Update `specwright-finish`:
   - the archive commit goes in the store, staged by file, with the archive directory found by the archive-name rule (`archivedAs` when available);
   - the planning-only test (no code commits and no code PR in any state; a failed lookup writes no marker and stops) and the `specwright-change.yaml` marker;
   - the `chore/archive-<name>` recovery with the same test;
