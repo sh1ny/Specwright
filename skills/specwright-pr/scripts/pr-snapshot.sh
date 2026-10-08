@@ -13,7 +13,11 @@
 #             once anything changes (checks, threads, comments, reviews, head,
 #             state, edits, a list getting cut off) or the timeout passes
 #             (default 1800s, interval 300s); "incomplete" at once if the first
-#             snapshot is already cut off; exits 1 if the last poll failed
+#             snapshot is already cut off; exits 1 if the last poll failed.
+#             One watcher per PR on this machine: a newer --wait on the same
+#             PR (from any agent) takes over, and the older one exits 4
+#             before its next poll, so a lost or forgotten watcher stops
+#             spending the account's API budget.
 # "complete": false means a list was cut off at its page size - do not treat
 # missing items as absent.
 # Wrap with as.sh to pin the GitHub identity.
@@ -46,6 +50,26 @@ done
 [ -n "$repo" ] || repo=$(gh repo view --json owner,name --jq '.owner.login + "/" + .name')
 [ -n "$pr" ] || pr=$(gh pr view --json number --jq .number)
 owner=${repo%%/*} name=${repo#*/}
+
+# Watch ownership: the newest --wait on a PR writes its token; any older one
+# sees a different token before its next poll and exits 4. $HOME, not a temp
+# dir, because each harness may have its own temp dir.
+owner_file= token=
+claim_watch() {
+  local dir=${SPECWRIGHT_STATE_DIR:-$HOME/.cache/specwright}/watch
+  mkdir -p "$dir" || return 0
+  owner_file="$dir/$owner-$name-$pr" token="$$-$RANDOM-$(date +%s)"
+  printf '%s
+' "$token" > "$owner_file"
+  trap 'release_watch' EXIT
+}
+release_watch() {
+  [ -n "$owner_file" ] && [ "$(cat "$owner_file" 2>/dev/null)" = "$token" ] && rm -f "$owner_file"
+  return 0
+}
+still_owner() {
+  [ -z "$owner_file" ] || [ "$(cat "$owner_file" 2>/dev/null)" = "$token" ]
+}
 
 read -r -d '' QUERY <<'GQL' || true
 query($owner:String!, $name:String!, $pr:Int!) {
@@ -251,11 +275,13 @@ $SHAPE"
 sig_of() { printf '%s' "$1" | grep -o '"sig":"[^"]*"' || true; }
 
 if [ "$wait" = 1 ]; then
+  claim_watch
   prepare_cfg; base=$(snapshot); base_sig=$(sig_of "$base"); waited=0; wake=timeout; snap=$base; ok=1
   # Activity beyond a cut-off page cannot be seen, so do not wait for it.
   case $base in *'"complete":false'*) wake=incomplete; timeout=0 ;; esac
   while [ "$waited" -lt "$timeout" ]; do
     sleep "$interval"; waited=$((waited + interval))
+    still_owner || { echo "pr-snapshot: a newer watcher took over PR $pr; this one stops" >&2; exit 4; }
     # keep the last good snapshot; a failed poll never replaces it
     if prepare_cfg && next=$(snapshot); then snap=$next; ok=1; else ok=0; continue; fi
     if [ "$(sig_of "$snap")" != "$base_sig" ]; then wake=changed; break; fi

@@ -82,7 +82,7 @@ Then summarize the issues filed. Under **watch**, carry on toward ready.
 
 Loop until a stop condition:
 
-1. Wait in the background - one tool call, no tokens while waiting: `[as] bash scripts/pr-snapshot.sh <pr> <reviewers> --wait --timeout 1800 --interval <pr.poll_interval in seconds, default 300>` (Claude Code: `run_in_background`; other harnesses: their background or blocking exec). It prints `{"wake":"changed"|"timeout"|"incomplete", "snapshot":{...}}` (`incomplete`: the first snapshot was already cut off, so it did not wait), or exits non-zero if GitHub could not be read.
+1. Wait in the background - one tool call, no tokens while waiting: `[as] bash scripts/pr-snapshot.sh <pr> <reviewers> --wait --timeout 1800 --interval <pr.poll_interval in seconds, default 300>` (Claude Code: `run_in_background`; other harnesses: their background or blocking exec). It prints `{"wake":"changed"|"timeout"|"incomplete", "snapshot":{...}}` (`incomplete`: the first snapshot was already cut off, so it did not wait), or exits non-zero if GitHub could not be read. Run one wait per PR, never two: before starting a new one, stop the previous by its own task or process id. If that fails, start the new one anyway: the older wait sees it and exits 4 before its next poll. Exit 4 means another wait owns the PR now; do nothing with it.
 2. On wake, in this order:
    - `state` MERGED or CLOSED → stop.
    - `complete` false → stop: report the `truncated` lists and hand over to the user. Only one page of each list is fetched, so readiness cannot be judged.
