@@ -203,7 +203,7 @@ Test kinds:
   - list the uncommitted store files.
 
   Verify: the three evals pass (rows 36, 77, 78 green).
-- [ ] 10.3 Add the README "Stores" section: OpenSpec ≥ 1.14.1; pointer, `defaultStore` and `--store`; one change in progress per store per machine, plus the gate lock; the PR pair and the expected PR set; `planning_store:`; references; the `Feedback-Round` trailer note for repo-local projects. Verify: every setting the section names exists in `templates/openspec/specwright.yaml` or the OpenSpec CLI help (`openspec store --help`).
+- [x] 10.3 Add the README "Stores" section: OpenSpec ≥ 1.14.1; pointer, `defaultStore` and `--store`; one change in progress per store per machine, plus the gate lock; the PR pair and the expected PR set; `planning_store:`; references; the `Feedback-Round` trailer note for repo-local projects. Verify: every setting the section names exists in `templates/openspec/specwright.yaml` or the OpenSpec CLI help (`openspec store --help`).
 
 ## 11. Release and integration
 
