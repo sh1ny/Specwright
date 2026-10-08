@@ -162,7 +162,7 @@ Test kinds:
 
 ## 7. specwright-pr wiring (D5, D6, D7, D8)
 
-- [ ] 7.1 Add `evals/pr-pair/test_skill_text.py`. It checks mechanically that `skills/specwright-pr/SKILL.md` calls `pr-pair.sh identity` before any push, uses `discover` instead of `gh pr list` for change PRs, runs `link` after both PRs exist, and uses `pair-state`, `pass` and `cleanup-plan` in watch, feedback and cleanup. Add agent evals `eval-store-ship-push-rejected` (fake gh; the store push fails through an unreachable `http.proxy` in `eval.env`) and `eval-store-archive-before-merge-local-store`. Confirm they fail.
+- [x] 7.1 Add `evals/pr-pair/test_skill_text.py`. It checks mechanically that `skills/specwright-pr/SKILL.md` calls `pr-pair.sh identity` before any push, uses `discover` instead of `gh pr list` for change PRs, runs `link` after both PRs exist, and uses `pair-state`, `pass` and `cleanup-plan` in watch, feedback and cleanup. Add agent evals `eval-store-ship-push-rejected` (fake gh; the store push fails through an unreachable `http.proxy` in `eval.env`) and `eval-store-archive-before-merge-local-store`. Confirm they fail.
 - [ ] 7.2 Rewrite the ship, watch, feedback and after-limit sections of `skills/specwright-pr/SKILL.md` for the expected PR set:
   - store commands run inside the store with `planning_store` settings;
   - ship order: store first, then code, then link;

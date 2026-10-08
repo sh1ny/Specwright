@@ -490,6 +490,42 @@
         "The report names the recovery branch chore/archive-add-greeting",
         "No commit was amended in either repo"
       ]
+    },
+    {
+      "id": 29,
+      "name": "eval-store-ship-push-rejected",
+      "skills": [
+        "specwright-pr"
+      ],
+      "prompt": "Ship the add-greeting change: push it and open the pull requests.",
+      "expected_output": "Both repos have a GitHub origin and finish is pr, so the expected set is a store PR and a code PR. The store push fails (git cannot reach GitHub): ships the store first, reports the store push error, opens and changes no pull request in either repo (no code PR without the store PR, no link comment), does not fall back to another account, does not call the change ready, and leaves both repos' branches, commits and trees as they were.",
+      "assertions": [
+        "No gh call created or changed a pull request or a comment in either repo, and neither fake repo has a pull request",
+        "No gh call switched accounts (gh auth switch) or asked for another login's token; only the configured account eval-bot was used",
+        "Both repos are still on feat/add-greeting with no new commit, no new branch and a clean tree, and both mains are unchanged",
+        "No commit was amended in either repo",
+        "The report names the store push as the step that failed and shows its error (unreachable, could not connect, proxy or rejected)",
+        "The report says no pull request was opened (for the store, and the code PR was not opened without it)",
+        "The report does not call the change ready or give a pull request URL"
+      ]
+    },
+    {
+      "id": 30,
+      "name": "eval-store-archive-before-merge-local-store",
+      "skills": [
+        "specwright-pr",
+        "specwright-finish"
+      ],
+      "prompt": "The code PR for add-greeting (#7) passed CI and every review, so watch reports it ready. Yes, archive add-greeting on this branch now, as watch asks before merge. The store is a local checkout with no GitHub remote.",
+      "expected_output": "The store has no GitHub origin, so no store PR is expected: archives add-greeting in the store, commits the archive on the store's feat/add-greeting branch (staged by file, no specwright-change.yaml because the code branch has commits), makes no push and no review request, does not touch the open code PR #7 or the code repo, and reports the store branch feat/add-greeting to be shared by hand.",
+      "assertions": [
+        "The store has an archive commit feat(add-greeting): archive change on feat/add-greeting that stages only the removed change directory, the archive directory and openspec/specs/greeting/spec.md, and no specwright-change.yaml was written",
+        "The store is still on feat/add-greeting, its main is unchanged, it has no remote and no remote-tracking branch, and its tree is clean",
+        "The code repo is untouched: still on feat/add-greeting with its task commits, main has only the initial commit, and the tree is clean",
+        "No gh call created or changed a pull request or a comment, and code PR #7 is still the only PR, open and unchanged (no review request was posted)",
+        "The report names the store branch feat/add-greeting and says it must be shared by hand because there is no store PR or GitHub remote",
+        "No commit was amended in either repo"
+      ]
     }
   ]
 }

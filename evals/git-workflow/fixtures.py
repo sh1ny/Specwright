@@ -89,11 +89,11 @@ def install_fake_gh(dest):
     env_file(dest, FAKE_GH_STATE=posix(dest / "gh-state.json"), FAKE_GH_LOG=posix(dest / "gh-log.jsonl"))
 
 
-def code_repo(code, store_id="team-plans", pointer=True):
+def code_repo(code, store_id="team-plans", pointer=True, settings="finish: local\n"):
     """The project repo: Specwright settings, an optional config.yaml pointing at the store
     (otherwise the store is the global defaultStore) and the tiny project. No openspec specs/changes."""
     init(code)
-    write(code, "openspec/specwright.yaml", "finish: local\n")
+    write(code, "openspec/specwright.yaml", settings)
     if pointer:
         write(code, "openspec/config.yaml", f"store: {store_id}\n")
     project(code)
@@ -112,7 +112,8 @@ def register(dest, root, store_id, pointer=True):
         openspec(dest, "config", "set", "defaultStore", store_id)
 
 
-def store_base(dest, store_id="team-plans", pointer=True, registered=True, store_git=True, store_worktree=False):
+def store_base(dest, store_id="team-plans", pointer=True, registered=True, store_git=True, store_worktree=False,
+               settings="finish: local\n"):
     """<dest>/code (the project; its openspec/config.yaml points at the store when `pointer`,
     otherwise the store is the global defaultStore) and <dest>/store (a registered store
     holding the schema, trigger config and specs). Both are clean on main.
@@ -120,7 +121,7 @@ def store_base(dest, store_id="team-plans", pointer=True, registered=True, store
     store_git=False: <dest>/store is a plain directory, not a git repo.
     store_worktree: <dest>/store is a worktree of the code repo on branch `plans`."""
     code, store = dest / "code", dest / "store"
-    code_repo(code, store_id, pointer)
+    code_repo(code, store_id, pointer, settings)
     (dest / "bin").mkdir()
     if not registered:
         return env_file(dest)
@@ -277,13 +278,13 @@ def archive_change(dest, name):
     openspec(dest, "archive", name, "--yes", cwd=dest / "store")
 
 
-def finish_ready(dest, name="add-greeting", code_work=True):
+def finish_ready(dest, name="add-greeting", code_work=True, settings="finish: local\n"):
     """store_base, both repos on feat/<name>, the planning artifacts committed in the store and
     every task done. code_work: each task is a code commit plus a store tick commit (done_pair);
     otherwise the change is planning-only: the code branch has no commit and the store ticks every task
     in one commit. Both trees are clean; the archive has not run."""
     code, store = dest / "code", dest / "store"
-    store_base(dest)
+    store_base(dest, settings=settings)
     for r in (code, store):
         git(r, "checkout", "-q", "-b", f"feat/{name}")
     change_artifacts(store, name)
@@ -331,6 +332,41 @@ def open_code_pr(dest, code):
           "base": {"ref": "main"}}
     st = {"user": "eval-bot", "tokens": {"eval-bot": "eval-token"}, "repos": {PR_SLUG: {"default_branch": "main", "pulls": [pr]}}}
     write(dest, "gh-state.json", json.dumps(st, indent=2))
+
+
+STORE_SLUG = "acme/greeter-plans"
+PR_SETTINGS = "finish: pr\ngithub:\n  login: eval-bot\n"
+
+
+def unreachable_proxy(dest):
+    """Every git network operation in the run fails fast: the fixture's global git config (GIT_CONFIG_GLOBAL in
+    eval.env) sends HTTP(S) through a proxy nobody listens on. as.sh clears only extraHeader and credential
+    helpers, so the proxy survives it; GIT_CONFIG_COUNT variables would not (as.sh replaces them)."""
+    write(dest, "gitconfig", "[http]\n\tproxy = http://127.0.0.1:9\n")
+    env_file(dest, GIT_CONFIG_GLOBAL=posix(dest / "gitconfig"))
+
+
+def pr_pair_base(dest, store_origin=True, code_pr=False):
+    """Both repos finished on feat/add-greeting (task pairs committed, archive not run), finish: pr as
+    eval-bot, fake gh, an unreachable git proxy. The code repo's origin is acme/greeter; the store's is
+    acme/greeter-plans when `store_origin`, otherwise it has no remote. code_pr: code PR #7 is open."""
+    finish_ready(dest, settings=PR_SETTINGS)
+    code, store = dest / "code", dest / "store"
+    git(code, "remote", "add", "origin", f"https://github.com/{PR_SLUG}.git")
+    if store_origin:
+        git(store, "remote", "add", "origin", f"https://github.com/{STORE_SLUG}.git")
+    install_fake_gh(dest)
+    unreachable_proxy(dest)
+    repos = {PR_SLUG: {"default_branch": "main", "pulls": []}}
+    if code_pr:
+        repos[PR_SLUG]["pulls"].append(
+            {"number": 7, "html_url": f"https://github.com/{PR_SLUG}/pull/7", "state": "open", "merged_at": None,
+             "title": "feat(add-greeting): add greet and farewell", "body": "Adds greet and farewell.",
+             "head": {"ref": "feat/add-greeting", "label": "acme:feat/add-greeting", "repo": {"full_name": PR_SLUG}},
+             "base": {"ref": "main"}})
+    if store_origin:
+        repos[STORE_SLUG] = {"default_branch": "main", "pulls": []}
+    write(dest, "gh-state.json", json.dumps({"user": "eval-bot", "tokens": {"eval-bot": "eval-token"}, "repos": repos}, indent=2))
 
 
 def build_store(name, dest):
@@ -423,6 +459,10 @@ def build_store(name, dest):
         merge_into_main(store)
         open_code_pr(dest, code)
         archive_change(dest, "add-greeting")
+    elif name == "eval-store-ship-push-rejected":
+        pr_pair_base(dest)  # both repos have a GitHub origin; any push dies at the unreachable proxy
+    elif name == "eval-store-archive-before-merge-local-store":
+        pr_pair_base(dest, store_origin=False, code_pr=True)  # code PR #7 is open and ready; the store has no GitHub origin
     elif name == "eval-nested-root-finish":
         nested_base(dest)
         finished(code, code / "planning")
