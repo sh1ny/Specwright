@@ -33,7 +33,7 @@ Test kinds:
 | planning-stores → Completion check covers both repos | Store has uncommitted tasks.md | evals/git-workflow/evals.json | eval-store-complete-gap | green |
 | planning-stores → Planning-only changes are recorded in the archive | Planning-only archive | evals/git-workflow/evals.json | eval-store-finish-planning-only | green |
 | planning-stores → Planning-only changes are recorded in the archive | Planning-only archive of a date-prefixed change | evals/git-workflow/evals.json | eval-store-finish-dated | green |
-| planning-stores → Planning-only changes are recorded in the archive | Code work appears after the marker | evals/pr-pair/test_pr_pair.py | test_pass_plan_removes_marker_before_code_fix | red |
+| planning-stores → Planning-only changes are recorded in the archive | Code work appears after the marker | evals/pr-pair/test_pr_pair.py | test_pass_plan_removes_marker_before_code_fix | green |
 | planning-stores → Archive commit goes to the store | Archive committed in the store | evals/git-workflow/evals.json | eval-store-finish-local | green |
 | planning-stores → Archive commit goes to the store | Archive ran with the store on main | evals/git-workflow/evals.json | eval-store-archive-on-main | green |
 | planning-stores → Archive commit goes to the store | Archive recovery while the code PR is open | evals/git-workflow/evals.json | eval-store-archive-on-main-pr-open | green |
@@ -41,40 +41,40 @@ Test kinds:
 | planning-stores → Local finish merges the repos that have work | Planning-only change in local mode | evals/git-workflow/evals.json | eval-store-finish-planning-only | green |
 | planning-stores → Local finish merges the repos that have work | Store merge conflicts | evals/git-workflow/evals.json | eval-store-finish-store-conflict | green |
 | planning-stores → Local finish merges the repos that have work | Code merge conflicts after the store merged | evals/git-workflow/evals.json | eval-store-finish-code-conflict | green |
-| planning-stores → Commands run where they resolve correctly | Store push with a repository-local auth header | evals/pr-pair/test_as_sh.py | test_scrubs_header_local_to_the_store | red |
-| planning-stores → Commands run where they resolve correctly | Store login override | evals/pr-pair/test_pr_pair.py | test_context_login_per_repo | red |
+| planning-stores → Commands run where they resolve correctly | Store push with a repository-local auth header | evals/pr-pair/test_as_sh.py | test_scrubs_header_local_to_the_store | green |
+| planning-stores → Commands run where they resolve correctly | Store login override | evals/pr-pair/test_pr_pair.py | test_context_login_per_repo | green |
 | planning-stores → Commands run where they resolve correctly | Schema lookup with a root nested in the store repo | evals/git-workflow/evals.json | eval-install-nested-store | red |
-| planning-stores → The expected PR set follows the change's work and transport | Planning-only change with a GitHub store | evals/pr-pair/test_pr_pair.py | test_expected_planning_only_github_store | red |
-| planning-stores → The expected PR set follows the change's work and transport | Planning-only change with no GitHub store | evals/pr-pair/test_pr_pair.py | test_expected_planning_only_local_store | red |
-| planning-stores → The expected PR set follows the change's work and transport | Code fix turns a planning-only change into a pair | evals/pr-pair/test_pr_pair.py | test_expected_gains_code_pr_after_code_commit | red |
-| planning-stores → The expected PR set follows the change's work and transport | Fresh watch after the code PR merged | evals/pr-pair/test_pr_pair.py | test_pair_state_merged_code_pr_stays_expected | red |
-| planning-stores → PR finish pairs the store PR with the code PR | Ship opens both PRs | evals/pr-pair/test_pr_pair.py | test_ship_sequence_links_both | red |
-| planning-stores → PR finish pairs the store PR with the code PR | Code PR already open without the link | evals/pr-pair/test_pr_pair.py | test_link_existing_code_pr_by_comment | red |
-| planning-stores → PR finish pairs the store PR with the code PR | Ship re-run after an interrupted first run | evals/pr-pair/test_pr_pair.py | test_ship_sequence_rerun_is_idempotent | red |
-| planning-stores → PR finish pairs the store PR with the code PR | Code PR replaced after closing unmerged | evals/pr-pair/test_pr_pair.py | test_link_updates_own_comment_for_new_peer | red |
-| planning-stores → PR finish pairs the store PR with the code PR | Existing code PR targets another branch | evals/pr-pair/test_pr_pair.py | test_ensure_pr_stops_on_wrong_base | red |
-| planning-stores → PR finish pairs the store PR with the code PR | Fetch and push URLs name different repositories | evals/pr-pair/test_pr_pair.py | test_identity_fetch_push_mismatch | red |
-| planning-stores → PR finish pairs the store PR with the code PR | Matching PR beyond the first page | evals/pr-pair/test_pr_pair.py | test_discover_paginates_past_fork_prs | red |
-| planning-stores → PR finish pairs the store PR with the code PR | Inherited GH_REPO names the code repo | evals/pr-pair/test_pr_pair.py | test_gh_repo_env_ignored | red |
+| planning-stores → The expected PR set follows the change's work and transport | Planning-only change with a GitHub store | evals/pr-pair/test_pr_pair.py | test_expected_planning_only_github_store | green |
+| planning-stores → The expected PR set follows the change's work and transport | Planning-only change with no GitHub store | evals/pr-pair/test_pr_pair.py | test_expected_planning_only_local_store | green |
+| planning-stores → The expected PR set follows the change's work and transport | Code fix turns a planning-only change into a pair | evals/pr-pair/test_pr_pair.py | test_expected_gains_code_pr_after_code_commit | green |
+| planning-stores → The expected PR set follows the change's work and transport | Fresh watch after the code PR merged | evals/pr-pair/test_pr_pair.py | test_pair_state_merged_code_pr_stays_expected | green |
+| planning-stores → PR finish pairs the store PR with the code PR | Ship opens both PRs | evals/pr-pair/test_pr_pair.py | test_ship_sequence_links_both | green |
+| planning-stores → PR finish pairs the store PR with the code PR | Code PR already open without the link | evals/pr-pair/test_pr_pair.py | test_link_existing_code_pr_by_comment | green |
+| planning-stores → PR finish pairs the store PR with the code PR | Ship re-run after an interrupted first run | evals/pr-pair/test_pr_pair.py | test_ship_sequence_rerun_is_idempotent | green |
+| planning-stores → PR finish pairs the store PR with the code PR | Code PR replaced after closing unmerged | evals/pr-pair/test_pr_pair.py | test_link_updates_own_comment_for_new_peer | green |
+| planning-stores → PR finish pairs the store PR with the code PR | Existing code PR targets another branch | evals/pr-pair/test_pr_pair.py | test_ensure_pr_stops_on_wrong_base | green |
+| planning-stores → PR finish pairs the store PR with the code PR | Fetch and push URLs name different repositories | evals/pr-pair/test_pr_pair.py | test_identity_fetch_push_mismatch | green |
+| planning-stores → PR finish pairs the store PR with the code PR | Matching PR beyond the first page | evals/pr-pair/test_pr_pair.py | test_discover_paginates_past_fork_prs | green |
+| planning-stores → PR finish pairs the store PR with the code PR | Inherited GH_REPO names the code repo | evals/pr-pair/test_pr_pair.py | test_gh_repo_env_ignored | green |
 | planning-stores → PR finish pairs the store PR with the code PR | Store push rejected | evals/git-workflow/evals.json | eval-store-ship-push-rejected | red |
-| planning-stores → Watch covers the expected PR set | Code PR green, store PR waiting | evals/pr-pair/test_pr_pair.py | test_pair_state_waits_for_both | red |
-| planning-stores → Watch covers the expected PR set | Store PR alone is ready | evals/pr-pair/test_pr_pair.py | test_pair_state_single_store_pr_ready | red |
-| planning-stores → Watch covers the expected PR set | One PR of the pair merged | evals/pr-pair/test_pr_pair.py | test_pair_state_split_hands_off | red |
+| planning-stores → Watch covers the expected PR set | Code PR green, store PR waiting | evals/pr-pair/test_pr_pair.py | test_pair_state_waits_for_both | green |
+| planning-stores → Watch covers the expected PR set | Store PR alone is ready | evals/pr-pair/test_pr_pair.py | test_pair_state_single_store_pr_ready | green |
+| planning-stores → Watch covers the expected PR set | One PR of the pair merged | evals/pr-pair/test_pr_pair.py | test_pair_state_split_hands_off | green |
 | planning-stores → Watch covers the expected PR set | Archive before merge with no store PR | evals/git-workflow/evals.json | eval-store-archive-before-merge-local-store | red |
-| planning-stores → Feedback rounds span the PR pair | Spec fix requested on the code PR | evals/pr-pair/test_pr_pair.py | test_pass_plan_routes_spec_fix_to_store | red |
-| planning-stores → Feedback rounds span the PR pair | Round limit across both repos | evals/pr-pair/test_pr_pair.py | test_rounds_highest_across_branches | red |
-| planning-stores → Feedback rounds span the PR pair | Finishing an interrupted final pass | evals/pr-pair/test_pr_pair.py | test_pass_plan_final_pass_push_pending | red |
-| planning-stores → An interrupted feedback pass is completed first | Interrupted between the two fix commits | evals/pr-pair/test_pr_pair.py | test_pass_plan_missing_store_commit | red |
-| planning-stores → An interrupted feedback pass is completed first | Interrupted after both pushes | evals/pr-pair/test_pr_pair.py | test_pass_plan_rerequest_and_replies_pending | red |
-| planning-stores → An interrupted feedback pass is completed first | Commit made but not recorded | evals/pr-pair/test_pr_pair.py | test_pass_plan_commit_found_by_trailer | red |
-| planning-stores → An interrupted feedback pass is completed first | Reply posted, then its resolution failed | evals/pr-pair/test_pr_pair.py | test_pass_plan_reply_done_resolution_pending | red |
-| planning-stores → An interrupted feedback pass is completed first | Reviewer follow-up during the interruption | evals/pr-pair/test_pr_pair.py | test_pass_plan_stale_disposition_stops | red |
-| planning-stores → An interrupted feedback pass is completed first | Interrupted halfway through a spec fix | evals/pr-pair/test_pr_pair.py | test_pass_plan_partial_edit_not_committable | red |
-| planning-stores → An interrupted feedback pass is completed first | Review requests disabled | evals/pr-pair/test_pr_pair.py | test_pass_plan_rerequest_not_applicable | red |
-| planning-stores → An interrupted feedback pass is completed first | Pass with an open question thread | evals/pr-pair/test_pr_pair.py | test_pass_plan_question_thread_done_when_replied | red |
-| planning-stores → Cleanup after merge covers every expected PR | Both PRs merged | evals/pr-pair/test_pr_pair.py | test_cleanup_plan_both_merged | red |
-| planning-stores → Cleanup after merge covers every expected PR | Only one PR merged | evals/pr-pair/test_pr_pair.py | test_cleanup_plan_split | red |
-| planning-stores → Cleanup after merge covers every expected PR | Cleanup re-run after the store PR merges | evals/pr-pair/test_pr_pair.py | test_cleanup_plan_rerun_code_branch_gone | red |
+| planning-stores → Feedback rounds span the PR pair | Spec fix requested on the code PR | evals/pr-pair/test_pr_pair.py | test_pass_plan_routes_spec_fix_to_store | green |
+| planning-stores → Feedback rounds span the PR pair | Round limit across both repos | evals/pr-pair/test_pr_pair.py | test_rounds_highest_across_branches | green |
+| planning-stores → Feedback rounds span the PR pair | Finishing an interrupted final pass | evals/pr-pair/test_pr_pair.py | test_pass_plan_final_pass_push_pending | green |
+| planning-stores → An interrupted feedback pass is completed first | Interrupted between the two fix commits | evals/pr-pair/test_pr_pair.py | test_pass_plan_missing_store_commit | green |
+| planning-stores → An interrupted feedback pass is completed first | Interrupted after both pushes | evals/pr-pair/test_pr_pair.py | test_pass_plan_rerequest_and_replies_pending | green |
+| planning-stores → An interrupted feedback pass is completed first | Commit made but not recorded | evals/pr-pair/test_pr_pair.py | test_pass_plan_commit_found_by_trailer | green |
+| planning-stores → An interrupted feedback pass is completed first | Reply posted, then its resolution failed | evals/pr-pair/test_pr_pair.py | test_pass_plan_reply_done_resolution_pending | green |
+| planning-stores → An interrupted feedback pass is completed first | Reviewer follow-up during the interruption | evals/pr-pair/test_pr_pair.py | test_pass_plan_stale_disposition_stops | green |
+| planning-stores → An interrupted feedback pass is completed first | Interrupted halfway through a spec fix | evals/pr-pair/test_pr_pair.py | test_pass_plan_partial_edit_not_committable | green |
+| planning-stores → An interrupted feedback pass is completed first | Review requests disabled | evals/pr-pair/test_pr_pair.py | test_pass_plan_rerequest_not_applicable | green |
+| planning-stores → An interrupted feedback pass is completed first | Pass with an open question thread | evals/pr-pair/test_pr_pair.py | test_pass_plan_question_thread_done_when_replied | green |
+| planning-stores → Cleanup after merge covers every expected PR | Both PRs merged | evals/pr-pair/test_pr_pair.py | test_cleanup_plan_both_merged | green |
+| planning-stores → Cleanup after merge covers every expected PR | Only one PR merged | evals/pr-pair/test_pr_pair.py | test_cleanup_plan_split | green |
+| planning-stores → Cleanup after merge covers every expected PR | Cleanup re-run after the store PR merges | evals/pr-pair/test_pr_pair.py | test_cleanup_plan_rerun_code_branch_gone | green |
 | planning-stores → Roadmap status needs proof that the whole change merged | Both repos merged | evals/git-workflow/evals.json | eval-store-roadmap-local, eval-store-roadmap-pr | red |
 | planning-stores → Roadmap status needs proof that the whole change merged | Date-prefixed change merged | evals/git-workflow/evals.json | eval-store-roadmap-local | red |
 | planning-stores → Roadmap status needs proof that the whole change merged | Code partly integrated | evals/git-workflow/evals.json | eval-store-roadmap-pr | red |
@@ -146,7 +146,7 @@ Test kinds:
 ## 6. PR-pair decisions script (D5 pr part, D7, D8, D6 identity)
 
 - [x] 6.1 Write `evals/pr-pair/test_pr_pair.py` and `evals/pr-pair/test_as_sh.py` with every script-test row of the test map. Use real git repos with GitHub-form remotes, a local bare repo reached through `url.<bare>.insteadOf` only where a test needs a working push and does not exercise `identity`, and the fake `gh`. Confirm every test fails because `pr-pair.sh` does not exist yet, and that `test_scrubs_header_local_to_the_store` passes against today's `as.sh` when run inside the store (which documents the D1 requirement).
-- [ ] 6.2 Implement `skills/specwright-pr/scripts/pr-pair.sh` subcommands, each printing one JSON line:
+- [x] 6.2 Implement `skills/specwright-pr/scripts/pr-pair.sh` subcommands, each printing one JSON line:
   - `identity <dir>`: fetch URL plus every push URL → `<owner>/<name>`, or a mismatch or not-GitHub error;
   - `context`: per-repo login, main, validate and reviewers from `specwright.yaml` and `planning_store:`;
   - `discover --repo <o/n> --branch <b> [--base <main>] [--state ...]`: complete paginated discovery; a failure means unknown, with exit 3;
