@@ -182,6 +182,12 @@ artifacts:
       Create the design document that explains HOW to implement the change.
       design.md is always written; the triage decides how deep it goes.
 
+      Referenced stores (`references:` in config.yaml) are read-only
+      context: read their specs only through `openspec context --json`
+      and its `fetch` commands, and never write there. A reference with
+      `reference_unresolved` status is named in Context as an unresolved
+      reference, and the design continues without it.
+
       1. TRIAGE (first section, always). Check each trigger against the code,
       not memory:
       - T1 Components: a new component, or 3+ components/modules/processes/
@@ -280,6 +286,10 @@ artifacts:
     template: review.md
     instruction: |
       Read the `TIER:` line in design.md first.
+
+      Referenced stores are read-only context for the review as well
+      (read through `openspec context --json`, never written); name an
+      unresolved reference in the review and continue.
 
       LIGHT: re-check the triage against the code. If it still holds, write
       only the metadata with `VERDICT: SKIPPED_LIGHT`, `CHANGES_APPLIED: n/a`

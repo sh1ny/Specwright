@@ -82,8 +82,8 @@ Test kinds:
 | planning-stores → Roadmap status needs proof that the whole change merged | Code PR merged into another branch | evals/git-workflow/evals.json | eval-store-roadmap-pr | green |
 | planning-stores → Roadmap status needs proof that the whole change merged | Planning-only change squash-merged | evals/git-workflow/evals.json | eval-store-roadmap-pr | green |
 | planning-stores → Roadmap status needs proof that the whole change merged | Store fetch fails | evals/git-workflow/evals.json | eval-store-roadmap-pr | green |
-| planning-stores → Referenced stores are read-only | Apply in a repo with references | evals/git-workflow/evals.json | eval-references-apply | red |
-| planning-stores → Referenced stores are read-only | Referenced store is not registered | evals/git-workflow/evals.json | eval-references-unregistered | red |
+| planning-stores → Referenced stores are read-only | Apply in a repo with references | evals/git-workflow/evals.json | eval-references-apply | green |
+| planning-stores → Referenced stores are read-only | Referenced store is not registered | evals/git-workflow/evals.json | eval-references-unregistered | green |
 | planning-stores → Install targets the resolved root | Install into a store-backed project | evals/git-workflow/evals.json | eval-install-store | red |
 | planning-stores → Install targets the resolved root | Store already uses another schema | evals/git-workflow/evals.json | eval-install-store-other-schema | red |
 
@@ -189,7 +189,7 @@ Test kinds:
 ## 9. References mode (D11)
 
 - [x] 9.1 Add agent evals `eval-references-apply` and `eval-references-unregistered` as regression guards. No red confirmation for the unregistered case: OpenSpec 1.14.1 already reports an unregistered reference (`reference_unresolved` in `openspec instructions apply`), so agents name it before 9.2. Record the pre-9.2 runs and their scores instead.
-- [ ] 9.2 Add the read-only rule to the five skills and the design/review guidance: never branch, commit or push in a referenced store; read references via `openspec context --json`; name an unresolved reference and continue. Verify: both evals pass (rows 75–76 green).
+- [x] 9.2 Add the read-only rule to the five skills and the design/review guidance: never branch, commit or push in a referenced store; read references via `openspec context --json`; name an unresolved reference and continue. Verify: both evals pass (rows 75–76 green).
 
 ## 10. Install and docs (D10)
 

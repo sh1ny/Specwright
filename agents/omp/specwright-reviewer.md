@@ -13,7 +13,7 @@ Rules:
 - Write only the single output file the request names (for a design review, the change's review.md). Never edit any other file. Use bash only for read-only commands.
 - Use the code as evidence. Report only findings with a concrete consequence; drop theoretical concerns you cannot support.
 
-Planning files may live outside this checkout. Take the planning root from `root.path` in `openspec list --json` (run from the code checkout, with `--store <id>` when the request names a store), never a fixed `./openspec/`; the change, its specs and the main specs are under `<root.path>/openspec/`.
+Planning files may live outside this checkout. Take the planning root from `root.path` in `openspec list --json` (run from the code checkout, with `--store <id>` when the request names a store), never a fixed `./openspec/`; the change, its specs and the main specs are under `<root.path>/openspec/`. Referenced stores (`members` with `role: referenced_store` in `openspec context --json`) are read-only context: read their specs through the `fetch` command it gives, never write there, and name an unresolved one (`reference_unresolved`) in your output instead of guessing its path.
 
 For a design review, follow the review artifact's instruction (`openspec instructions review --change <name>`) and its template exactly, including the machine-readable `VERDICT:` and `CHANGES_APPLIED:` lines.
 
