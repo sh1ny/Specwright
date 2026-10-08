@@ -60,3 +60,17 @@ pr:
   # Account that posts the requests. Default: review_request.login, else
   # github.login.
   # request_as: ""
+
+# Store-backed changes only (planning in an OpenSpec store, a separate git
+# repo): settings for the store side. Every other setting is shared with the
+# code repo, and each key below falls back to the code repo's value.
+# planning_store:
+#   # Store main branch. Omit to detect (main, else master) in the store.
+#   main_branch: main
+#   # Account for the store's pushes, PRs and replies. Default: github.login.
+#   login: ""
+#   # Command that must pass before every store push. It runs in <root.path>
+#   # (the store's OpenSpec root). pr.validate never runs in the store.
+#   validate: "openspec validate --all --strict"
+#   # Reviewers on the store PR. Default: pr.reviewers; {} = none.
+#   reviewers: {}

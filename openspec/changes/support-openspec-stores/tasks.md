@@ -172,7 +172,7 @@ Test kinds:
   - post-merge cleanup.
 
   Also update `references/description.md` (store PR body, "no code changes" note, store PR link). Verify: `test_skill_text.py` and the two evals from 7.1 pass (rows 49 and 53 green), and `python -m unittest discover evals/pr-pair` still passes.
-- [ ] 7.3 Add the commented `planning_store:` block to `templates/openspec/specwright.yaml` (D6), with `{}` for no reviewers and the `<root.path>` working directory noted for `validate`. Verify: the file parses with `python -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" templates/openspec/specwright.yaml`.
+- [x] 7.3 Add the commented `planning_store:` block to `templates/openspec/specwright.yaml` (D6), with `{}` for no reviewers and the `<root.path>` working directory noted for `validate`. Verify: the file parses with `python -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" templates/openspec/specwright.yaml`.
 
 ## 8. Roadmap status (D9)
 
