@@ -5,27 +5,29 @@
 # that item and can spot a resolution that failed - dedup state lives on GitHub.
 #
 # Usage:
-#   bash pr-reply.sh <PR> thread  <thread-id> <root-comment-id> <body-file> [--resolve] [--react +1|-1] [--repo o/n]
-#   bash pr-reply.sh <PR> comment <source-id> <body-file> [--react +1|-1] [--repo o/n]
+#   bash pr-reply.sh <PR> thread  <thread-id> <root-comment-id> <body-file> [--resolve] [--react +1|-1] [--waiting] [--repo o/n]
+#   bash pr-reply.sh <PR> comment <source-id> <body-file> [--react +1|-1] [--waiting] [--repo o/n]
 #   bash pr-reply.sh <PR> react   <comment-id> +1|-1 [--repo o/n]
 #   bash pr-reply.sh <PR> resolve <thread-id> [--repo o/n]   (retry a failed resolution only)
 # --react puts a thumbs up (+1: the finding was right) or down (-1: it was
 # wrong) on the item answered: the thread's root comment, or the comment or
 # review <source-id>. react alone answers a reviewer's follow-up without a
 # reply; <comment-id> is a node id from the snapshot, or a review comment's
-# numeric id.
+# numeric id. --waiting marks a "waiting on owner" reply (specwright:waiting):
+# the snapshot keeps the item listed, with waiting_owner, until it is handled.
 # Thread replies use REST (GraphQL replies can attach to a pending review and
 # stay invisible). Exit 2: a pending review of yours exists - submit or
 # discard it on GitHub first. Wrap with as.sh to pin the GitHub identity.
 set -euo pipefail
 
 pr=${1:?PR}; kind=${2:?thread|comment|resolve}; shift 2
-repo= resolve=0 react= args=()
+repo= resolve=0 react= waiting=0 args=()
 while [ $# -gt 0 ]; do
   case $1 in
     --repo) repo=${2:?--repo needs owner/name}; shift 2 ;;
     --resolve) resolve=1; shift ;;
     --react) react=${2:?--react needs +1 or -1}; shift 2 ;;
+    --waiting) waiting=1; shift ;;
     *) args+=("$1"); shift ;;
   esac
 done
@@ -47,7 +49,8 @@ pending_check() {
 body_with_marker() {  # <body-file> <marker> -> temp file path
   tmp=$(mktemp)
   cat "$1" > "$tmp"
-  printf '\n\n<!-- specwright:handled %s -->\n' "$2" >> "$tmp"
+  kind=handled; [ "$waiting" = 1 ] && kind=waiting
+  printf '\n\n<!-- specwright:%s %s -->\n' "$kind" "$2" >> "$tmp"
   printf '%s' "$tmp"
 }
 
@@ -76,6 +79,7 @@ resolve_thread() {  # <thread-id>
 }
 
 [ -z "$react" ] || [ "$react" = +1 ] || [ "$react" = -1 ] || { echo "pr-reply: --react must be +1 or -1" >&2; exit 2; }
+[ "$waiting" = 0 ] || [ "$resolve$react" = 0 ] || { echo "pr-reply: --waiting takes neither --resolve nor --react" >&2; exit 2; }
 pending_check
 case $kind in
   thread)

@@ -83,12 +83,14 @@ def norm: sub("\\[bot\\]$"; "");
 .data.viewer.login as $me
 | .data.repository.pullRequest as $p
 # $handled: source id -> time of your latest reply carrying its marker. An item
-# edited after that reply counts as unhandled again.
+# edited after that reply counts as unhandled again. $waiting: the same for
+# "waiting on owner" replies (specwright:waiting), which leave the item listed.
 | ([ ($p.comments.nodes[]), ($p.reviews.nodes[]), ($p.reviewThreads.nodes[].comments.nodes[]) ]
-   | map(select((.author.login // "") == $me) | (.createdAt // .submittedAt // "") as $t
-         | (.body // "") | [scan("specwright:handled ([A-Za-z0-9_=-]+)") | {(.[0]): $t}] | add // {})
-   | reduce .[] as $m ({}; reduce ($m | to_entries[]) as $e (.; .[$e.key] = ([.[$e.key] // "", $e.value] | max))))
-  as $handled
+   | map(select((.author.login // "") == $me) | { t: (.createdAt // .submittedAt // ""), b: (.body // "") }))
+  as $mine
+| def marks($kind): [ $mine[] | .t as $t | .b | [scan("specwright:" + $kind + " ([A-Za-z0-9_=-]+)") | {(.[0]): $t}] | add // {} ]
+    | reduce .[] as $m ({}; reduce ($m | to_entries[]) as $e (.; .[$e.key] = ([.[$e.key] // "", $e.value] | max)));
+  marks("handled") as $handled | marks("waiting") as $waiting
 | ([ $p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? |
      if .__typename == "CheckRun" then
        { name, url: .detailsUrl, run_id: .checkSuite.workflowRun.databaseId, app: .checkSuite.app.slug,
@@ -116,17 +118,21 @@ def norm: sub("\\[bot\\]$"; "");
        outdated: .isOutdated, resolved: .isResolved,
        rev: (($last.databaseId // 0 | tostring) + "@"
              + ([ .comments.nodes[] | .lastEditedAt // .createdAt // "" ] | max // "")),
-       awaiting_reviewer: ($replied != "" and ($open | length == 0)),
+       # your latest reply said "waiting on owner": still to fix once allowed
+       waiting_owner: ($replied != "" and ($open | length == 0) and ($waiting[$tid] // "") == $replied),
+       awaiting_reviewer: ($replied != "" and ($open | length == 0) and ($waiting[$tid] // "") != $replied),
        resolve_pending: ((.isResolved | not) and (($last.author.login // "") == $me) and ($edited | not)
          and (($last.body // "") | contains("specwright:handled " + $tid + " resolve"))),
        comments: [ .comments.nodes[] | { id, author: (.author.login // "ghost"), body: (.body | clip(2500)),
                                         at: .createdAt, edited: .lastEditedAt, url, reacted: reacted($me) } ] } ]) as $threads
 | ([ $p.comments.nodes[] | select((.author.login // "") != $me and unhandled($handled) and (reacted($me) | not)) |
      { id, rev: (.lastEditedAt // .createdAt), author: (.author.login // "ghost"),
+       waiting_owner: (($waiting[.id] // "") >= (.lastEditedAt // .createdAt)),
        body: (.body | clip(1200)), at: .createdAt, url } ]) as $comments
 | ([ $p.reviews.nodes[] | select(.state != "PENDING" and (.body // "") != ""
        and (.author.login // "") != $me and unhandled($handled) and (reacted($me) | not)) |
      { id, rev: (.lastEditedAt // .submittedAt), author: (.author.login // "ghost"), state,
+       waiting_owner: (($waiting[.id] // "") >= (.lastEditedAt // .submittedAt)),
        body: (.body | clip(1200)), at: .submittedAt, url } ]) as $reviews
 # A reviewer's latest verdict stays CHANGES_REQUESTED until they approve or it
 # is dismissed. Stale: none of the threads they started is still open.
@@ -138,7 +144,7 @@ def norm: sub("\\[bot\\]$"; "");
 # Has each configured reviewer reported on the current head? cfg (prepended by
 # the script) gives the reviewers, the head's push time and GitHub's "now".
 # Bots that are known get a precise signal; any other login counts as reported
-# once it posts anything (or completes a check) at or after the push.
+# once it posts anything at or after the push.
 | (if cfg.head == $p.headRefOid then cfg.pushed else null end) as $pushed
 | $p.headRefOid as $head
 | ([ ($p.comments.nodes[]), ($p.reviews.nodes[]), ($p.reviewThreads.nodes[].comments.nodes[]) ]) as $all
@@ -159,17 +165,18 @@ def norm: sub("\\[bot\\]$"; "");
                and ((.body // "") | test("Reviewing this PR|Code review in progress") | not)) ] | length > 0)
           or ([ $by[] | select(.state != null and (.submittedAt // "") >= $pushed) ] | length > 0)
         else
-          ([ $by[] | select((.lastEditedAt // .createdAt // .submittedAt // "") >= $pushed) ] | length > 0)
-          or ([ $checks[] | select(((.app // "") | norm) == $r.login and .state != "pending") ] | length > 0)
+          [ $by[] | select((.lastEditedAt // .createdAt // .submittedAt // "") >= $pushed) ] | length > 0
         end) as $done
      | { login: $r.login, role: $r.role, timeout: $r.timeout,
          state: (if $done then "reported"
                  elif $pushed != null and (cfg.now - ($pushed | fromdateiso8601)) >= $r.timeout then "timed_out"
                  else "waiting" end) } ]) as $reviewers
-# A pending check of an advisory reviewer stops blocking once that reviewer
-# reported or timed out.
-| ([ $reviewers[] | select(.role == "advisory" and .state != "waiting") | .login ]) as $quiet
-| ([ $checks[] | select(.state == "pending" and (((.app // "") | norm) as $a | any($quiet[]; . == $a))) ]
+# The review check of an advisory reviewer stops blocking once that reviewer
+# reported or timed out. Only known review checks: other checks of the same
+# app (tests, analysis) keep blocking.
+| { "kody-ai": "Kody Code Review" } as $review_check
+| ([ $reviewers[] | select(.role == "advisory" and .state != "waiting") | $review_check[.login] // empty ]) as $quiet
+| ([ $checks[] | select(.state == "pending" and (.name as $n | any($quiet[]; . == $n))) ]
    | length) as $quiet_pending
 | ([ (if $p.reviewThreads.pageInfo.hasNextPage then "threads" else empty end),
      ($p.reviewThreads.nodes[] | select(.comments.totalCount > 100) | "thread " + .id + " comments"),
@@ -204,30 +211,34 @@ def norm: sub("\\[bot\\]$"; "");
 JQ
 
 # cfg for the reviewer check: the head's push time from the repository's
-# activity log (cached per head; the commit date if not found) and GitHub's
-# clock from a Date header, so timeouts never depend on the local clock.
+# activity log (cached per head) and GitHub's clock from a Date header, so
+# timeouts never depend on the local clock. If the push is not in the log, the
+# GitHub time this process first saw the head stands in: never earlier than
+# the push, so a timeout can come late but never early (a commit date can be
+# hours before the push).
 # Sets CFG in the current shell; call it outside $(...).
-CFG='def cfg: {reviewers: [], head: null, pushed: null, now: 0};' pushed_oid= pushed_at=
+CFG='def cfg: {reviewers: [], head: null, pushed: null, now: 0};' pushed_oid= pushed_at= first_seen=
 prepare_cfg() {
   [ -n "$reviewers" ] || return 0
-  local info oid branch hrepo committed at date
+  local info oid branch hrepo date pushed
   info=$(gh api graphql -f owner="$owner" -f name="$name" -F pr="$pr" -f query='
     query($owner:String!,$name:String!,$pr:Int!){ repository(owner:$owner,name:$name){ pullRequest(number:$pr){
-      headRefOid headRefName headRepository { nameWithOwner } commits(last:1){ nodes { commit { committedDate } } } } } }' \
-    --jq '.data.repository.pullRequest | [.headRefOid, .headRefName, (.headRepository.nameWithOwner // "-"),
-          .commits.nodes[0].commit.committedDate] | join(" ")') || return 1
-  read -r oid branch hrepo committed <<<"$info"
-  if [ "$oid" != "$pushed_oid" ]; then
-    at=
-    [ "$hrepo" = - ] || at=$(gh api "repos/$hrepo/activity?ref=refs/heads/$branch&per_page=100" \
-      --jq "[.[] | select(.after == \"$oid\")][0].timestamp // empty" 2>/dev/null) || at=
-    pushed_oid=$oid pushed_at=${at:-$committed}
-  fi
+      headRefOid headRefName headRepository { nameWithOwner } } } }' \
+    --jq '.data.repository.pullRequest | [.headRefOid, .headRefName, (.headRepository.nameWithOwner // "-")] | join(" ")') || return 1
+  read -r oid branch hrepo <<<"$info"
   date=$(gh api -i rate_limit 2>/dev/null | tr -d '\r' | sed -n 's/^[Dd]ate: //p' | head -n 1) || date=
   printf '%s' "$oid" | grep -Eq '^[0-9a-f]{40}$' || return 1
-  printf '%s' "$pushed_at" | grep -Eq '^[0-9T:Z-]+$' || return 1
   printf '%s' "$date" | grep -Eq '^[A-Za-z]{3}, [0-9]{2} [A-Za-z]{3} [0-9]{4} [0-9:]{8} GMT$' || return 1
-  CFG="def cfg: {reviewers: [$reviewers], head: \"$oid\", pushed: \"$pushed_at\",
+  [ "$oid" = "$pushed_oid" ] || { pushed_oid=$oid pushed_at= first_seen=$date; }
+  # look the push up until found; it can reach the log after the first poll
+  if [ -z "$pushed_at" ] && [ "$hrepo" != - ]; then
+    pushed_at=$(gh api "repos/$hrepo/activity?ref=refs/heads/$branch&per_page=100" \
+      --jq "[.[] | select(.after == \"$oid\")][0].timestamp // empty" 2>/dev/null) || pushed_at=
+    printf '%s' "$pushed_at" | grep -Eq '^[0-9T:Z-]+$' || pushed_at=
+  fi
+  if [ -n "$pushed_at" ]; then pushed="\"$pushed_at\""
+  else pushed="(\"$first_seen\" | strptime(\"%a, %d %b %Y %H:%M:%S GMT\") | mktime | todate)"; fi
+  CFG="def cfg: {reviewers: [$reviewers], head: \"$oid\", pushed: $pushed,
     now: (\"$date\" | strptime(\"%a, %d %b %Y %H:%M:%S GMT\") | mktime)};"
 }
 snapshot() {
