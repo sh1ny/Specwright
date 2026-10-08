@@ -747,7 +747,13 @@ def remote_contains(d, branch, sha):
     remote = line.split()[0]
     if remote == sha:
         return True
-    return git(d, "merge-base", "--is-ancestor", sha, remote).returncode == 0
+    if git(d, "cat-file", "-e", remote + "^{commit}").returncode != 0:
+        # another checkout pushed a tip this repo lacks: fetch it (FETCH_HEAD only, no local ref moves) before the ancestry test
+        git(d, "fetch", "-q", "origin", f"refs/heads/{branch}")
+    r = git(d, "merge-base", "--is-ancestor", sha, remote)
+    if r.returncode in (0, 1):
+        return r.returncode == 0
+    raise Stop("remote_unreadable", f"cannot tell whether origin/{branch} contains {sha} in {d}: {r.stderr.strip()}", code=3, unknown=True)
 
 
 def branch_log(d, rng, branch_ref):
@@ -813,18 +819,26 @@ def load_record(p):
         raise Stop("record_unreadable", f"{p}: {e}")
 
 
-def find_marker(store, branch, change, prefix):
-    """The planning-only marker of this change, under the selected root's archive only: another root's marker is not ours."""
+def find_marker(store, branch, change, prefix, main=None):
+    """The planning-only marker of this change's own archive, under the selected root only: another root's marker is not
+    ours, and neither is an earlier archive of a reused change name - that one is already on the store's main."""
     archive = f"{prefix}/changes/archive"
-    r = git(store, "ls-tree", "-r", "--name-only", f"refs/heads/{branch}", "--", archive + "/")
+    r = git(store, "ls-tree", "-d", "--name-only", f"refs/heads/{branch}", "--", archive + "/")
     if r.returncode != 0:
         return None
-    rx = re.compile("^" + re.escape(archive) + r"/(\d{4}-\d{2}-\d{2}-)?" + re.escape(change) + r"/specwright-change\.yaml$")
-    for path in r.stdout.split("\n"):
-        if rx.search(path):
-            body = git(store, "show", f"refs/heads/{branch}:{path}").stdout
-            if re.search(r"^code_changes:\s*none\s*$", body, re.M):
-                return path
+    rx = re.compile("^" + re.escape(archive) + r"/(\d{4}-\d{2}-\d{2}-)?" + re.escape(change) + "$")
+    dirs = [d for d in r.stdout.split("\n") if rx.search(d)]
+    mref = main_ref(store, main) if main else None
+    if mref:
+        dirs = [d for d in dirs if git(store, "cat-file", "-e", f"{mref}:{d}").returncode != 0]
+    if len(dirs) > 1:
+        raise Stop("marker_ambiguous", f"more than one archive of {change} on {branch} is not on the store's main: {', '.join(dirs)}",
+                   paths=dirs)
+    for d in dirs:
+        path = f"{d}/specwright-change.yaml"
+        body = git(store, "show", f"refs/heads/{branch}:{path}")
+        if body.returncode == 0 and re.search(r"^code_changes:\s*none\s*$", body.stdout, re.M):
+            return path
     return None
 
 
@@ -881,7 +895,7 @@ def pass_write(argv):
         if r.returncode != 0:
             raise Stop("branch_missing", f"{k} has no branch {intent['branch']}")
         heads[k] = r.stdout.strip()
-    marker = find_marker(a["store"], intent["branch"], a["change"], prefix) if any(edits_for(f, "code") for f in intent["findings"]) else None
+    marker = find_marker(a["store"], intent["branch"], a["change"], prefix, (contexts(a["code"], a["store"])["store"] or {}).get("main")) if any(edits_for(f, "code") for f in intent["findings"]) else None
     rec = {**intent, "change": a["change"], "code_repo": a["code_repo"], "heads": heads, "marker": marker, "version": 1}
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")

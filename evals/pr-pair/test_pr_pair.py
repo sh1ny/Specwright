@@ -680,6 +680,23 @@ class Rounds(Base):
         self.git(self.store, "push", "-q", "origin", BRANCH)
         self.assertEqual(self.rounds()["unpushed"], {})
 
+    def test_rounds_pushed_fix_under_a_remote_tip_this_checkout_lacks(self):
+        # another checkout pushed on top of our fix: its tip is not in this repo, yet the fix is on the remote
+        bares = {}
+        for d, slug in ((self.code, CODE), (self.store, STORE)):
+            bares[d] = self.attach_bare(d, slug)
+            self.git(d, "push", "-q", "origin", BRANCH)
+        self.commit(self.store, {"a.md": "1\n"}, "fix(add-greeting): address review feedback\n\nFeedback-Round: 2")
+        self.git(self.store, "push", "-q", "origin", BRANCH)
+        other = self.tmp / "other-store"
+        self.git(self.tmp, "clone", "-q", "-b", BRANCH, fixtures.posix(bares[self.store]), str(other))
+        self.git(other, "config", "user.name", "Other")
+        self.git(other, "config", "user.email", "other@example.com")
+        self.commit(other, {"b.md": "2\n"}, "docs: someone else's commit")
+        self.git(other, "push", "-q", "origin", BRANCH)
+        r = self.rounds()
+        self.assertEqual((r["unpushed"], r["remote_unreadable"]), ({}, []))
+
 
 # =======================================================================================================
 class PassBase(Base):
@@ -1048,6 +1065,33 @@ class PassPlan(PassBase):
         self.commit(self.store, {decoy: "code_changes: none\n"}, "chore: other root archive")
         w = self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}])])
         self.assertIsNone(w["marker"], "a marker outside <store-prefix>/changes/archive/ belongs to another root")
+
+    def reuse_change_name(self):
+        """An earlier planning-only archive of the same change name, already merged into the store's main."""
+        old = "openspec/changes/archive/2026-09-01-add-greeting/specwright-change.yaml"
+        self.git(self.store, "checkout", "-q", "main")
+        self.commit(self.store, {old: "code_changes: none\n"}, "merge: add-greeting (earlier)")
+        self.git(self.store, "checkout", "-q", BRANCH)
+        self.git(self.store, "merge", "-q", "--no-edit", "main")
+        return old
+
+    def test_pass_write_takes_this_archives_marker_not_an_earlier_one(self):
+        self.reuse_change_name()
+        self.commit(self.store, {MARKER: "code_changes: none\n"}, "chore(add-greeting): archive change marker")
+        w = self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}])])
+        self.assertEqual(w["marker"], MARKER)
+
+    def test_pass_write_ignores_an_earlier_archives_marker(self):
+        self.reuse_change_name()  # this archive (ARCHIVE) has code work, so no marker of its own
+        w = self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}])])
+        self.assertIsNone(w["marker"], "the earlier archive's marker is history on main, not this change's")
+
+    def test_pass_write_stops_when_two_archives_are_new(self):
+        other = "openspec/changes/archive/2026-09-01-add-greeting/specwright-change.yaml"
+        self.commit(self.store, {other: "code_changes: none\n", MARKER: "code_changes: none\n"}, "chore: two archives")
+        r = self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}])], expect=1)
+        self.assertEqual(r["error"], "marker_ambiguous")
+        self.assertFalse(self.record_path().exists())
 
     def test_pass_plan_no_marker_when_only_store_fixes(self):
         self.commit(self.store, {MARKER: "code_changes: none\n"}, "chore(add-greeting): archive change marker")
