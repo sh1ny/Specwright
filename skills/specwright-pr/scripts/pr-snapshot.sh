@@ -136,21 +136,23 @@ def norm: sub("\\[bot\\]$"; "");
 # $edited marks a comment of theirs edited after your latest reply. $open: the
 # reviewer comments that came (or were edited) after your latest reply and
 # carry no reaction of yours - unanswered. Resolved threads are listed too
-# when $open is non-empty: bots often reply after the thread was resolved.
+# when $open is non-empty (bots often reply after the thread was resolved) or
+# your latest reply is a "waiting on owner" one: still to fix once allowed.
 | ([ $p.reviewThreads.nodes[] |
      .id as $tid | .comments.nodes[-1] as $last |
      ([ .comments.nodes[] | select((.author.login // "") == $me) | .createdAt ] | max // "") as $replied |
      ([ .comments.nodes[] | select((.author.login // "") != $me and (.lastEditedAt // "") > $replied) ] | length > 0) as $edited |
      ([ .comments.nodes[] | select((.author.login // "") != $me
           and (.lastEditedAt // .createdAt // "") > $replied and (reacted | not)) ]) as $open |
-     select((.isResolved | not) or ($open | length > 0)) |
+     ($replied != "" and ($waiting[$tid] // "") == $replied) as $held |
+     select((.isResolved | not) or ($open | length > 0) or $held) |
      { id, root_id: .comments.nodes[0].databaseId, path, line: (.line // .originalLine),
        outdated: .isOutdated, resolved: .isResolved,
        rev: (($last.databaseId // 0 | tostring) + "@"
              + ([ .comments.nodes[] | .lastEditedAt // .createdAt // "" ] | max // "")),
        # your latest reply said "waiting on owner": still to fix once allowed
-       waiting_owner: ($replied != "" and ($open | length == 0) and ($waiting[$tid] // "") == $replied),
-       awaiting_reviewer: ($replied != "" and ($open | length == 0) and ($waiting[$tid] // "") != $replied),
+       waiting_owner: (($open | length == 0) and $held),
+       awaiting_reviewer: ($replied != "" and ($open | length == 0) and ($held | not)),
        resolve_pending: ((.isResolved | not) and (($last.author.login // "") == $me) and ($edited | not)
          and (($last.body // "") | contains("specwright:handled " + $tid + " resolve"))),
        comments: [ .comments.nodes[] | { id, author: (.author.login // "ghost"), body: (.body | clip(2500)),
