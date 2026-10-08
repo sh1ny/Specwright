@@ -266,7 +266,7 @@ prepare_cfg() {
     --jq '.data.repository.pullRequest | [.headRefOid, .headRefName, (.headRepository.nameWithOwner // "-"),
       (.commits.nodes[0].commit.committedDate // "-")] | join(" ")') || return 1
   read -r oid branch hrepo committed <<<"$info"
-  printf '%s' "$committed" | grep -Eq '^[0-9T:Z-]+$' || committed=
+  printf '%s' "$committed" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$' || committed=
   date=$(gh api -i rate_limit 2>/dev/null | tr -d '\r' | sed -n 's/^[Dd]ate: //p' | head -n 1) || date=
   printf '%s' "$oid" | grep -Eq '^[0-9a-f]{40}$' || return 1
   printf '%s' "$date" | grep -Eq '^[A-Za-z]{3}, [0-9]{2} [A-Za-z]{3} [0-9]{4} [0-9:]{8} GMT$' || return 1
@@ -275,7 +275,7 @@ prepare_cfg() {
   if [ -z "$pushed_at" ] && [ "$hrepo" != - ]; then
     pushed_at=$(gh api "repos/$hrepo/activity?ref=refs/heads/$branch&per_page=100" \
       --jq "[.[] | select(.after == \"$oid\")][0].timestamp // empty" 2>/dev/null) || pushed_at=
-    printf '%s' "$pushed_at" | grep -Eq '^[0-9T:Z-]+$' || pushed_at=
+    printf '%s' "$pushed_at" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$' || pushed_at=
   fi
   if [ -n "$pushed_at" ]; then pushed="\"$pushed_at\"" since=$pushed
   else
@@ -291,8 +291,9 @@ $1
 $SHAPE"
 }
 # One query (~1 point); more only when an item you reacted to was edited
-# since: its reaction times, 100 ids per query (~1 point each), then the PR
-# query once more with them.
+# since: its reaction times, 100 ids per query (1-2 points each), then the PR
+# query once more with them. Your reaction is looked for among the latest 100
+# of its kind on the item (the page size does not change the cost).
 snapshot() {
   local out batches ids part rt=
   out=$(query_pr 'def rtimes: {};') || return 1
@@ -303,8 +304,8 @@ snapshot() {
   while read -r ids; do
     [ -n "$ids" ] || continue
     part=$(gh api graphql -f query="query{ viewer { login } nodes(ids:[$ids]) { id ... on Reactable {
-        up: reactions(content:THUMBS_UP, last:20) { nodes { createdAt user { login } } }
-        down: reactions(content:THUMBS_DOWN, last:20) { nodes { createdAt user { login } } } } } }" \
+        up: reactions(content:THUMBS_UP, last:100) { nodes { createdAt user { login } } }
+        down: reactions(content:THUMBS_DOWN, last:100) { nodes { createdAt user { login } } } } } }" \
       --jq '.data.viewer.login as $me | [ .data.nodes[] | select(. != null) | { (.id): ([ (.up.nodes[]?, .down.nodes[]?)
         | select((.user.login // "") == $me) | .createdAt ] | max // "") } ] | add // {} | tojson') || return 1
     rt="$rt${rt:+ + }$part"

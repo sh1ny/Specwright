@@ -41,7 +41,7 @@ When `github.login` is set, run **every** `gh` and `git push` command, and every
 
 Before any push, run `pr.validate` if set. If it fails, fix or stop; never push red.
 
-**Review requests**: with `pr.reviewers`, each entry's `request`, posted as `pr.request_as`; without it, `github.review_request.body`, posted as `review_request.login`.
+**Review requests**: with `pr.reviewers`, each entry's `request`, posted as `pr.request_as`; without it, `github.review_request.body`, posted as `review_request.login`. The poster falls back to `review_request.login`, then `github.login`; if all are empty it is the ambient `gh` account (`gh api user --jq .login`), and requests are posted with plain `gh`, not as.sh.
 
 **Re-request review** - for reviewers that only run when tagged (Codex), not on new commits. Only right after you pushed a fix commit or the archive commit (watch step 3), and, without `pr.reviewers`, only when `review_request.after_fixes` is true. Do it for each review request. Compare GitHub timestamps only, never the local clock: get the push time of the new head from the repository you pushed to, `[as] gh api "repos/<owner>/<repo>/activity?ref=refs/heads/<branch>" --jq '[.[] | select(.after == "<head sha>")][0].timestamp'`, and the comments from `[as] gh pr view <n> --json comments`. Unless a comment from its poster with that exact body was created at or after that push time, post it as in ship step 5. If the push time is not found, post anyway: a duplicate request costs less than an unreviewed fix. At most once per pushed head: never on a wake with nothing new pushed, and never for commits someone else pushed.
 
@@ -51,7 +51,7 @@ Before any push, run `pr.validate` if set. If it fails, fix or stop; never push 
 2. Push: `[as] git push -u origin HEAD`.
 3. Find an existing PR: `[as] gh pr list --head <branch> --state open --json number,url,headRepositoryOwner`. Exit 0 with `[]` means none; a non-zero exit means unknown, so stop rather than create a duplicate.
 4. No PR → write the description per `references/description.md` into a temp file and `[as] gh pr create --base <main> --title <title> --body-file <file>`. Existing PR → leave its description alone (the user may have edited it on GitHub); rewrite it with `[as] gh pr edit <n> --body-file <file>` only when the user asks. Never pass the body through stdin or `--body-file -`.
-5. For each review request: if the PR has no comment from its poster with that exact body (check `gh pr view <n> --json comments`), write the body to a temp file and post it: `bash scripts/as.sh <poster> gh pr comment <n> --body-file <file>`. This also repairs a request that failed on an earlier run.
+5. For each review request: if the PR has no comment from its poster with that exact body (check `gh pr view <n> --json comments`), write the body to a temp file and post it: `bash scripts/as.sh <poster> gh pr comment <n> --body-file <file>`, or `gh pr comment <n> --body-file <file>` when the poster is the ambient account. This also repairs a request that failed on an earlier run.
 6. Report the URL and offer `watch`.
 
 ## feedback
