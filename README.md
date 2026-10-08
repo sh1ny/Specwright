@@ -54,8 +54,20 @@ also repairs an interrupted or partial install.
 Step 1 - Check prerequisites
 - Run `openspec --version`. If it fails, tell the user to install it
   (`npm i -g @fission-ai/openspec`) and STOP.
-- If there is no `openspec/` directory, tell the user to run `openspec init`
-  first and STOP.
+- Run `openspec list --json` in the code checkout and read `root`.
+  - `"root": null`: if the error names this project's `openspec/config.yaml`
+    (it starts with `Declared in` or `Invalid store declaration in`), show
+    its message and fix and STOP. Otherwise tell the user to run
+    `openspec init` first and STOP.
+  - Otherwise `<root>` below means `root.path`. It is the code checkout
+    for a repo-local project, or a store checkout (OpenSpec stores, 1.14.1
+    or later) elsewhere. Say which.
+- The schema and `config.yaml` go in `<root>/openspec/`. `specwright.yaml`,
+  `.specwright/VERSION`, skills and agents go in the code checkout. When
+  `<root>` is not the code checkout, never create `openspec/specs/`,
+  `openspec/changes/` or `openspec/schemas/` in the code checkout (a real
+  `openspec/` root there would override the store), and leave its
+  `openspec/config.yaml` (the `store:` pointer) as it is.
 
 Step 2 - Choose targets
 Ask which agents this project uses (several may apply) and confirm the paths:
@@ -82,18 +94,19 @@ Step 4 - Install files (track new vs updated)
   and `agents/omp/*.md` into `.omp/agents/` if OMP was chosen. If an
   installed agent file has a different `model:` value than the downloaded
   one, the user changed it: keep their value and say so.
-- Replace `openspec/schemas/specwright/` with the downloaded
+- Replace `<root>/openspec/schemas/specwright/` with the downloaded
   `schemas/specwright/`.
 - Legacy openspec-git-flow: if `openspec-git-branch`, `openspec-git-commit` or
   `openspec-git-merge` skill directories exist in a chosen skills directory,
   or `openspec/.git-flow/` exists, list them and ask before removing them.
 - Do not write `openspec/.specwright/VERSION` yet; Step 7 does, last.
 
-Step 5 - Merge openspec/config.yaml (never remove unrelated content)
+Step 5 - Merge <root>/openspec/config.yaml (never remove unrelated content)
 - If it does not exist, copy the downloaded `templates/openspec/config.yaml`.
 - Otherwise:
   - `schema:` - if it is missing or `spec-driven`, set it to `specwright`. If
-    it names another schema, ask the user before changing it; if they
+    it names another schema, ask the user before changing it (in a store,
+    say the change applies to everyone who uses that store); if they
     decline, keep it.
   - `context:` - if there is no `context:` key, add `context: |` holding the
     lines from the downloaded `templates/openspec/config.yaml` (leave any
@@ -106,7 +119,7 @@ Step 5 - Merge openspec/config.yaml (never remove unrelated content)
     `openspec-git-merge`. Leave every other line alone, including the
     project's own lines that mention Specwright.
 
-Step 6 - Settings (openspec/specwright.yaml)
+Step 6 - Settings (openspec/specwright.yaml in the code checkout)
 - If it does not exist, copy the downloaded
   `templates/openspec/specwright.yaml`, then ask the user for:
   finish mode (`local` merges to main locally; `pr` goes through GitHub PRs),
@@ -124,13 +137,13 @@ Step 6 - Settings (openspec/specwright.yaml)
   file no longer has, list them and ask before removing them.
 
 Step 7 - Verify, stamp the version, clean up
-- Run `openspec schema validate specwright`.
+- Run `openspec schema validate specwright` inside `<root>`.
 - Every file of the downloaded `skills/specwright-*` directories exists,
   with the same content, in every chosen skills directory, and nothing else
   is in them.
 - Every downloaded agent file exists in each chosen agents directory (the
   `model:` line may differ, per Step 4).
-- `openspec/config.yaml` has `schema: specwright` (or the schema the user
+- `<root>/openspec/config.yaml` has `schema: specwright` (or the schema the user
   chose to keep - then report "installed, but not the default schema"),
   every downloaded context line exactly once, and no other managed line.
 - `openspec/specwright.yaml` has every key in the downloaded
@@ -144,8 +157,11 @@ Step 7 - Verify, stamp the version, clean up
 Step 8 - Report briefly: version change (fresh, <old> → <new>, or
 reinstall), directories used, skills and agents installed (new vs updated,
 models kept), config and settings created/merged/unchanged (keys added or
-removed), legacy files removed, and the result of each Step 7 check. Tell the
-user to restart their agent so new skills and agents load.
+removed), legacy files removed, and the result of each Step 7 check. When `<root>`
+is a store, list the files this install left uncommitted there (by path,
+from `git status --porcelain` in the store) and say the user commits them in
+the store; this prompt never commits. Tell the user to restart their agent
+so new skills and agents load.
 ```
 
 ## ⚡ First Steps After Install

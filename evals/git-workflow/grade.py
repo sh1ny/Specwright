@@ -606,7 +606,9 @@ def check_install(name, repo, code, store, rep):
               and branches == [["main"], ["main"]] and not any(stash) and not gh_calls(repo),
               f"code commits={subjects(code, '--all')} store commits={subjects(store, '--all')} branches={branches} stash={stash} gh calls={len(gh_calls(repo))}"))
     if other:
-        sents = [x for x in sentences(rep) if "team-flow" in x]
+        # the question may follow the sentence that names team-flow ("... sets schema: team-flow. Should it change?")
+        allsents = sentences(rep)
+        sents = [x for i, x in enumerate(allsents) if any("team-flow" in y for y in allsents[max(0, i - 2):i + 1])]
         ask = [x for x in sents if re.search(r"\?|whether|confirm|let me know|please (tell|say|advise)|your (call|choice)|decide", x)
                and re.search(r"specwright|replace|chang|switch|overwrit", x)]
         R.append(("The report asks the user whether to change the schema from team-flow to specwright", bool(ask), f"matching sentences={ask[:2]}"))
@@ -630,7 +632,8 @@ def check_install(name, repo, code, store, rep):
         r"uncommitted|not (been )?committed|isn't committed|aren't committed|untracked|(did not|didn't|haven't|have not|not) commit", rep)
     R.append((f"The report lists the store's uncommitted files (schemas/specwright and config.yaml{' under planning/' if nested else ''}) and says they are not committed",
               bool(listed), f"report excerpt={rep[-240:]!r}"))
-    val = [x for x in sentences(rep) if "schema validate" in x and where in x
+    # the README install prompt names the root `<root>`, so a report may say "in <root>" instead of naming the folder
+    val = [x for x in sentences(rep) if "schema validate" in x and (where in x or "<root>" in x)
            and re.search(r"\bpass(ed|es)?\b|\bvalid\b|success|\bok\b|no errors", x) and not re.search(r"\bfail|\berror[^s]|not valid|invalid", x)]
     R.append((f"The report says openspec schema validate specwright was run in {place} and passed", bool(val), f"matching sentences={val[:2]}"))
     return R

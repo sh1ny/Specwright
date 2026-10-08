@@ -43,7 +43,7 @@ Test kinds:
 | planning-stores → Local finish merges the repos that have work | Code merge conflicts after the store merged | evals/git-workflow/evals.json | eval-store-finish-code-conflict | green |
 | planning-stores → Commands run where they resolve correctly | Store push with a repository-local auth header | evals/pr-pair/test_as_sh.py | test_scrubs_header_local_to_the_store | green |
 | planning-stores → Commands run where they resolve correctly | Store login override | evals/pr-pair/test_pr_pair.py | test_context_login_per_repo | green |
-| planning-stores → Commands run where they resolve correctly | Schema lookup with a root nested in the store repo | evals/git-workflow/evals.json | eval-install-nested-store | red |
+| planning-stores → Commands run where they resolve correctly | Schema lookup with a root nested in the store repo | evals/git-workflow/evals.json | eval-install-nested-store | green |
 | planning-stores → The expected PR set follows the change's work and transport | Planning-only change with a GitHub store | evals/pr-pair/test_pr_pair.py | test_expected_planning_only_github_store | green |
 | planning-stores → The expected PR set follows the change's work and transport | Planning-only change with no GitHub store | evals/pr-pair/test_pr_pair.py | test_expected_planning_only_local_store | green |
 | planning-stores → The expected PR set follows the change's work and transport | Code fix turns a planning-only change into a pair | evals/pr-pair/test_pr_pair.py | test_expected_gains_code_pr_after_code_commit | green |
@@ -84,8 +84,8 @@ Test kinds:
 | planning-stores → Roadmap status needs proof that the whole change merged | Store fetch fails | evals/git-workflow/evals.json | eval-store-roadmap-pr | green |
 | planning-stores → Referenced stores are read-only | Apply in a repo with references | evals/git-workflow/evals.json | eval-references-apply | green |
 | planning-stores → Referenced stores are read-only | Referenced store is not registered | evals/git-workflow/evals.json | eval-references-unregistered | green |
-| planning-stores → Install targets the resolved root | Install into a store-backed project | evals/git-workflow/evals.json | eval-install-store | red |
-| planning-stores → Install targets the resolved root | Store already uses another schema | evals/git-workflow/evals.json | eval-install-store-other-schema | red |
+| planning-stores → Install targets the resolved root | Install into a store-backed project | evals/git-workflow/evals.json | eval-install-store | green |
+| planning-stores → Install targets the resolved root | Store already uses another schema | evals/git-workflow/evals.json | eval-install-store-other-schema | green |
 
 ## 1. Two-repo test harness
 
@@ -194,7 +194,7 @@ Test kinds:
 ## 10. Install and docs (D10)
 
 - [x] 10.1 Add agent evals `eval-install-store`, `eval-install-store-other-schema` and `eval-install-nested-store`. Confirm `eval-install-nested-store` fails against today's install prompt, which never mentions stores; record the runs of the other two, which agents can pass by their own judgement, and keep them as regression guards.
-- [ ] 10.2 Update the README install/update prompt:
+- [x] 10.2 Update the README install/update prompt:
   - run `openspec list --json` first;
   - put the schema and `config.yaml` `context:` under `<root.path>/openspec/`, with `specwright.yaml`, skills and agents in the code repo;
   - never create `openspec/specs/` or `openspec/changes/` in the code repo when the root is elsewhere;
