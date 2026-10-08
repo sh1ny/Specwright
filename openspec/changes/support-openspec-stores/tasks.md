@@ -193,7 +193,7 @@ Test kinds:
 
 ## 10. Install and docs (D10)
 
-- [ ] 10.1 Add agent evals `eval-install-store`, `eval-install-store-other-schema` and `eval-install-nested-store`. Confirm they fail against today's install prompt, which writes to the code repo's `openspec/`.
+- [ ] 10.1 Add agent evals `eval-install-store`, `eval-install-store-other-schema` and `eval-install-nested-store`. Confirm `eval-install-nested-store` fails against today's install prompt, which never mentions stores; record the runs of the other two, which agents can pass by their own judgement, and keep them as regression guards.
 - [ ] 10.2 Update the README install/update prompt:
   - run `openspec list --json` first;
   - put the schema and `config.yaml` `context:` under `<root.path>/openspec/`, with `specwright.yaml`, skills and agents in the code repo;
