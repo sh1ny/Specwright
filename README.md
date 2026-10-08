@@ -46,7 +46,7 @@ Copy the prompt below and paste it into your coding agent. **The same prompt ins
 ```text
 Install/Update Specwright
 
-Install or update Specwright from https://github.com/sh1ny/Specwright into the
+Install or update Specwright from https://github.com/sh1ny/specwright into the
 current project. Follow the steps in order. Ask the user where indicated - do
 not assume answers. Every step is safe to repeat, so re-running this prompt
 also repairs an interrupted or partial install.
@@ -65,7 +65,7 @@ Ask which agents this project uses (several may apply) and confirm the paths:
 - Other: ask for the skills directory.
 
 Step 3 - Download and compare versions
-- Clone https://github.com/sh1ny/Specwright to a temporary directory
+- Clone https://github.com/sh1ny/specwright to a temporary directory
   (`git clone --depth 1`, or any other method that works).
 - Read the downloaded `VERSION` and the installed
   `openspec/.specwright/VERSION` (missing = fresh install, or an earlier
@@ -326,7 +326,7 @@ Files are always staged by name — never `git add -A`, never all of `openspec/`
 
 ## 🔧 Manual Installation
 
-1. `git clone --depth 1 https://github.com/sh1ny/Specwright.git /tmp/specwright`
+1. `git clone --depth 1 https://github.com/sh1ny/specwright.git /tmp/specwright`
 2. Copy `skills/specwright-*` into your agent's skills directory, and `agents/claude/*` into `.claude/agents/` and/or `agents/omp/*` into `.omp/agents/`.
 3. Copy `schemas/specwright/` to `openspec/schemas/specwright/` and `VERSION` to `openspec/.specwright/VERSION`.
 4. Set `schema: specwright` and append the `context:` lines from [`templates/openspec/config.yaml`](templates/openspec/config.yaml) to your `openspec/config.yaml`; copy [`templates/openspec/specwright.yaml`](templates/openspec/specwright.yaml) to `openspec/specwright.yaml` and fill it in.
