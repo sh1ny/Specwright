@@ -178,6 +178,10 @@ def norm: sub("\\[bot\\]$"; "");
 # Bots that are known get a precise signal; any other login counts as reported
 # once it posts anything at or after the push.
 | (if cfg.head == $p.headRefOid then cfg.pushed else null end) as $pushed
+# Output counts as a report from $since on: the push time, or the commit date
+# when the push is unknown (the earliest it can have been pushed), so a review
+# that came before this watcher first saw the head is not thrown away.
+| (if cfg.head == $p.headRefOid then cfg.since else null end) as $since
 | $p.headRefOid as $head
 | ([ ($p.comments.nodes[]), ($p.reviews.nodes[]), ($p.reviewThreads.nodes[].comments.nodes[]) ]) as $all
 | ([ cfg.reviewers[] | . as $r
@@ -189,15 +193,15 @@ def norm: sub("\\[bot\\]$"; "");
         elif $r.login == "kody-ai" then
           # its check run is created on the commit it reviews
           [ $checks[] | select(.name == "Kody Code Review" and .state != "pending") ] | length > 0
-        elif $pushed == null then false
+        elif $since == null then false
         elif $r.login == "kintsugimira" then
           # one walkthrough comment, edited in place; no SHA anywhere
           ([ $by[] | select(((.body // "") | contains("<!-- mira-walkthrough -->"))
-               and (.lastEditedAt // .createdAt // "") >= $pushed
+               and (.lastEditedAt // .createdAt // "") >= $since
                and ((.body // "") | test("Reviewing this PR|Code review in progress") | not)) ] | length > 0)
-          or ([ $by[] | select(.state != null and (.submittedAt // "") >= $pushed) ] | length > 0)
+          or ([ $by[] | select(.state != null and (.submittedAt // "") >= $since) ] | length > 0)
         else
-          [ $by[] | select((.lastEditedAt // .createdAt // .submittedAt // "") >= $pushed) ] | length > 0
+          [ $by[] | select((.lastEditedAt // .createdAt // .submittedAt // "") >= $since) ] | length > 0
         end) as $done
      | { login: $r.login, role: $r.role, timeout: $r.timeout,
          state: (if $done then "reported"
@@ -247,19 +251,22 @@ JQ
 # cfg for the reviewer check: the head's push time from the repository's
 # activity log (cached per head) and GitHub's clock from a Date header, so
 # timeouts never depend on the local clock. If the push is not in the log, the
-# GitHub time this process first saw the head stands in: never earlier than
-# the push, so a timeout can come late but never early (a commit date can be
-# hours before the push).
+# GitHub time this process first saw the head starts the timeout: never
+# earlier than the push, so a timeout can come late but never early (a commit
+# date can be hours before the push). Reports are then accepted from the commit
+# date on (since), so one that came before this process started still counts.
 # Sets CFG in the current shell; call it outside $(...).
-CFG='def cfg: {reviewers: [], head: null, pushed: null, now: 0};' pushed_oid= pushed_at= first_seen=
+CFG='def cfg: {reviewers: [], head: null, pushed: null, since: null, now: 0};' pushed_oid= pushed_at= first_seen=
 prepare_cfg() {
   [ -n "$reviewers" ] || return 0
-  local info oid branch hrepo date pushed
+  local info oid branch hrepo committed date pushed since
   info=$(gh api graphql -f owner="$owner" -f name="$name" -F pr="$pr" -f query='
     query($owner:String!,$name:String!,$pr:Int!){ repository(owner:$owner,name:$name){ pullRequest(number:$pr){
-      headRefOid headRefName headRepository { nameWithOwner } } } }' \
-    --jq '.data.repository.pullRequest | [.headRefOid, .headRefName, (.headRepository.nameWithOwner // "-")] | join(" ")') || return 1
-  read -r oid branch hrepo <<<"$info"
+      headRefOid headRefName headRepository { nameWithOwner } commits(last:1) { nodes { commit { committedDate } } } } } }' \
+    --jq '.data.repository.pullRequest | [.headRefOid, .headRefName, (.headRepository.nameWithOwner // "-"),
+      (.commits.nodes[0].commit.committedDate // "-")] | join(" ")') || return 1
+  read -r oid branch hrepo committed <<<"$info"
+  printf '%s' "$committed" | grep -Eq '^[0-9T:Z-]+$' || committed=
   date=$(gh api -i rate_limit 2>/dev/null | tr -d '\r' | sed -n 's/^[Dd]ate: //p' | head -n 1) || date=
   printf '%s' "$oid" | grep -Eq '^[0-9a-f]{40}$' || return 1
   printf '%s' "$date" | grep -Eq '^[A-Za-z]{3}, [0-9]{2} [A-Za-z]{3} [0-9]{4} [0-9:]{8} GMT$' || return 1
@@ -270,9 +277,12 @@ prepare_cfg() {
       --jq "[.[] | select(.after == \"$oid\")][0].timestamp // empty" 2>/dev/null) || pushed_at=
     printf '%s' "$pushed_at" | grep -Eq '^[0-9T:Z-]+$' || pushed_at=
   fi
-  if [ -n "$pushed_at" ]; then pushed="\"$pushed_at\""
-  else pushed="(\"$first_seen\" | strptime(\"%a, %d %b %Y %H:%M:%S GMT\") | mktime | todate)"; fi
-  CFG="def cfg: {reviewers: [$reviewers], head: \"$oid\", pushed: $pushed,
+  if [ -n "$pushed_at" ]; then pushed="\"$pushed_at\"" since=$pushed
+  else
+    pushed="(\"$first_seen\" | strptime(\"%a, %d %b %Y %H:%M:%S GMT\") | mktime | todate)"
+    if [ -n "$committed" ]; then since="\"$committed\""; else since=$pushed; fi
+  fi
+  CFG="def cfg: {reviewers: [$reviewers], head: \"$oid\", pushed: $pushed, since: $since,
     now: (\"$date\" | strptime(\"%a, %d %b %Y %H:%M:%S GMT\") | mktime)};"
 }
 query_pr() {  # <rtimes def>
@@ -280,21 +290,26 @@ query_pr() {  # <rtimes def>
 $1
 $SHAPE"
 }
-# One query (~1 point); a second pair only when an item you reacted to was
-# edited since, to learn whether your reaction is older than the edit.
+# One query (~1 point); more only when an item you reacted to was edited
+# since: its reaction times, 100 ids per query (~1 point each), then the PR
+# query once more with them.
 snapshot() {
-  local out ids rt
+  local out batches ids part rt=
   out=$(query_pr 'def rtimes: {};') || return 1
-  ids=$(printf '%s' "$out" | grep -o '"recheck":\[[^]]*\]' | sed 's/^"recheck"://' \
-    | grep -oE '"[A-Za-z0-9_=-]+"' | head -n 100 | paste -sd, -) || ids=
-  if [ -n "$ids" ]; then
-    rt=$(gh api graphql -f query="query{ viewer { login } nodes(ids:[$ids]) { id ... on Reactable {
+  batches=$(printf '%s' "$out" | grep -o '"recheck":\[[^]]*\]' | sed 's/^"recheck"://' \
+    | grep -oE '"[A-Za-z0-9_=-]+"' | paste -d, - - - - - - - - - - - - - - - - - - - - - - - - - \
+    | paste -d, - - - - | sed 's/,*$//') || batches=
+  [ -n "$batches" ] || { printf '%s\n' "$out"; return 0; }
+  while read -r ids; do
+    [ -n "$ids" ] || continue
+    part=$(gh api graphql -f query="query{ viewer { login } nodes(ids:[$ids]) { id ... on Reactable {
         up: reactions(content:THUMBS_UP, last:20) { nodes { createdAt user { login } } }
         down: reactions(content:THUMBS_DOWN, last:20) { nodes { createdAt user { login } } } } } }" \
       --jq '.data.viewer.login as $me | [ .data.nodes[] | select(. != null) | { (.id): ([ (.up.nodes[]?, .down.nodes[]?)
         | select((.user.login // "") == $me) | .createdAt ] | max // "") } ] | add // {} | tojson') || return 1
-    out=$(query_pr "def rtimes: $rt;") || return 1
-  fi
+    rt="$rt${rt:+ + }$part"
+  done <<<"$batches"
+  out=$(query_pr "def rtimes: ($rt);") || return 1
   printf '%s\n' "$out"
 }
 sig_of() { printf '%s' "$1" | grep -o '"sig":"[^"]*"' || true; }
