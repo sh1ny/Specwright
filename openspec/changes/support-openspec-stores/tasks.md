@@ -20,6 +20,7 @@ Test kinds:
 | planning-stores → Store branch mirrors the code branch | Store is dirty | evals/git-workflow/evals.json | eval-store-branch-dirty | green |
 | planning-stores → Store branch mirrors the code branch | Store checkout busy with another change | evals/git-workflow/evals.json | eval-store-branch-busy | green |
 | planning-stores → A change name is used once | Name of an archived change | evals/git-workflow/evals.json | eval-store-branch-reused-name | green |
+| planning-stores → A change name is used once | Archived from another checkout | evals/git-workflow/evals.json | eval-store-branch-reused-name (the archive is on the store's origin main only) | green |
 | planning-stores → The store gate is exclusive | Two sessions start changes against one store at once | evals/git-workflow/evals.json | eval-store-branch-locked (the fixture holds the lock as the other session; the race itself is the atomic `mkdir`) | green |
 | planning-stores → The store gate is exclusive | Gate lock left by an interrupted session | evals/git-workflow/evals.json | eval-store-branch-stale-lock | green |
 | planning-stores → Planning commits go to the store | Planning artifacts committed before the first task | evals/git-workflow/evals.json | eval-store-apply | green |

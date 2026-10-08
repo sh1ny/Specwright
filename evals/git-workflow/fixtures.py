@@ -493,10 +493,22 @@ def build_store(name, dest):
         git(store, "add", "-A")
         git(store, "commit", "-q", "-m", "feat(other-change): add planning artifacts")
     elif name == "eval-store-branch-reused-name":
+        # an earlier change of the same name was archived and merged from another checkout: it is on the store's
+        # origin main only, and this checkout's local main has not been pulled
         store_base(dest)
-        write(store, "openspec/changes/archive/2026-09-01-add-csv-export/proposal.md", "## Why\n\nAn earlier CSV export, shipped and archived.\n")
-        git(store, "add", "-A")
-        git(store, "commit", "-q", "-m", "merge: add-csv-export")  # an earlier change of the same name, archived on main
+        bare = dest / "store-origin.git"
+        git(dest, "init", "-q", "--bare", "-b", "main", posix(bare))
+        git(store, "remote", "add", "origin", posix(bare))
+        git(store, "push", "-q", "origin", "main")
+        other = dest / "other-checkout"
+        git(dest, "clone", "-q", posix(bare), posix(other))
+        for k, v in (("user.name", "Other Bot"), ("user.email", "other@example.invalid"), ("commit.gpgsign", "false")):
+            git(other, "config", k, v)
+        write(other, "openspec/changes/archive/2026-09-01-add-csv-export/proposal.md", "## Why\n\nAn earlier CSV export, shipped and archived.\n")
+        git(other, "add", "-A")
+        git(other, "commit", "-q", "-m", "merge: add-csv-export")
+        git(other, "push", "-q", "origin", "main")
+        shutil.rmtree(other, onerror=lambda f, p, _: (os.chmod(p, 0o700), f(p)))
     elif name == "eval-store-branch-locked":
         store_base(dest)
         gate_lock(store, datetime.now(timezone.utc))  # another session is in its gate right now

@@ -674,7 +674,7 @@
         "specwright-branch"
       ],
       "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
-      "expected_output": "The store's main already holds openspec/changes/archive/2026-09-01-add-csv-export/: creates no branch in either repo, scaffolds nothing, leaves no gate lock, says the name was used by an archived change and offers another name or abort.",
+      "expected_output": "An earlier add-csv-export was archived and merged from another checkout, so only the store's origin/main holds openspec/changes/archive/2026-09-01-add-csv-export/: the gate fetches, finds it, creates no branch in either repo, scaffolds nothing, leaves no gate lock and the local mains unchanged, says the name was used by an archived change and offers another name or abort.",
       "assertions": [
         "Both repos are still on main with only the main branch and no new commit",
         "No change directory add-csv-export was created in either repo",

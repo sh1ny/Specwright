@@ -1168,7 +1168,7 @@ def check_store_branch(name, code, store, rep):
     elif name == "eval-store-branch-reused-name":
         R.append(("Both repos are still on main with only the main branch and no new commit",
                   on(code) == on(store) == "main" and bs(code) == bs(store) == ["main"] and subjects(code, "main") == [INITIAL]
-                  and subjects(store, "main") == ["merge: add-csv-export", *STORE_MAIN],
+                  and subjects(store, "main") == STORE_MAIN,  # a fetch moves origin/main only
                   f"code={on(code)} {bs(code)} store={on(store)} {bs(store)} store main={subjects(store, 'main')}"))
         R.append(("No change directory add-csv-export was created in either repo", not dirs, f"dirs={dirs}"))
         R.append(no_lock)
