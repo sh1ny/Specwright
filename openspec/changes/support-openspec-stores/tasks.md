@@ -188,7 +188,7 @@ Test kinds:
 
 ## 9. References mode (D11)
 
-- [ ] 9.1 Add agent evals `eval-references-apply` and `eval-references-unregistered`. Confirm the unregistered case fails today: the report does not name the unresolved reference.
+- [ ] 9.1 Add agent evals `eval-references-apply` and `eval-references-unregistered` as regression guards. No red confirmation for the unregistered case: OpenSpec 1.14.1 already reports an unregistered reference (`reference_unresolved` in `openspec instructions apply`), so agents name it before 9.2. Record the pre-9.2 runs and their scores instead.
 - [ ] 9.2 Add the read-only rule to the five skills and the design/review guidance: never branch, commit or push in a referenced store; read references via `openspec context --json`; name an unresolved reference and continue. Verify: both evals pass (rows 75–76 green).
 
 ## 10. Install and docs (D10)
