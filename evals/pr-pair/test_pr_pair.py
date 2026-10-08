@@ -1036,6 +1036,19 @@ class PassPlan(PassBase):
         self.assertEqual((code_push["state"], code_push["blocked"]), ("todo", False))
         self.assertEqual(self.row(p, "push", "store")["state"], "todo")
 
+    def test_pass_write_finds_the_marker_under_the_selected_root_only(self):
+        # another OpenSpec root in the store archives a change of the same name; its marker sorts first and is not ours
+        decoy = "aaa/openspec/changes/archive/2026-10-01-add-greeting/specwright-change.yaml"
+        self.commit(self.store, {decoy: "code_changes: none\n", MARKER: "code_changes: none\n"}, "chore(add-greeting): archive change marker")
+        w = self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}])])
+        self.assertEqual(w["marker"], MARKER)
+
+    def test_pass_write_ignores_another_roots_marker(self):
+        decoy = "other/changes/archive/2026-10-01-add-greeting/specwright-change.yaml"
+        self.commit(self.store, {decoy: "code_changes: none\n"}, "chore: other root archive")
+        w = self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}])])
+        self.assertIsNone(w["marker"], "a marker outside <store-prefix>/changes/archive/ belongs to another root")
+
     def test_pass_plan_no_marker_when_only_store_fixes(self):
         self.commit(self.store, {MARKER: "code_changes: none\n"}, "chore(add-greeting): archive change marker")
         w = self.write_record([self.finding()])

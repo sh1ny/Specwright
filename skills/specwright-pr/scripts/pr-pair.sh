@@ -813,11 +813,13 @@ def load_record(p):
         raise Stop("record_unreadable", f"{p}: {e}")
 
 
-def find_marker(store, branch, change):
-    r = git(store, "ls-tree", "-r", "--name-only", f"refs/heads/{branch}")
+def find_marker(store, branch, change, prefix):
+    """The planning-only marker of this change, under the selected root's archive only: another root's marker is not ours."""
+    archive = f"{prefix}/changes/archive"
+    r = git(store, "ls-tree", "-r", "--name-only", f"refs/heads/{branch}", "--", archive + "/")
     if r.returncode != 0:
         return None
-    rx = re.compile(r"(^|/)changes/archive/(\d{4}-\d{2}-\d{2}-)?" + re.escape(change) + r"/specwright-change\.yaml$")
+    rx = re.compile("^" + re.escape(archive) + r"/(\d{4}-\d{2}-\d{2}-)?" + re.escape(change) + r"/specwright-change\.yaml$")
     for path in r.stdout.split("\n"):
         if rx.search(path):
             body = git(store, "show", f"refs/heads/{branch}:{path}").stdout
@@ -879,7 +881,7 @@ def pass_write(argv):
         if r.returncode != 0:
             raise Stop("branch_missing", f"{k} has no branch {intent['branch']}")
         heads[k] = r.stdout.strip()
-    marker = find_marker(a["store"], intent["branch"], a["change"]) if any(edits_for(f, "code") for f in intent["findings"]) else None
+    marker = find_marker(a["store"], intent["branch"], a["change"], prefix) if any(edits_for(f, "code") for f in intent["findings"]) else None
     rec = {**intent, "change": a["change"], "code_repo": a["code_repo"], "heads": heads, "marker": marker, "version": 1}
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")

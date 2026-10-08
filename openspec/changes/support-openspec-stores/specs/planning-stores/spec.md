@@ -123,7 +123,7 @@ For a store-backed change, the "every task is `[x]`" check SHALL require, for ev
 - **THEN** Specwright reconciles it as above, or reports the gap, and does not hand off to archive or PR until it is closed
 
 ### Requirement: Planning-only changes are recorded in the archive
-When a store-backed change is planning-only at archive time, `specwright-finish` SHALL write `specwright-change.yaml` with `code_changes: none` into the archived change directory, as part of the archive commit. A change is planning-only when its code branch has no commits after the code main branch and no code PR from that branch exists in any state. Specwright SHALL NOT write the file otherwise, including on an archive recovery branch.
+When a store-backed change is planning-only at archive time, `specwright-finish` SHALL write `specwright-change.yaml` with `code_changes: none` into the archived change directory, as part of the archive commit. A change is planning-only when its code branch has no commits after the code main branch and no code PR from that branch into the code main branch exists in any state. Specwright SHALL NOT write the file otherwise, including on an archive recovery branch.
 
 #### Scenario: Planning-only archive
 - **WHEN** finish commits the archive of a store-backed change whose code branch has no commits
@@ -132,6 +132,10 @@ When a store-backed change is planning-only at archive time, `specwright-finish`
 #### Scenario: Planning-only archive of a date-prefixed change
 - **WHEN** finish commits the archive of the planning-only change `2026-10-07-add-greeting`
 - **THEN** the archive commit contains `openspec/changes/archive/2026-10-07-add-greeting/specwright-change.yaml`
+
+#### Scenario: Old PR into another base
+- **WHEN** finish archives a store-backed change whose code branch has no commits and whose only code PR from that branch targets `integration`, not the code main branch
+- **THEN** the change is planning-only and the archive commit contains `specwright-change.yaml`
 
 #### Scenario: Code work appears after the marker
 - **WHEN** a feedback fix adds a code commit to a change whose archived directory already has `specwright-change.yaml`
