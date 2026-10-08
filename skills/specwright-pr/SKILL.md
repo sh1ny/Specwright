@@ -101,7 +101,7 @@ One pass covers every expected PR of the change (repo-local: its one PR): all it
    - comment or review body: `[as] bash scripts/pr-reply.sh <pr> comment <id> <file> --repo <owner>/<name>`
    With `pr.react` true, add `--react +1` when the finding was right (fixed, addressed differently, or valid but deferred) and `--react -1` when it was wrong (not-addressing, declined); a question gets +1, a suggestion you turn down -1. `--react` marks the thread's root comment; for a follow-up that was a finding of its own, reply in the thread without `--react` and mark the follow-up with `react <comment id>`. Needs-human items get their reaction once the user decides.
    Exit 2 means a pending review appeared - stop and tell the user. Exit 1 after a posted reply names the one step to retry (the resolution or the reaction); retry only that.
-9. For each repo step 7 pushed, **re-request review** on its PR (see Settings and identity). A store fix with no store PR is reported as a branch to share by hand.
+9. For each repo step 7 pushed, **re-request review** on its PR (see Settings and identity). A store fix with no store PR is reported as a branch to share by hand. A code fix on a change with no code PR (store-only until now) makes the code PR expected: the plan's code `push` row says `action: ship`, so run **ship** for the code repo (push, open the PR, post its review requests) before replying; the pass cannot complete until that PR is open.
 10. Store-backed: `bash scripts/pr-pair.sh pass done ...` with fresh snapshots; if it does not report the record deleted, do what its plan lists.
 11. Summarize: fixed / replied / declined / dropped / needs-human (with the options and your recommendation).
 

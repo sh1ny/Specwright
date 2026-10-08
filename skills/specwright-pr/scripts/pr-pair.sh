@@ -940,10 +940,19 @@ def pass_plan(argv):
     def unmet(*ids):
         return [i for i in ids if not any(r["step"] + ":" + r["repo"] == i and r["state"] in ("done", "not_applicable") for r in rows if "repo" in r)]
 
+    if "code" in dests and not prs.get("code"):  # a code fix on a store-only change: the code PR is now expected
+        opened = [p for p in discover(slug["code"], branch, base=ctx["code"]["main"])["prs"] if p["state"] == "OPEN"]
+        if opened:
+            prs = {**prs, "code": {"repo": slug["code"], "number": opened[0]["number"]}}
+
     for k in dests:  # 2. push
         pr = prs.get(k)
         row = {"step": "push", "repo": k, "branch": branch, "after": [], "blocked": False}
-        if not pr:
+        if not pr and k == "code":
+            after = unmet("fix_commit:code") + (unmet("fix_commit:store") if marker else [])
+            row.update(state="todo", action="ship", after=after, blocked=bool(after),
+                       detail="the code repo now has commits but no open code PR: ship it (push, ensure-pr, review request), then plan again")
+        elif not pr:
             row.update(state="not_applicable", share_by_hand=True)
         else:
             after = unmet(f"fix_commit:{k}")

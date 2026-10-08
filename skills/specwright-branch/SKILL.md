@@ -17,7 +17,7 @@ Insert a git gate in front of the vanilla change-creation workflow. Run no OpenS
 4. **Not on main** → stop. Offer: switch to main (only if the tree is clean apart from step 5's carry-over), or abort.
 5. **Dirty tree:** untracked files only under `<P>/changes/<change-name>/` are this change's artifacts, created before the gate ran (or when apply found the change on main): they carry over to the new branch, so continue. Anything else → stop and show `git status --short`. Offer: commit first, stash (`git stash push -u -m "specwright-branch: pre-<change-name>" -- <those paths>`, report the ref), or abort.
 6. **Prefix** from the name's first token: add/feat/feature/implement/introduce → `feat`; fix/bugfix/hotfix/patch/resolve → `bugfix`; refactor/restructure/cleanup → `refactor`; docs/doc/document → `docs`; chore/bump/deps/ci/build → `chore`; anything else → `feat` (say so in one line).
-7. **Existing branch** `<prefix>/<change-name>` → stop. Offer: switch to it and resume the change (do not re-scaffold), pick another name, or abort.
+7. **Existing branch** `<prefix>/<change-name>` → stop (store-backed: note it and go on; store step 2 decides once both repos are inspected). Offer: switch to it and resume the change (do not re-scaffold), pick another name, or abort.
 8. Store-backed → continue with **Store-backed changes** (below) instead of this step. Otherwise `git checkout -b <prefix>/<change-name>`, announce `On branch <prefix>/<change-name> (from <main>)`, then hand back to the triggering workflow. If the change directory already exists, tell the workflow to continue it rather than create it again.
 
 If the roadmap (`project.roadmap`, default `openspec/roadmap.md`) exists and the user did not say which milestone this change serves, ask, so the proposal can name it.
@@ -28,13 +28,14 @@ Never commit or push here.
 
 ## Store-backed changes
 
-When the **Planning repo** is a store, the gate covers both repos and both get the same branch name. Steps 1–7 run on the code repo as written. Then:
+When the **Planning repo** is a store, the gate covers both repos and both get the same branch name. Steps 1–7 run on the code repo as written, except that an existing branch in step 7 is only noted: whether it stops depends on the store too. Then:
 
 1. **Lock** the store gate before touching the store, in one call: `cd "<store toplevel>" && L="$(git rev-parse --path-format=absolute --git-common-dir)/specwright-gate.lock" && mkdir "$L" && printf 'time: %s\nchange: %s\ncode: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<change-name>" "<code toplevel>" > "$L/owner"`. `mkdir` is atomic and fails when the lock exists. When it succeeds, you hold the lock: go on to step 2. When `mkdir` fails, stop before touching either repo: show `owner` (when the lock was taken, for which change, from which checkout) and say another session may be in its gate for this store. A lock left by an interrupted session is never removed automatically: ask the user to confirm that no other session is in its gate, and only then remove it (`rm -r "$L"`) and rerun the gate.
 2. **Store checks**, with the lock held: run steps 1, 3, 4, 5 and 7 on the store (in `cd "<store toplevel>" &&` calls). Main is `planning_store.main_branch` in this repo's `openspec/specwright.yaml`, else `main`, else `master`. Step 5's carry-over is `<P>/changes/<change-name>/` in the store.
    - Store on another change's branch → **busy**: stop, name that branch, and say one store holds one change in progress at a time on this machine (finish or archive that change first). Do not offer to switch it.
    - Store dirty → stop and show the store's `git status --short`, with the same offers as step 5, run in the store.
-   - `<prefix>/<change-name>` exists in only one repo → offer to resume it and create the missing one, pick another name, or abort.
+   - `<prefix>/<change-name>` exists in both repos → stop with step 7's offers.
+   - `<prefix>/<change-name>` exists in only one repo (the code repo's, noted in step 7, or the store's) → stop. Offer to resume it and create the missing one, pick another name, or abort.
 3. **Create** only after both repos pass: `git checkout -b <prefix>/<change-name>` in the code repo, then in the store. If the store creation fails, remove the empty code branch (`git checkout <main> && git branch -d <prefix>/<change-name>`) and stop.
 4. **Release** the lock with `rm -r "$L"` right after both branches exist. Every stop from step 1 onwards releases it first, unless the stop is that the lock was held by someone else.
 5. Announce `On branch <prefix>/<change-name> in the code repo (<code toplevel>, from <main>) and the store (<store toplevel>, from <store main>)`, then hand back to the triggering workflow. It scaffolds the change in the store, since the root resolves there.

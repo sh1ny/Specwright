@@ -932,6 +932,33 @@ class PassPlan(PassBase):
         self.assertTrue(d["deleted"])
         self.assertFalse(self.record_path().exists())
 
+    def test_pass_plan_first_code_fix_on_store_only_change_needs_code_pr(self):
+        # a store-only change (no code PR) gets a code fix: the pass is not complete until the code PR exists
+        intent = {**self.intent([]), "prs": {"store": {"repo": STORE, "number": 3}},
+                  "findings": [self.finding("F1", source="store", dest="code", react=None)]}
+        self.write_record(None, intent=intent)
+        self.fix_code()
+        self.push_all()
+        p = self.plan(store=snap(threads=[]))
+        push = self.row(p, "push", "code")
+        self.assertEqual((push["state"], push["action"]), ("todo", "ship"))
+        self.assertNotIn("code", p["share_by_hand"])
+        self.assertEqual(p["status"], "resume")
+        self.assertFalse(p["delete_record"])
+        self.plan(store=snap(threads=[]), sub="done", expect=1)
+        self.assertTrue(self.record_path().exists())
+        # once ship opened the code PR, the pass re-requests review on it and then completes
+        self.add_pull(CODE, 7)
+        p = self.plan(store=snap(threads=[]))
+        self.assertEqual(self.row(p, "push", "code")["state"], "done")
+        rr = self.row(p, "rerequest", "code")
+        self.assertEqual((rr["pr"], rr["state"]), ({"repo": CODE, "number": 7}, "todo"))
+        self.pushed_at(CODE, BRANCH, self.tip(self.code), "2026-10-08T12:00:00Z")
+        self.add_comment(CODE, 7, "@codex review", "KintsugiBot", 2003, created_at="2026-10-08T12:00:03Z")
+        p = self.plan(store=snap(threads=[]))
+        self.assertEqual(p["status"], "complete")
+        self.assertTrue(self.plan(store=snap(threads=[]), sub="done")["deleted"])
+
     def test_pass_plan_question_thread_done_when_replied(self):
         self.settings("github:\n  login: KintsugiBot\npr:\n  max_fix_rounds: 2\n")
         self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}],
