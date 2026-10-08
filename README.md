@@ -332,11 +332,9 @@ Files are always staged by name — never `git add -A`, never all of `openspec/`
 4. Set `schema: specwright` and append the `context:` lines from [`templates/openspec/config.yaml`](templates/openspec/config.yaml) to your `openspec/config.yaml`; copy [`templates/openspec/specwright.yaml`](templates/openspec/specwright.yaml) to `openspec/specwright.yaml` and fill it in.
 5. `openspec schema validate specwright`, then restart your agent.
 
-## 🛠️ Developing Specwright
+## 🛠️ Contributing
 
-Specwright is built with Specwright. The repository's own `openspec/` is a normal install made with the prompt above, so changes to Specwright go through the same branch → artifacts → apply → PR → archive flow. The files the installer copies into a project live under [`templates/openspec/`](templates/openspec/), never in `openspec/`, so this repo's settings never ship to users.
-
-The installed copies (`.claude/skills/specwright-*`, `.claude/agents/specwright-*`, `.omp/agents/specwright-*`, `.agents/skills/specwright-*`, `openspec/schemas/specwright/`, `openspec/.specwright/`) are ignored by git: the sources are `skills/`, `agents/`, `schemas/` and `VERSION`. A fresh clone needs `openspec init` and the install prompt before the workflow runs. Agents follow the installed copies, so after a change edits a skill, re-run the install prompt to pick it up.
+Specwright is developed with Specwright. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the source vs. installed layout, conventions and releases.
 
 ## 🗑️ Uninstall
 
