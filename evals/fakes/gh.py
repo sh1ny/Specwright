@@ -9,6 +9,7 @@ State is JSON at $FAKE_GH_STATE:
 Any call whose argv (joined by spaces) matches a `fail` pattern exits non-zero.
 Every call appends one JSON line {argv, cwd, gh_repo} to $FAKE_GH_LOG.
 
+Optional per-repo "readers": [logins] - only they may call `api repos/<o>/<n>/...` (a private repo); others get 404.
 Optional per-repo "activity": [{"ref": "refs/heads/b", "after": "<sha>", "timestamp": "..."}]
 backs `api repos/<o>/<n>/activity?ref=...` (the push-time lookup).
 Covers: auth token (and its --help, which names --user), api (user, pulls list/get, activity,
@@ -236,6 +237,8 @@ def cmd_api(st, args):
         raise Fail(f"fake gh: unsupported api endpoint {path}", 2)
     slug, rest = m.groups()
     repo = st.setdefault("repos", {}).setdefault(slug, {})
+    if repo.get("readers") and whoami(st) not in repo["readers"]:
+        raise Fail("gh: Not Found (HTTP 404)")
     if rest == "pulls" and method == "GET":
         state = query.get("state", "open")
         head = query.get("head")

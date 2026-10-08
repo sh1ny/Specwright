@@ -92,9 +92,55 @@ def git(d, *args):
     return run(["git", *args], cwd=d)
 
 
+REPO_LOGIN, TOKENS = {}, {}  # repo slug (lower) -> login that reads it; login -> its verified token
+
+
 def gh(*args):
     # through bash so a `gh` that is a shell script (or a shim) resolves like it does for the caller
-    return run([BASH, "-c", 'exec gh "$@"', "gh", *args] if BASH else ["gh", *args])
+    cmd = [BASH, "-c", 'exec gh "$@"', "gh", *args] if BASH else ["gh", *args]
+    login = REPO_LOGIN.get((repo_of(args) or "").lower())
+    if not login:
+        return run(cmd)
+    try:
+        return subprocess.run(cmd, env={**ENV, "GH_TOKEN": token_for(login)}, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+    except OSError as e:
+        return subprocess.CompletedProcess(cmd, 127, "", str(e))
+
+
+def repo_of(args):
+    for i, x in enumerate(args):
+        m = re.match(r"/?repos/([^/]+/[^/?]+)", x)
+        if m:
+            return m.group(1)
+        if x == "--repo" and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def token_for(login):
+    """`login`'s gh token, pinned and verified the way as.sh pins one (never `gh auth switch`)."""
+    if login not in TOKENS:
+        bare = {k: v for k, v in ENV.items() if k not in ("GH_TOKEN", "GITHUB_TOKEN")}
+        base = [BASH, "-c", 'exec gh "$@"', "gh"] if BASH else ["gh"]
+        r = subprocess.run(base + ["auth", "token", "--hostname", "github.com", "--user", login], env=bare,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        tok = r.stdout.strip() if r.returncode == 0 else ""
+        if not tok:
+            raise Stop("no_credential", f"no gh credential for '{login}' (planning_store.login); run gh auth login", code=3, login=login)
+        v = subprocess.run(base + ["api", "--hostname", "github.com", "user", "--jq", ".login"], env={**bare, "GH_TOKEN": tok},
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if v.stdout.strip() != login:
+            raise Stop("identity_mismatch", f"the token for '{login}' resolves to '{v.stdout.strip()}'; refusing", code=3, login=login)
+        TOKENS[login] = tok
+    return TOKENS[login]
+
+
+def read_store_as(ctx, store_repo):
+    """Store reads use planning_store.login when it differs from the code login the pair-wide call runs as."""
+    s, c = (ctx.get("store") or {}).get("login") or "", ctx["code"].get("login") or ""
+    if store_repo and s and s.lower() != c.lower():
+        REPO_LOGIN[store_repo.lower()] = s
 
 
 def norm(p):
@@ -515,6 +561,7 @@ def expected_set(code, store, branch):
     store_side = {"expected": sid is not None, "repo": sid["repo"] if sid else None, "main": smain,
                   "reason": "github_origin" if sid else "no_github_origin", "pr": None, "other_base": []}
     if sid:
+        read_store_as(ctx, sid["repo"])
         sd = discover(sid["repo"], branch, base=smain)
         store_side["pr"], store_side["other_base"] = pr_of(sd["prs"]), sd["other_base"]
     members = [k for k, side in (("store", store_side), ("code", code_side)) if side["expected"]]
@@ -916,6 +963,7 @@ def pass_plan(argv):
     fix, tip, pushed, slug = {}, {}, {}, {}
     for k in ("code", "store"):
         slug[k] = (prs.get(k) or {}).get("repo") or (rec["code_repo"] if k == "code" else None)
+    read_store_as(ctx, slug["store"])
 
     for k in dests:  # 1. fix commits
         d = dirs[k]

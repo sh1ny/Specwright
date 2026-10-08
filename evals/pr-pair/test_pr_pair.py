@@ -367,6 +367,27 @@ class Expected(Base):
         self.git(self.store, "remote", "set-url", "--push", "origin", "https://github.com/publishing/plans.git")
         self.assertEqual(self.expected(expect=1)["error"], "mismatch")
 
+    def test_expected_reads_the_store_with_the_store_login(self):
+        # a private store only planning_store.login can read: pair-wide calls run as the code login (as.sh) yet still see it
+        self.commit(self.code, {"openspec/specwright.yaml": "github:\n  login: KintsugiBot\nplanning_store:\n  login: sh1ny\n"},
+                    "chore: settings")
+        st = self.gh()
+        st.setdefault("repos", {})[STORE] = {"readers": ["sh1ny"]}
+        self.save_gh(st)
+        self.add_pull(STORE, 3)
+        r = self.expected(env={"GH_TOKEN": "tok-k"})
+        self.assertEqual(r["store"]["pr"]["number"], 3)
+        store_calls = [c for c in self.gh_calls() if any(STORE in a for a in c["argv"])]
+        self.assertTrue(store_calls)
+        # the code login still reads the code repo itself
+        self.assertEqual(r["set"], ["store", "code"])
+
+    def test_expected_stops_when_the_store_login_has_no_credential(self):
+        self.commit(self.code, {"openspec/specwright.yaml": "github:\n  login: KintsugiBot\nplanning_store:\n  login: nobody\n"},
+                    "chore: settings")
+        r = self.expected(env={"GH_TOKEN": "tok-k"}, expect=3)
+        self.assertEqual(r["error"], "no_credential")
+
     def test_expected_unknown_when_lookup_fails(self):
         st = self.gh()
         st["fail"] = [{"match": r"api .*repos/acme/code/pulls", "exit": 1, "stderr": "HTTP 500"}]
@@ -1051,6 +1072,22 @@ class PassPlan(PassBase):
         reply = self.row(p, "reply", finding="F1")
         self.assertEqual(reply["after"], [])
         self.assertEqual(sorted((l["repo"], l["sha"]) for l in reply["link_commits"]), sorted([(CODE, c_sha), (STORE, s_sha)]))
+
+    def test_pass_plan_reads_a_private_store_as_the_store_login(self):
+        self.settings("github:\n  login: KintsugiBot\npr:\n  max_fix_rounds: 2\n"
+                      "  reviewers:\n    chatgpt-codex-connector: { role: required, request: \"@codex review\" }\n"
+                      "planning_store:\n  login: sh1ny\n")
+        st = self.gh()
+        st.setdefault("repos", {}).setdefault(STORE, {})["readers"] = ["sh1ny"]
+        self.save_gh(st)
+        self.write_record([self.finding()])
+        self.fix_store()
+        self.push_all()
+        p = self.pp("pass", "plan", *self.common(), "--snapshot", f"code={self.write_json('code-snap.json', snap(threads=[thread()]))}",
+                    "--snapshot", f"store={self.write_json('store-snap.json', snap())}", env={"GH_TOKEN": "tok-k"})
+        rr = self.row(p, "rerequest", "store")
+        self.assertEqual(rr["state"], "todo")
+        self.assertIn("push_time", rr)
 
     def test_pass_write_both_needs_a_repo_per_edit(self):
         bad = self.finding("F1", dest="both", edits=[{"file": "greet.py", "contains": ["x"]}])
