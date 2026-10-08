@@ -9,18 +9,18 @@ Test kinds:
 | Requirement | Scenario | Test file | Test name | State |
 |---|---|---|---|---|
 | planning-stores → Planning root comes from OpenSpec | Store selected by a project pointer | evals/git-workflow/evals.json | eval-store-apply | red |
-| planning-stores → Planning root comes from OpenSpec | Repo-local project is unchanged | evals/git-workflow/evals.json | eval-apply-three-tasks, eval-finish-local, eval-branch-clean-main (new check: only the code repo changed) | red |
+| planning-stores → Planning root comes from OpenSpec | Repo-local project is unchanged | evals/git-workflow/evals.json | eval-apply-three-tasks, eval-finish-local, eval-branch-clean-main (new check: only the code repo changed) | green |
 | planning-stores → Planning root comes from OpenSpec | Root found after archive | evals/git-workflow/evals.json | eval-store-finish-local | red |
 | planning-stores → Planning root comes from OpenSpec | Date-prefixed change name found after archive | evals/git-workflow/evals.json | eval-store-finish-dated | red |
-| planning-stores → Planning root comes from OpenSpec | Declared store cannot be resolved | evals/git-workflow/evals.json | eval-store-unregistered | red |
-| planning-stores → Planning root comes from OpenSpec | Root in another worktree of the code repo | evals/git-workflow/evals.json | eval-store-other-worktree | red |
-| planning-stores → Planning paths are relative to the resolved root | Root nested in the code repo | evals/git-workflow/evals.json | eval-nested-root-finish | red |
-| planning-stores → Planning paths are relative to the resolved root | Path outside every repository | evals/git-workflow/evals.json | eval-root-outside-git | red |
-| planning-stores → Store branch mirrors the code branch | Both repos clean on main | evals/git-workflow/evals.json | eval-store-branch-clean | red |
-| planning-stores → Store branch mirrors the code branch | Store is dirty | evals/git-workflow/evals.json | eval-store-branch-dirty | red |
-| planning-stores → Store branch mirrors the code branch | Store checkout busy with another change | evals/git-workflow/evals.json | eval-store-branch-busy | red |
-| planning-stores → The store gate is exclusive | Two sessions start changes against one store at once | evals/git-workflow/evals.json | eval-store-branch-locked (the fixture holds the lock as the other session; the race itself is the atomic `mkdir`) | red |
-| planning-stores → The store gate is exclusive | Gate lock left by an interrupted session | evals/git-workflow/evals.json | eval-store-branch-stale-lock | red |
+| planning-stores → Planning root comes from OpenSpec | Declared store cannot be resolved | evals/git-workflow/evals.json | eval-store-unregistered | green |
+| planning-stores → Planning root comes from OpenSpec | Root in another worktree of the code repo | evals/git-workflow/evals.json | eval-store-other-worktree | green |
+| planning-stores → Planning paths are relative to the resolved root | Root nested in the code repo | evals/git-workflow/evals.json | eval-nested-root-finish | green |
+| planning-stores → Planning paths are relative to the resolved root | Path outside every repository | evals/git-workflow/evals.json | eval-root-outside-git | green |
+| planning-stores → Store branch mirrors the code branch | Both repos clean on main | evals/git-workflow/evals.json | eval-store-branch-clean | green |
+| planning-stores → Store branch mirrors the code branch | Store is dirty | evals/git-workflow/evals.json | eval-store-branch-dirty | green |
+| planning-stores → Store branch mirrors the code branch | Store checkout busy with another change | evals/git-workflow/evals.json | eval-store-branch-busy | green |
+| planning-stores → The store gate is exclusive | Two sessions start changes against one store at once | evals/git-workflow/evals.json | eval-store-branch-locked (the fixture holds the lock as the other session; the race itself is the atomic `mkdir`) | green |
+| planning-stores → The store gate is exclusive | Gate lock left by an interrupted session | evals/git-workflow/evals.json | eval-store-branch-stale-lock | green |
 | planning-stores → Planning commits go to the store | Planning artifacts committed before the first task | evals/git-workflow/evals.json | eval-store-apply | red |
 | planning-stores → Planning commits go to the store | Task commit for a store-backed change | evals/git-workflow/evals.json | eval-store-apply | red |
 | planning-stores → Planning commits go to the store | Store on the wrong branch | evals/git-workflow/evals.json | eval-store-apply-wrong-branch | red |
