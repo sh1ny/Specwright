@@ -18,7 +18,7 @@ Every Specwright skill SHALL take the planning root from OpenSpec's resolved roo
 - **THEN** Specwright runs every git step in the code repo only, with the same branches and commit subjects it produced before this change
 
 #### Scenario: Root found after archive
-- **WHEN** finish starts in a fresh session after `openspec archive` moved `openspec/changes/<change-name>/` into the archive
+- **WHEN** finish starts in a fresh session after `openspec archive` moved the change directory into the archive
 - **THEN** Specwright still resolves the planning root and finds the archived directory `openspec/changes/archive/<archived-name>/` under it
 
 #### Scenario: Date-prefixed change name found after archive
@@ -57,7 +57,7 @@ When a new change will live in a store, `specwright-branch` SHALL run its gate o
 
 #### Scenario: Store checkout busy with another change
 - **WHEN** the store's checkout is on another change's branch because a second change is in progress against the same store
-- **THEN** Specwright stops, names the branch the store is on, and says that one store holds one change in progress at a time on this machine
+- **THEN** Specwright stops, names the branch the store is on, says that one store holds one change in progress at a time on this machine, does not switch the store off that branch (the other change's work would be lost) and leaves both repos on their original branches; the user finishes or abandons that change first
 
 ### Requirement: The store gate is exclusive
 `specwright-branch` SHALL run the store checks and the branch creation while holding an exclusive gate lock on the store, so two sessions cannot both pass against the same store checkout. A lock left by an interrupted session SHALL be removed only with the user's confirmation.

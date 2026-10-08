@@ -59,7 +59,7 @@ TRAILER = re.compile(r"^Feedback-Round:[ \t]*(\d+)[ \t]*$", re.M)
 LEGACY_SUBJECT = re.compile(r"address review feedback", re.I)
 MARK = re.compile(r"<!--\s*specwright:link\s+(store|code)\s+(\S+)\s*-->")
 GH_URL = re.compile(
-    r"^(?:(?:https?|ssh|git)://(?:[^@/\s]+@)?github\.com(?::\d+)?/|(?:[^@/\s]+@)?github\.com:)"
+    r"^(?:(?:https?|ssh|git)://(?:[^@/\s]+@)?(?:ssh\.)?github\.com(?::\d+)?/|(?:[^@/\s]+@)?(?:ssh\.)?github\.com:)"
     r"([^/\s]+)/([^/\s]+?)(?:\.git)?/?$", re.I)
 
 
@@ -779,6 +779,15 @@ def find_marker(store, branch, change):
     return None
 
 
+def edit_repo(f, e):
+    """The repo an edit lands in: its own `repo` (required when the finding's destination is `both`), else the finding's."""
+    return e.get("repo") or f["destination"]
+
+
+def edits_for(f, k):
+    return [e for e in f["edits"] if edit_repo(f, e) == k]
+
+
 def pass_args(argv, extra=None):
     spec = {"--code": "code", "--store": "store", "--code-repo": "code_repo", "--change": "change", "--snapshot": "+snapshot"}
     spec.update(extra or {})
@@ -806,21 +815,24 @@ def pass_write(argv):
         for key in ("id", "source", "destination", "edits", "disposition", "revision"):
             if key not in f:
                 raise Stop("invalid_intent", f"finding {f.get('id')} lacks '{key}'", code=2)
-        if f["id"] in seen or f["destination"] not in ("code", "store") or f["source"] not in ("code", "store") or not f["edits"]:
+        if f["id"] in seen or f["destination"] not in ("code", "store", "both") or f["source"] not in ("code", "store") or not f["edits"]:
             raise Stop("invalid_intent", f"finding {f['id']} is duplicated or malformed", code=2)
         seen.add(f["id"])
-        if f["destination"] == "store":
-            for e in f["edits"]:
-                if not norm(e["file"]).startswith(prefix + "/"):
-                    raise Stop("misrouted", f"finding {f['id']}: {e['file']} is not under {prefix}/, so it does not belong to the store branch",
-                               finding=f["id"], file=e["file"])
+        for e in f["edits"]:
+            r = e.get("repo")
+            if (f["destination"] == "both" and r not in ("code", "store")) or (f["destination"] != "both" and r not in (None, f["destination"])):
+                raise Stop("invalid_intent", f"finding {f['id']}: edit {e.get('file')} needs repo code|store matching the destination", code=2)
+        for e in edits_for(f, "store"):
+            if not norm(e["file"]).startswith(prefix + "/"):
+                raise Stop("misrouted", f"finding {f['id']}: {e['file']} is not under {prefix}/, so it does not belong to the store branch",
+                           finding=f["id"], file=e["file"])
     heads = {}
     for k in ("code", "store"):
         r = git(a[k], "rev-parse", f"refs/heads/{intent['branch']}")
         if r.returncode != 0:
             raise Stop("branch_missing", f"{k} has no branch {intent['branch']}")
         heads[k] = r.stdout.strip()
-    marker = find_marker(a["store"], intent["branch"], a["change"]) if any(f["destination"] == "code" for f in intent["findings"]) else None
+    marker = find_marker(a["store"], intent["branch"], a["change"]) if any(edits_for(f, "code") for f in intent["findings"]) else None
     rec = {**intent, "change": a["change"], "code_repo": a["code_repo"], "heads": heads, "marker": marker, "version": 1}
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
@@ -899,7 +911,7 @@ def pass_plan(argv):
     ctx = contexts(a["code"], a["store"])
     dirs = {"code": a["code"], "store": a["store"]}
     marker = rec.get("marker")
-    dests = [k for k in ("store", "code") if any(f["destination"] == k for f in findings) or (k == "store" and marker)]
+    dests = [k for k in ("store", "code") if any(edits_for(f, k) for f in findings) or (k == "store" and marker)]
     rows, stops = [], []
     fix, tip, pushed, slug = {}, {}, {}, {}
     for k in ("code", "store"):
@@ -914,7 +926,7 @@ def pass_plan(argv):
         sha, ok = fix_commit(d, rec["heads"][k], branch, n)
         if not ok:
             stops.append({"reason": "head_unreachable", "repo": k, "detail": f"{rec['heads'][k]} is not reachable from {branch}"})
-        edits = [{**e, "finding": f["id"]} for f in findings if f["destination"] == k for e in f["edits"]]
+        edits = [{**e, "finding": f["id"]} for f in findings for e in edits_for(f, k)]
         if k == "store" and marker:
             edits.append({"file": marker, "deleted": True, "finding": "marker"})
         files = sorted({norm(e["file"]) for e in edits})
@@ -982,7 +994,8 @@ def pass_plan(argv):
 
     react_on = ctx["react"]
     for f in findings:  # 4-6. reply, resolution, reaction
-        src, k, kind = f["source"], f["destination"], f.get("kind", "thread")
+        src, kind = f["source"], f.get("kind", "thread")
+        ks = [k for k in ("store", "code") if edits_for(f, k)]
         s = snaps[src]
         items = s.get({"thread": "threads", "comment": "comments", "review": "reviews"}[kind]) or []
         item = next((i for i in items if i.get("id") == f["item"]), None)
@@ -1012,11 +1025,11 @@ def pass_plan(argv):
             rows.append({**base, "step": "react", "state": "stopped"})
             continue
         pr = prs.get(src) or {}
-        after = unmet(f"fix_commit:{k}", f"push:{k}")
-        link = {"repo": slug[k], "sha": fix.get(k)}
+        after = [i for k in ks for i in unmet(f"fix_commit:{k}", f"push:{k}")]
+        links = [{"repo": slug[k], "sha": fix.get(k)} for k in ks]
         reply = {**base, "step": "reply", "state": "done" if answered else "todo", "kind": kind, "item": f["item"], "root_id": f.get("root_id"),
                  "pr": {"repo": pr.get("repo"), "number": pr.get("number")}, "resolve": want_resolve and not answered,
-                 "react": reaction if not answered else None, "link_commit": link,
+                 "react": reaction if not answered else None, "link_commit": links[0], "link_commits": links,
                  "after": [] if answered else after, "blocked": bool(after) and not answered}
         rows.append(reply)
         if not want_resolve:

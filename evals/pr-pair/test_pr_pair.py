@@ -208,7 +208,8 @@ class Identity(Base):
 
     def test_identity_url_forms(self):
         for url in ("https://github.com/team/plans.git", "https://github.com/team/plans", "git@github.com:team/plans.git",
-                    "ssh://git@github.com/team/plans.git", "https://x-access-token:tok@github.com/team/plans.git"):
+                    "ssh://git@github.com/team/plans.git", "https://x-access-token:tok@github.com/team/plans.git",
+                    "ssh://git@ssh.github.com:443/team/plans.git", "git@ssh.github.com:team/plans.git"):
             d = self.make_repo("r" + str(abs(hash(url))), url)
             r = self.pp("identity", d)
             self.assertEqual((r["repo"], r["fetch"], r["push"]), ("team/plans", "team/plans", ["team/plans"]), url)
@@ -1028,6 +1029,36 @@ class PassPlan(PassBase):
         args = ["pass", "plan", *self.common(), "--snapshot", f"store={self.write_json('s.json', snap())}"]
         r = self.pp(*args, expect=2)
         self.assertEqual(r["error"], "snapshot_required")
+
+    def test_pass_plan_finding_spanning_both_repos(self):
+        # one finding needs a spec edit in the store and a code edit: each edit goes to its own repo, one reply covers both
+        both = self.finding("F1", dest="both", edits=[
+            {"repo": "store", "file": SPEC_ARCHIVED, "contains": [NEW_TEXT], "absent": [OLD_TEXT]},
+            {"repo": "store", "file": SPEC_MAIN, "contains": [NEW_TEXT], "absent": [OLD_TEXT]},
+            {"repo": "code", "file": "greet.py", "contains": ["strip()"]}])
+        self.write_record([both])
+        p = self.plan(code=snap(threads=[thread()]))
+        sfix, cfix = self.row(p, "fix_commit", "store"), self.row(p, "fix_commit", "code")
+        self.assertEqual(sorted(sfix["files"]), sorted([SPEC_ARCHIVED, SPEC_MAIN]))
+        self.assertEqual(cfix["files"], ["greet.py"])
+        reply = self.row(p, "reply", finding="F1")
+        self.assertTrue({"fix_commit:store", "fix_commit:code", "push:store", "push:code"} <= set(reply["after"]))
+        s_sha, c_sha = self.fix_store(), self.fix_code()
+        p = self.plan(code=snap(threads=[thread()]))
+        self.assertEqual((self.row(p, "fix_commit", "store")["state"], self.row(p, "fix_commit", "code")["state"]), ("done", "done"))
+        self.push_all()
+        p = self.plan(code=snap(threads=[thread()]))
+        reply = self.row(p, "reply", finding="F1")
+        self.assertEqual(reply["after"], [])
+        self.assertEqual(sorted((l["repo"], l["sha"]) for l in reply["link_commits"]), sorted([(CODE, c_sha), (STORE, s_sha)]))
+
+    def test_pass_write_both_needs_a_repo_per_edit(self):
+        bad = self.finding("F1", dest="both", edits=[{"file": "greet.py", "contains": ["x"]}])
+        self.assertEqual(self.write_record([bad], expect=2)["error"], "invalid_intent")
+        stray = self.finding("F1", dest="both", edits=[{"repo": "store", "file": "greet.py", "contains": ["x"]},
+                                                       {"repo": "code", "file": "greet.py", "contains": ["y"]}])
+        self.assertEqual(self.write_record([stray], expect=1)["error"], "misrouted")
+        self.assertFalse(self.record_path().exists())
 
     def test_pass_write_refuses_an_existing_record_and_misrouted_edits(self):
         self.write_record([self.finding()])
