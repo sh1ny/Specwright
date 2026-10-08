@@ -495,6 +495,232 @@ def check_store(name, repo, run):
 
     elif name.startswith("eval-store-branch-"):
         R.extend(check_store_branch(name, code, store, rep))
+    elif name.startswith(("eval-store-finish-", "eval-store-archive-on-main")):
+        R.extend(check_store_finish(name, repo, code, store, rep))
+    return R
+
+
+DATE = r"\d{4}-\d\d-\d\d"
+MARKER = "specwright-change.yaml"
+CONFLICT_COMMIT = {"store": "docs(greeting): add greeting spec on main", "code": "feat: add formal greeting"}  # fixtures.py CONFLICT_STORE / CONFLICT_CODE
+
+
+def merge_head(repo):
+    """(parent count, subject) of main's tip."""
+    return len((git(repo, "log", "-1", "--format=%P", "main") or "").split()), (git(repo, "log", "-1", "--format=%s", "main") or None)
+
+
+def is_merge_of(repo, name):
+    n, subj = merge_head(repo)
+    return n == 2 and subj == f"merge: {name}"
+
+
+def archive_dirs(store, rev):
+    """Names of the directories under openspec/changes/archive/ at rev."""
+    out = git(store, "ls-tree", "--name-only", rev, "openspec/changes/archive/") or ""
+    return sorted(l.rsplit("/", 1)[-1] for l in out.splitlines() if l)
+
+
+def archive_commit_ok(store, commit, name, archived, marker):
+    """The archive commit stages exactly: the removed change directory, the archive directory (plus the
+    marker when `marker`) and the main spec - by file, so nothing else (a stray user file) is in it.
+    `archived` is a regex for the archive directory name. Returns (ok, evidence)."""
+    if not commit:
+        return False, "no archive commit"
+    files = files_of(store, commit)
+    orig = [f for f in (git(store, "ls-tree", "-r", "--name-only", f"{commit}^", f"openspec/changes/{name}/") or "").splitlines() if f]
+    arch = [f for f in files if re.fullmatch(rf"openspec/changes/archive/{archived}/.+", f)]
+    spec = "openspec/specs/greeting/spec.md"
+    extra = [f for f in files if f not in orig and f not in arch and f != spec]
+    has = any(f.endswith("/" + MARKER) for f in arch)
+    ok = bool(orig) and set(orig) <= set(files) and len(arch) == len(orig) + (1 if marker else 0) and spec in files and not extra and has == marker
+    return ok, f"commit={commit} files={files} removed originals={len(orig)} archive files={len(arch)} marker={has} extra={extra}"
+
+
+def marker_text(store, commit):
+    for f in files_of(store, commit):
+        if f.endswith("/" + MARKER):
+            return git(store, "cat-file", "-p", f"{commit}:{f}") or ""  # not `show`: git on Windows fails with "Filename too long" on long sha:path names
+    return None
+
+
+def conflict_left(repo, files):
+    """A merge conflict handed to the user: the merge is in progress with exactly `files` unmerged, or it was
+    aborted (nothing unmerged); either way no conflict markers were committed to main."""
+    in_progress = git(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD") is not None
+    unmerged = sorted((git(repo, "diff", "--name-only", "--diff-filter=U") or "").splitlines())
+    marked = [f for f in files if "<<<<<<<" in (git(repo, "cat-file", "-p", f"main:{f}") or "")]
+    return (unmerged == sorted(files) if in_progress else not unmerged) and not marked, \
+        f"merge in progress={in_progress} unmerged={unmerged} markers committed on main={marked}"
+
+
+def pr_mutations(repo):
+    """gh calls that create or change a pull request or comment (anything but reads)."""
+    out = []
+    for c in gh_calls(repo):
+        a = c["argv"]
+        method = next((a[i + 1].upper() for i, x in enumerate(a[:-1]) if x in ("-X", "--method")), "GET")
+        if (a[:1] == ["pr"] and a[1:2] != ["view"]) or (a[:1] == ["api"] and method != "GET"):
+            out.append(" ".join(a))
+    return out
+
+
+def sentences(rep):
+    return re.split(r"(?<=[.?!])\s+|\n", rep)
+
+
+def check_store_finish(name, repo, code, store, rep):
+    """Store finish evals: the change is fully applied in both repos and the archive ran in the store, uncommitted."""
+    R = []
+    on = lambda r: git(r, "branch", "--show-current")
+    bs = lambda r: (git(r, "branch", "--format=%(refname:short)") or "").splitlines()
+    am = amends(code) + amends(store)
+    no_amend = ("No commit was amended in either repo", not am, f"amend entries={am}")
+    bad_code = [f for f in history_paths(code) if f.startswith(("openspec/changes", "openspec/specs"))]
+    marker_paths = [f for f in history_paths(store) if f.endswith(MARKER)]
+    cn = "add-greeting"
+    no_planning_in_code = ("The code repo has no archive or planning path in its history and no archive commit",
+                           not bad_code and not find_commit(code, f"feat({cn}): archive change"), f"planning paths={bad_code[:5]}")
+
+    if name == "eval-store-finish-local":
+        arch = find_commit(store, f"feat({cn}): archive change")
+        ok, ev = archive_commit_ok(store, arch, cn, rf"{DATE}-{cn}", False)
+        R.append(("The store has an archive commit feat(add-greeting): archive change that stages only the removed change directory, the archive directory and openspec/specs/greeting/spec.md", ok, ev))
+        dirs = archive_dirs(store, "main")
+        R.append(("The archive directory openspec/changes/archive/<date>-add-greeting/ exists on the store's main and the original change directory is gone",
+                  len(dirs) == 1 and bool(re.fullmatch(rf"{DATE}-{cn}", dirs[0])) and git(store, "ls-tree", "main", f"openspec/changes/{cn}") == "",
+                  f"archive dirs={dirs}"))
+        R.append(no_planning_in_code)
+        R.append(("The store's main HEAD is a merge commit with two parents and subject merge: add-greeting",
+                  is_merge_of(store, cn), f"store main={merge_head(store)}"))
+        ts = [int(git(r, "log", "-1", "--format=%ct", "main") or 0) for r in (store, code)]
+        R.append(("The code repo's main HEAD is a merge commit with two parents and subject merge: add-greeting, made after the store's merge",
+                  is_merge_of(code, cn) and ts[1] >= ts[0] > 0, f"code main={merge_head(code)} committer times store/code={ts}"))
+        R.append(("Both repos are on main with only main left, so feat/add-greeting was deleted in each",
+                  on(code) == on(store) == "main" and bs(code) == bs(store) == ["main"], f"code={on(code)} {bs(code)} store={on(store)} {bs(store)}"))
+        ever = git(store, "log", "--all", "--format=%h", "--", "store-notes.txt") or ""
+        R.append(("store-notes.txt was never committed and is still untracked, and the code repo is clean",
+                  not ever and status_of(store) == ["?? store-notes.txt"] and not status_of(code), f"commits={ever!r} store={status_of(store)} code={status_of(code)}"))
+        R.append(("No specwright-change.yaml was written, because the code branch has commits", not marker_paths, f"marker paths={marker_paths}"))
+        hashes = [(git(r, "rev-parse", "--short=7", "main") or "?") for r in (code, store)]
+        pushed = re.search(r"nothing (was )?pushed|not pushed|never push|no push|local only|push [^.\n]*when ready|without push", rep)
+        R.append(("The report names the code repo and the store, both merge commits, and says nothing was pushed",
+                  "code" in rep and "store" in rep and all(h in rep for h in hashes) and bool(pushed),
+                  f"hashes={hashes} pushed={pushed.group(0) if pushed else None} report excerpt={rep[-240:]!r}"))
+        R.append(no_amend)
+
+    elif name in ("eval-store-finish-planning-only", "eval-store-finish-dated"):
+        dated = name.endswith("dated")
+        cn = "2026-10-07-add-greeting" if dated else "add-greeting"
+        arch = find_commit(store, f"feat({cn}): archive change")
+        ok, ev = archive_commit_ok(store, arch, cn, re.escape(cn) if dated else rf"{DATE}-{cn}", True)
+        text = marker_text(store, arch) if arch else None
+        has = text is not None and bool(re.search(r"^code_changes:\s*none\s*$", text, re.M))
+        R.append((f"The store's archive commit feat({cn}): archive change stages only archive paths and includes {MARKER} with code_changes: none inside the archive directory",
+                  ok and has, f"{ev} marker text={text!r}"))
+        dirs = archive_dirs(store, "main")
+        gone = git(store, "ls-tree", "main", f"openspec/changes/{cn}") == ""
+        if dated:
+            R.append(("The archive directory is exactly openspec/changes/archive/2026-10-07-add-greeting/ with no second date prefix, and the original change directory is gone",
+                      dirs == [cn] and gone, f"archive dirs={dirs}"))
+        else:
+            R.append(("The archive directory openspec/changes/archive/<date>-add-greeting/ exists on the store's main and the original change directory is gone",
+                      len(dirs) == 1 and bool(re.fullmatch(rf"{DATE}-{cn}", dirs[0])) and gone, f"archive dirs={dirs}"))
+        R.append((f"The store's main HEAD is a merge commit with two parents and subject merge: {cn}, and the store is on main with only main left",
+                  is_merge_of(store, cn) and on(store) == "main" and bs(store) == ["main"], f"store main={merge_head(store)} {on(store)} {bs(store)}"))
+        R.append(("The code repo's main is unchanged: no merge commit and no new commit",
+                  subjects(code, "--all") == [INITIAL], f"code commits={subjects(code, '--all')}"))
+        R.append((f"The empty code branch feat/{cn} was deleted and the code repo is on main",
+                  on(code) == "main" and bs(code) == ["main"], f"code={on(code)} {bs(code)}"))
+        R.append(("Both working trees are clean", not status_of(code) and not status_of(store), f"code={status_of(code)} store={status_of(store)}"))
+        if dated:
+            doubled = re.search(rf"{DATE}-2026-10-07", rep) or [p for p in history_paths(store) if re.search(rf"archive/{DATE}-2026-10-07", p)]
+            R.append(("The report names the archive directory 2026-10-07-add-greeting and no doubled date prefix",
+                      "2026-10-07-add-greeting" in rep and not doubled, f"doubled={doubled!r}"))
+        else:
+            R.append(no_planning_in_code)
+            nocode = re.search(r"no code (changes|commits|work)|planning-only|planning only|without code|had no code", rep)
+            R.append(("The report says the change had no code changes and names the store's merge commit",
+                      bool(nocode) and (git(store, "rev-parse", "--short=7", "main") or "?") in rep,
+                      f"match={nocode.group(0) if nocode else None} report excerpt={rep[-240:]!r}"))
+        R.append(no_amend)
+
+    elif name == "eval-store-finish-store-conflict":
+        spec = "openspec/specs/greeting/spec.md"
+        arch = find_commit(store, f"feat({cn}): archive change", "main..feat/add-greeting")
+        ok, ev = archive_commit_ok(store, arch, cn, rf"{DATE}-{cn}", False)
+        R.append(("The store's archive commit feat(add-greeting): archive change is on feat/add-greeting, staged by file, and not on main", ok, ev))
+        R.append(("The store's main still ends at the conflicting commit docs(greeting): add greeting spec on main with no merge commit, and feat/add-greeting still exists in the store",
+                  merge_head(store) == (1, CONFLICT_COMMIT["store"]) and "feat/add-greeting" in bs(store), f"store main={merge_head(store)} branches={bs(store)}"))
+        ok, ev = conflict_left(store, [spec])
+        R.append((f"The conflict was left for the user: the store merge is in progress with only {spec} unmerged, or it was aborted, and no conflict markers were committed", ok, ev))
+        R.append(("The code repo is not merged: it is still on feat/add-greeting, main has only the initial commit and no merge commit, and the tree is clean",
+                  on(code) == "feat/add-greeting" and subjects(code, "main") == [INITIAL] and not status_of(code),
+                  f"code={on(code)} main={subjects(code, 'main')} status={status_of(code)}"))
+        R.append(("The report lists openspec/specs/greeting/spec.md as conflicting and offers manual resolution or git merge --abort",
+                  spec in rep and "abort" in rep and "resol" in rep, f"report excerpt={rep[-240:]!r}"))
+        left = any("code" in x and re.search(r"not (been )?(yet )?merged|unmerged|no merge|not merge|left|untouched|stopp|did not|didn't|nothing", x) for x in sentences(rep))
+        R.append(("The report says the code repo was left unmerged on feat/add-greeting", left and "feat/add-greeting" in rep, f"left={left}"))
+        R.append(no_amend)
+
+    elif name == "eval-store-finish-code-conflict":
+        arch = find_commit(store, f"feat({cn}): archive change", "main")
+        ok, ev = archive_commit_ok(store, arch, cn, rf"{DATE}-{cn}", False)
+        R.append(("The store's archive commit feat(add-greeting): archive change is on the store's main, staged by file", ok, ev))
+        R.append(("The store's main HEAD is a merge commit with two parents and subject merge: add-greeting, and the store's working tree is clean",
+                  is_merge_of(store, cn) and not status_of(store), f"store main={merge_head(store)} status={status_of(store)}"))
+        R.append(("The code repo's main still ends at the conflicting commit feat: add formal greeting with no merge commit, and feat/add-greeting still exists in the code repo",
+                  merge_head(code) == (1, CONFLICT_COMMIT["code"]) and "feat/add-greeting" in bs(code), f"code main={merge_head(code)} branches={bs(code)}"))
+        ok, ev = conflict_left(code, ["greet.py"])
+        R.append(("The conflict was left for the user: the code merge is in progress with only greet.py unmerged, or it was aborted, and no conflict markers were committed", ok, ev))
+        sents = sentences(rep)
+        store_has = any("store" in x and re.search(r"merged|has the change|contains the change|landed", x) for x in sents)
+        code_not = any("code" in x and re.search(r"not (yet )?(been )?merged|unmerged|does not (have|contain)|doesn't (have|contain)|without the change|conflict", x) for x in sents)
+        R.append(("The report lists greet.py as conflicting and says the store's main has the change while the code repo does not",
+                  "greet.py" in rep and store_has and code_not, f"greet.py={'greet.py' in rep} store has change={store_has} code does not={code_not} report excerpt={rep[-300:]!r}"))
+        R.append(no_amend)
+
+    else:  # eval-store-archive-on-main, eval-store-archive-on-main-pr-open
+        pr_open = name.endswith("pr-open")
+        branch = "chore/archive-add-greeting"
+        direct = (git(store, "log", "--first-parent", "--no-merges", "--format=%s", "main") or "").splitlines()
+        R.append(("No commit was made directly on the store's main: its non-merge commits are the fixture's",
+                  direct == STORE_MAIN, f"main non-merge first-parent commits={direct}"))
+        arch = None
+        for line in (git(store, "log", "--all", "--format=%H%x09%s") or "").splitlines():
+            h, _, subj = line.partition("\t")
+            if re.fullmatch(rf"\w+\({cn}\): archive change", subj):
+                arch = h
+                break
+        if arch:
+            ok, ev = archive_commit_ok(store, arch, cn, rf"{DATE}-{cn}", False)
+            ev = f"branches containing it={git(store, 'branch', '--all', '--contains', arch)!r}; {ev}"
+        else:
+            pending = status_of(store)
+            ok = any(l.startswith("?? openspec/changes/archive/") for l in pending) and asks_about(rep, re.escape(branch)) and on(store) == "main"
+            ev = f"no archive commit; store on {on(store)} status={pending[:3]}"
+        R.append((f"The archive is carried on {branch} in the store, staged by file, or is still uncommitted on main with the report offering that branch", ok, ev))
+        R.append(("No specwright-change.yaml was written in the store, in history or in the working tree",
+                  not marker_paths and not list(store.glob(f"openspec/changes/archive/*/{MARKER}")), f"marker paths={marker_paths}"))
+        if pr_open:
+            R.append(("The code repo is untouched: still on feat/add-greeting with its task commits, main has only the initial commit, and the tree is clean",
+                      on(code) == "feat/add-greeting" and bs(code) == ["feat/add-greeting", "main"] and subjects(code, "main") == [INITIAL]
+                      and count_all(code) == 4 and not status_of(code), f"code={on(code)} {bs(code)} commits={count_all(code)} status={status_of(code)}"))
+            try:
+                pulls = json.loads((repo / "gh-state.json").read_text(encoding="utf-8"))["repos"]["acme/greeter"]["pulls"]
+            except (OSError, ValueError, KeyError):
+                pulls = None
+            R.append(("No gh call created or changed a pull request, and the open code PR is still the only PR, open and unchanged",
+                      not pr_mutations(repo) and pulls is not None and len(pulls) == 1 and pulls[0]["state"] == "open" and pulls[0]["body"] == "Adds greet and farewell.",
+                      f"mutating calls={pr_mutations(repo)} pulls={[(p['number'], p['state']) for p in pulls or []]}"))
+            R.append(("The report says the code PR is still open",
+                      any(re.search(r"\bpr\b|pull request|#7", x) and "open" in x for x in sentences(rep)), f"report excerpt={rep[-240:]!r}"))
+        else:
+            R.append(("The code repo is untouched: on main with only main, no new commit, and the tree is clean",
+                      on(code) == "main" and bs(code) == ["main"] and count_all(code) == 5 and is_merge_of(code, cn) and not status_of(code),
+                      f"code={on(code)} {bs(code)} commits={count_all(code)} status={status_of(code)}"))
+        R.append((f"The report names the recovery branch {branch}", branch in rep, f"report excerpt={rep[-240:]!r}"))
+        R.append(no_amend)
     return R
 
 

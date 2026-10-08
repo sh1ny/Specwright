@@ -133,7 +133,7 @@ Test kinds:
 
 ## 5. Finish: archive, planning-only marker, local merge (D5 local part, D2 archive rule)
 
-- [ ] 5.1 Add agent evals `eval-store-finish-local`, `-dated`, `-planning-only`, `-store-conflict`, `-code-conflict`, `eval-store-archive-on-main` and `-archive-on-main-pr-open`; the last one uses a fake-gh open code PR. Confirm they fail against the current `specwright-finish`.
+- [x] 5.1 Add agent evals `eval-store-finish-local`, `-dated`, `-planning-only`, `-store-conflict`, `-code-conflict`, `eval-store-archive-on-main` and `-archive-on-main-pr-open`; the last one uses a fake-gh open code PR. Confirm they fail against the current `specwright-finish`.
 - [ ] 5.2 Update `specwright-finish`:
   - the archive commit goes in the store, staged by file, with the archive directory found by the archive-name rule (`archivedAs` when available);
   - the planning-only test (no code commits and no code PR in any state; a failed lookup writes no marker and stops) and the `specwright-change.yaml` marker;

@@ -8,6 +8,7 @@ Store fixtures (eval-store-*) make <dest>/code and <dest>/store instead, plus
 working directory: it points the OpenSpec registry and config and the
 Specwright state at <dest>, so the user's real ones are never touched.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -64,11 +65,11 @@ def msys(p):
     return f"/{s[0].lower()}{s[2:]}" if s[1:2] == ":" else s
 
 
-def openspec(dest, *args):
-    """Run the openspec CLI against the fixture's isolated registry and config."""
+def openspec(dest, *args, cwd=None):
+    """Run the openspec CLI against the fixture's isolated registry and config (from `cwd`, default dest)."""
     env = {**os.environ, "XDG_DATA_HOME": posix(dest / "xdg-data"), "XDG_CONFIG_HOME": posix(dest / "xdg-config"),
            "OPENSPEC_TELEMETRY": "0"}
-    subprocess.run([shutil.which("openspec") or "openspec", *args], cwd=dest, env=env, check=True, capture_output=True, text=True)
+    subprocess.run([shutil.which("openspec") or "openspec", *args], cwd=cwd or dest, env=env, check=True, capture_output=True, text=True)
 
 
 def env_file(dest, **extra):
@@ -159,7 +160,8 @@ def nested_base(dest, store_id="team-plans"):
 CHANGE = "openspec/changes/add-greeting"
 
 
-def change_artifacts(repo):
+def change_artifacts(repo, name="add-greeting"):
+    CHANGE = f"openspec/changes/{name}"  # shadows the module constant for other names
     write(repo, f"{CHANGE}/.openspec.yaml", "schema: specwright\ncreated: 2026-10-07\n")
     write(repo, f"{CHANGE}/proposal.md", "## Why\n\nUsers need friendly greetings.\n\n## What Changes\n\n- Add `greet` and `farewell`.\n\n## Capabilities\n\n### New Capabilities\n- `greeting`: greeting and farewell messages\n\n## Impact\n\n`greet.py`, `README.md`.\n")
     write(repo, f"{CHANGE}/specs/greeting/spec.md", "# Spec Delta\n\n## Purpose\n\nProduces greeting and farewell messages for a named person.\n\n## ADDED Requirements\n\n### Requirement: Greeting\nThe system SHALL return `Hello, <name>!` for a non-empty name.\n\n#### Scenario: Named greeting\n- **WHEN** greet is called with `Ada`\n- **THEN** it returns `Hello, Ada!`\n\n#### Scenario: Empty name\n- **WHEN** greet is called with an empty string\n- **THEN** it raises ValueError\n\n### Requirement: Farewell\nThe system SHALL return `Goodbye, <name>!` for a non-empty name.\n\n#### Scenario: Named farewell\n- **WHEN** farewell is called with `Ada`\n- **THEN** it returns `Goodbye, Ada!`\n\n#### Scenario: Empty farewell name\n- **WHEN** farewell is called with an empty string\n- **THEN** it raises ValueError\n")
@@ -268,6 +270,69 @@ def gate_lock(store, when, change="other-change", checkout="C:/elsewhere/code"):
                                 encoding="utf-8", newline="\n")
 
 
+def archive_change(dest, name):
+    """Run the real `openspec archive` in the store, as the vanilla archive workflow does: the change
+    directory moves into openspec/changes/archive/ and the delta syncs into openspec/specs/, uncommitted.
+    A name without a date prefix is archived as <today>-<name>, so graders match the date by pattern."""
+    openspec(dest, "archive", name, "--yes", cwd=dest / "store")
+
+
+def finish_ready(dest, name="add-greeting", code_work=True):
+    """store_base, both repos on feat/<name>, the planning artifacts committed in the store and
+    every task done. code_work: each task is a code commit plus a store tick commit (done_pair);
+    otherwise the change is planning-only: the code branch has no commit and the store ticks every task
+    in one commit. Both trees are clean; the archive has not run."""
+    code, store = dest / "code", dest / "store"
+    store_base(dest)
+    for r in (code, store):
+        git(r, "checkout", "-q", "-b", f"feat/{name}")
+    change_artifacts(store, name)
+    git(store, "add", "-A")
+    git(store, "commit", "-q", "-m", f"feat({name}): add planning artifacts")
+    if code_work:
+        for t in ("1.1", "1.2", "2.1"):
+            done_pair(dest, t)
+    else:
+        tasks = store / f"openspec/changes/{name}/tasks.md"
+        write(store, f"openspec/changes/{name}/tasks.md", tasks.read_text(encoding="utf-8").replace("- [ ]", "- [x]").replace("| red |", "| green |"))
+        git(store, "add", "-A")
+        git(store, "commit", "-q", "-m", f"feat({name}): complete planning tasks")
+
+
+def diverge_main(repo, rel, text, subject, branch="feat/add-greeting"):
+    """A commit on main that conflicts with the change branch, which has not touched `rel` the same way;
+    the repo ends up back on `branch` with a clean tree."""
+    git(repo, "checkout", "-q", "main")
+    write(repo, rel, text)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", subject)
+    git(repo, "checkout", "-q", branch)
+
+
+CONFLICT_SPEC = "# greeting Specification\n\n## Purpose\n\nGreetings, as another team wrote them first.\n\n## Requirements\n\n### Requirement: Salutation\nThe system SHALL open every message with `Dear <name>,`.\n\n#### Scenario: Salutation\n- **WHEN** a message is written for `Ada`\n- **THEN** it starts with `Dear Ada,`\n"
+CONFLICT_STORE = "docs(greeting): add greeting spec on main"
+CONFLICT_CODE = "feat: add formal greeting"
+PR_SLUG = "acme/greeter"
+
+
+def merge_into_main(repo, branch="feat/add-greeting", name="add-greeting"):
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "-q", "--no-ff", branch, "-m", f"merge: {name}")
+    git(repo, "branch", "-q", "-d", branch)
+
+
+def open_code_pr(dest, code):
+    """The code PR for feat/add-greeting is open on GitHub (fake gh): origin names the repo, the state holds the PR."""
+    git(code, "remote", "add", "origin", f"https://github.com/{PR_SLUG}.git")
+    install_fake_gh(dest)
+    pr = {"number": 7, "html_url": f"https://github.com/{PR_SLUG}/pull/7", "state": "open", "merged_at": None,
+          "title": "feat(add-greeting): add greet and farewell", "body": "Adds greet and farewell.",
+          "head": {"ref": "feat/add-greeting", "label": "acme:feat/add-greeting", "repo": {"full_name": PR_SLUG}},
+          "base": {"ref": "main"}}
+    st = {"user": "eval-bot", "tokens": {"eval-bot": "eval-token"}, "repos": {PR_SLUG: {"default_branch": "main", "pulls": [pr]}}}
+    write(dest, "gh-state.json", json.dumps(st, indent=2))
+
+
 def build_store(name, dest):
     """Fixtures whose planning lives outside the code repo (or in a folder inside it)."""
     code, store = dest / "code", dest / "store"
@@ -330,6 +395,34 @@ def build_store(name, dest):
         store_base(dest, store_worktree=True)  # the store is the `plans` worktree of the code repo
         git(code, "checkout", "-q", "-b", "feat/add-greeting")
         change_artifacts(store)
+    elif name == "eval-store-finish-local":
+        finish_ready(dest)
+        write(store, "store-notes.txt", "personal notes - not part of the change\n")
+        archive_change(dest, "add-greeting")
+    elif name == "eval-store-finish-dated":
+        finish_ready(dest, "2026-10-07-add-greeting", code_work=False)  # planning-only and date-prefixed
+        archive_change(dest, "2026-10-07-add-greeting")
+    elif name == "eval-store-finish-planning-only":
+        finish_ready(dest, code_work=False)
+        archive_change(dest, "add-greeting")
+    elif name == "eval-store-finish-store-conflict":
+        finish_ready(dest)
+        diverge_main(store, "openspec/specs/greeting/spec.md", CONFLICT_SPEC, CONFLICT_STORE)
+        archive_change(dest, "add-greeting")
+    elif name == "eval-store-finish-code-conflict":
+        finish_ready(dest)
+        diverge_main(code, "greet.py", '"""Greeting helpers."""\n\n\ndef greet(name):\n    return "Dear " + name + ","\n', CONFLICT_CODE)
+        archive_change(dest, "add-greeting")
+    elif name == "eval-store-archive-on-main":
+        finish_ready(dest)  # both branches merged into main, then the archive ran with the store on main
+        for r in (code, store):
+            merge_into_main(r)
+        archive_change(dest, "add-greeting")
+    elif name == "eval-store-archive-on-main-pr-open":
+        finish_ready(dest)  # the store's change is merged; the code PR is still open on feat/add-greeting
+        merge_into_main(store)
+        open_code_pr(dest, code)
+        archive_change(dest, "add-greeting")
     elif name == "eval-nested-root-finish":
         nested_base(dest)
         finished(code, code / "planning")

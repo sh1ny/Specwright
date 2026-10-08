@@ -359,6 +359,137 @@
         "The report does not ask whether any task was a no-op",
         "No commit was amended in either repo"
       ]
+    },
+    {
+      "id": 22,
+      "name": "eval-store-finish-local",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "Store-backed change, fully applied, archive just ran in the store: commits the archive in the store (staged by file, leaving the user's store-notes.txt alone), then merges the store and the code repo into their mains with --no-ff in that order, deletes both branches, writes no planning-only marker, pushes nothing and names both repos and both merge commits.",
+      "assertions": [
+        "The store has an archive commit feat(add-greeting): archive change that stages only the removed change directory, the archive directory and openspec/specs/greeting/spec.md",
+        "The archive directory openspec/changes/archive/<date>-add-greeting/ exists on the store's main and the original change directory is gone",
+        "The code repo has no archive or planning path in its history and no archive commit",
+        "The store's main HEAD is a merge commit with two parents and subject merge: add-greeting",
+        "The code repo's main HEAD is a merge commit with two parents and subject merge: add-greeting, made after the store's merge",
+        "Both repos are on main with only main left, so feat/add-greeting was deleted in each",
+        "store-notes.txt was never committed and is still untracked, and the code repo is clean",
+        "No specwright-change.yaml was written, because the code branch has commits",
+        "The report names the code repo and the store, both merge commits, and says nothing was pushed",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 23,
+      "name": "eval-store-finish-dated",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for 2026-10-07-add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "The change name already starts with a date and has no code commits: finds the archive under its exact name (no second date prefix), writes specwright-change.yaml with code_changes: none into it as part of the store's archive commit, merges the store with --no-ff, leaves the code main unchanged and deletes the empty code branch with -d.",
+      "assertions": [
+        "The store's archive commit feat(2026-10-07-add-greeting): archive change stages only archive paths and includes specwright-change.yaml with code_changes: none inside the archive directory",
+        "The archive directory is exactly openspec/changes/archive/2026-10-07-add-greeting/ with no second date prefix, and the original change directory is gone",
+        "The store's main HEAD is a merge commit with two parents and subject merge: 2026-10-07-add-greeting, and the store is on main with only main left",
+        "The code repo's main is unchanged: no merge commit and no new commit",
+        "The empty code branch feat/2026-10-07-add-greeting was deleted and the code repo is on main",
+        "Both working trees are clean",
+        "The report names the archive directory 2026-10-07-add-greeting and no doubled date prefix",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 24,
+      "name": "eval-store-finish-planning-only",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "The code branch has no commits: the store's archive commit carries specwright-change.yaml (code_changes: none) inside the archive directory, the store merges into main with --no-ff, the code main does not change, the empty code branch is deleted with -d and the report says the change had no code changes.",
+      "assertions": [
+        "The store's archive commit feat(add-greeting): archive change stages only archive paths and includes specwright-change.yaml with code_changes: none inside the archive directory",
+        "The archive directory openspec/changes/archive/<date>-add-greeting/ exists on the store's main and the original change directory is gone",
+        "The store's main HEAD is a merge commit with two parents and subject merge: add-greeting, and the store is on main with only main left",
+        "The code repo's main is unchanged: no merge commit and no new commit",
+        "The empty code branch feat/add-greeting was deleted and the code repo is on main",
+        "Both working trees are clean",
+        "The code repo has no archive or planning path in its history and no archive commit",
+        "The report says the change had no code changes and names the store's merge commit",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 25,
+      "name": "eval-store-finish-store-conflict",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "Store main gained a conflicting greeting spec after the branch point: commits the archive on the store branch, the store merge conflicts, so it stops, lists the conflicting store file, offers manual resolution or git merge --abort, never resolves the conflict itself and leaves the code repo unmerged on its change branch.",
+      "assertions": [
+        "The store's archive commit feat(add-greeting): archive change is on feat/add-greeting, staged by file, and not on main",
+        "The store's main still ends at the conflicting commit docs(greeting): add greeting spec on main with no merge commit, and feat/add-greeting still exists in the store",
+        "The conflict was left for the user: the store merge is in progress with only openspec/specs/greeting/spec.md unmerged, or it was aborted, and no conflict markers were committed",
+        "The code repo is not merged: it is still on feat/add-greeting, main has only the initial commit and no merge commit, and the tree is clean",
+        "The report lists openspec/specs/greeting/spec.md as conflicting and offers manual resolution or git merge --abort",
+        "The report says the code repo was left unmerged on feat/add-greeting",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 26,
+      "name": "eval-store-finish-code-conflict",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "The store merges cleanly but code main gained a conflicting greet.py: stops at the code conflict without resolving it, keeps the store merge, lists greet.py and reports the split state (the store's main has the change, the code repo does not).",
+      "assertions": [
+        "The store's archive commit feat(add-greeting): archive change is on the store's main, staged by file",
+        "The store's main HEAD is a merge commit with two parents and subject merge: add-greeting, and the store's working tree is clean",
+        "The code repo's main still ends at the conflicting commit feat: add formal greeting with no merge commit, and feat/add-greeting still exists in the code repo",
+        "The conflict was left for the user: the code merge is in progress with only greet.py unmerged, or it was aborted, and no conflict markers were committed",
+        "The report lists greet.py as conflicting and says the store's main has the change while the code repo does not",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 27,
+      "name": "eval-store-archive-on-main",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "Archive ran while the store was on main (both branches were already merged): makes no commit directly on the store's main, carries the archive on chore/archive-add-greeting in the store (or offers it), writes no planning-only marker, touches no code repo state and names the recovery branch.",
+      "assertions": [
+        "No commit was made directly on the store's main: its non-merge commits are the fixture's",
+        "The archive is carried on chore/archive-add-greeting in the store, staged by file, or is still uncommitted on main with the report offering that branch",
+        "No specwright-change.yaml was written in the store, in history or in the working tree",
+        "The code repo is untouched: on main with only main, no new commit, and the tree is clean",
+        "The report names the recovery branch chore/archive-add-greeting",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 28,
+      "name": "eval-store-archive-on-main-pr-open",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "I just ran /opsx:archive for add-greeting and it completed successfully. Finish it up.",
+      "expected_output": "Archive ran with the store on main while the code PR (#7) is still open: carries the archive on chore/archive-add-greeting in the store (or offers it) with no specwright-change.yaml, makes no code branch or PR for it, does not touch the open code PR or the code branches, and says the code PR is still open.",
+      "assertions": [
+        "No commit was made directly on the store's main: its non-merge commits are the fixture's",
+        "The archive is carried on chore/archive-add-greeting in the store, staged by file, or is still uncommitted on main with the report offering that branch",
+        "No specwright-change.yaml was written in the store, in history or in the working tree",
+        "The code repo is untouched: still on feat/add-greeting with its task commits, main has only the initial commit, and the tree is clean",
+        "No gh call created or changed a pull request, and the open code PR is still the only PR, open and unchanged",
+        "The report says the code PR is still open",
+        "The report names the recovery branch chore/archive-add-greeting",
+        "No commit was amended in either repo"
+      ]
     }
   ]
 }
