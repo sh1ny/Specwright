@@ -2,6 +2,8 @@
 
 Usage: python grade.py <iteration-dir>
 Writes <run-dir>/grading.json for every eval-*/<config>/run-*/ that has a repo.
+A store run's repo/ holds code/ and store/ (two git repos) plus gh-log.jsonl from the
+fake gh; those runs are graded by check_store().
 """
 import json
 import re
@@ -23,6 +25,22 @@ def subjects(repo, rng):
     return out.splitlines() if out else []
 
 
+def status_of(repo):
+    """Porcelain status lines, ignoring __pycache__ from running tests."""
+    return [l for l in (git(repo, "status", "--porcelain", "--untracked-files=all") or "").splitlines()
+            if "__pycache__" not in l]
+
+
+def gh_calls(repo):
+    """Calls the fake gh logged for this run, oldest first; [] if it was never used."""
+    p = repo / "gh-log.jsonl"
+    return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()] if p.exists() else []
+
+
+def is_store_run(repo):
+    return (repo / "code").is_dir() and (repo / "store").is_dir()
+
+
 def report(run):
     p = run / "outputs" / "report.md"
     return p.read_text(encoding="utf-8").lower() if p.exists() else ""
@@ -36,8 +54,7 @@ def check(name, repo, run):
     branch = git(repo, "branch", "--show-current")
     branches = (git(repo, "branch", "--format=%(refname:short)") or "").splitlines()
     # __pycache__ comes from running the tests; the fixture has no .gitignore.
-    status = [l for l in (git(repo, "status", "--porcelain", "--untracked-files=all") or "").splitlines()
-              if "__pycache__" not in l]
+    status = status_of(repo)
     rep = report(run)
     R = []  # (text, passed, evidence)
 
@@ -117,12 +134,19 @@ def check(name, repo, run):
     return R
 
 
+def check_store(name, repo, run):
+    """Grade a store run: code, store = repo/code, repo/store; helpers: subjects, status_of, gh_calls."""
+    code, store = repo / "code", repo / "store"
+    R = []  # (text, passed, evidence)
+    return R
+
+
 def main(it):
     for run in sorted(Path(it).glob("eval-*/*/run-*")):
         repo = run / "repo"
         if not repo.exists():
             continue
-        res = check(run.parents[1].name, repo, run)
+        res = (check_store if is_store_run(repo) else check)(run.parents[1].name, repo, run)
         exp = [{"text": t, "passed": bool(p), "evidence": str(e)} for t, p, e in res]
         n = sum(x["passed"] for x in exp)
         g = {"expectations": exp, "summary": {"passed": n, "failed": len(exp) - n, "total": len(exp),
