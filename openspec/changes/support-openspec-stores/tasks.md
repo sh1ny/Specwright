@@ -8,7 +8,7 @@ Test kinds:
 
 | Requirement | Scenario | Test file | Test name | State |
 |---|---|---|---|---|
-| planning-stores → Planning root comes from OpenSpec | Store selected by a project pointer | evals/git-workflow/evals.json | eval-store-apply | red |
+| planning-stores → Planning root comes from OpenSpec | Store selected by a project pointer | evals/git-workflow/evals.json | eval-store-apply | green |
 | planning-stores → Planning root comes from OpenSpec | Repo-local project is unchanged | evals/git-workflow/evals.json | eval-apply-three-tasks, eval-finish-local, eval-branch-clean-main (new check: only the code repo changed) | green |
 | planning-stores → Planning root comes from OpenSpec | Root found after archive | evals/git-workflow/evals.json | eval-store-finish-local | red |
 | planning-stores → Planning root comes from OpenSpec | Date-prefixed change name found after archive | evals/git-workflow/evals.json | eval-store-finish-dated | red |
@@ -21,16 +21,16 @@ Test kinds:
 | planning-stores → Store branch mirrors the code branch | Store checkout busy with another change | evals/git-workflow/evals.json | eval-store-branch-busy | green |
 | planning-stores → The store gate is exclusive | Two sessions start changes against one store at once | evals/git-workflow/evals.json | eval-store-branch-locked (the fixture holds the lock as the other session; the race itself is the atomic `mkdir`) | green |
 | planning-stores → The store gate is exclusive | Gate lock left by an interrupted session | evals/git-workflow/evals.json | eval-store-branch-stale-lock | green |
-| planning-stores → Planning commits go to the store | Planning artifacts committed before the first task | evals/git-workflow/evals.json | eval-store-apply | red |
-| planning-stores → Planning commits go to the store | Task commit for a store-backed change | evals/git-workflow/evals.json | eval-store-apply | red |
-| planning-stores → Planning commits go to the store | Store on the wrong branch | evals/git-workflow/evals.json | eval-store-apply-wrong-branch | red |
-| planning-stores → Task commit pairs are reconciled before new work | Normal code task | evals/git-workflow/evals.json | eval-store-apply (check: no no-op question in the report) | red |
-| planning-stores → Task commit pairs are reconciled before new work | Store commit failed, apply resumes | evals/git-workflow/evals.json | eval-store-apply-reconcile | red |
-| planning-stores → Task commit pairs are reconciled before new work | Reconciliation cannot isolate the tick | evals/git-workflow/evals.json | eval-store-apply-multi-gap | red |
-| planning-stores → A tick without a code commit is confirmed | Restart before a task's code commit | evals/git-workflow/evals.json | eval-store-apply-orphan-tick | red |
-| planning-stores → A tick without a code commit is confirmed | No-op task's store commit failed | evals/git-workflow/evals.json | eval-store-apply-noop-gap | red |
-| planning-stores → Completion check covers both repos | All tasks committed in both repos | evals/git-workflow/evals.json | eval-store-apply | red |
-| planning-stores → Completion check covers both repos | Store has uncommitted tasks.md | evals/git-workflow/evals.json | eval-store-complete-gap | red |
+| planning-stores → Planning commits go to the store | Planning artifacts committed before the first task | evals/git-workflow/evals.json | eval-store-apply | green |
+| planning-stores → Planning commits go to the store | Task commit for a store-backed change | evals/git-workflow/evals.json | eval-store-apply | green |
+| planning-stores → Planning commits go to the store | Store on the wrong branch | evals/git-workflow/evals.json | eval-store-apply-wrong-branch | green |
+| planning-stores → Task commit pairs are reconciled before new work | Normal code task | evals/git-workflow/evals.json | eval-store-apply (check: no no-op question in the report) | green |
+| planning-stores → Task commit pairs are reconciled before new work | Store commit failed, apply resumes | evals/git-workflow/evals.json | eval-store-apply-reconcile | green |
+| planning-stores → Task commit pairs are reconciled before new work | Reconciliation cannot isolate the tick | evals/git-workflow/evals.json | eval-store-apply-multi-gap | green |
+| planning-stores → A tick without a code commit is confirmed | Restart before a task's code commit | evals/git-workflow/evals.json | eval-store-apply-orphan-tick | green |
+| planning-stores → A tick without a code commit is confirmed | No-op task's store commit failed | evals/git-workflow/evals.json | eval-store-apply-noop-gap | green |
+| planning-stores → Completion check covers both repos | All tasks committed in both repos | evals/git-workflow/evals.json | eval-store-apply | green |
+| planning-stores → Completion check covers both repos | Store has uncommitted tasks.md | evals/git-workflow/evals.json | eval-store-complete-gap | green |
 | planning-stores → Planning-only changes are recorded in the archive | Planning-only archive | evals/git-workflow/evals.json | eval-store-finish-planning-only | red |
 | planning-stores → Planning-only changes are recorded in the archive | Planning-only archive of a date-prefixed change | evals/git-workflow/evals.json | eval-store-finish-dated | red |
 | planning-stores → Planning-only changes are recorded in the archive | Code work appears after the marker | evals/pr-pair/test_pr_pair.py | test_pass_plan_removes_marker_before_code_fix | red |
@@ -122,7 +122,7 @@ Test kinds:
 ## 4. Planning and task commits (D4)
 
 - [x] 4.1 Add agent evals `eval-store-apply-wrong-branch`, `-reconcile`, `-multi-gap`, `-orphan-tick`, `-noop-gap` and `eval-store-complete-gap`. Confirm they fail for the expected reason.
-- [ ] 4.2 Rewrite the store parts of `specwright-commit`:
+- [x] 4.2 Rewrite the store parts of `specwright-commit`:
   - planning and drift commits go in the store, by path, on the store branch, with a branch check fused into the same shell call;
   - task pairs: code commit first, then the store tick with the same subject;
   - reconcile before any tick or commit, excluding the task this session is committing now;
