@@ -276,6 +276,17 @@ class Context(Base):
         self.assertEqual(c["max_fix_rounds"], 3)
         self.assertEqual(c["code"]["reviewers"]["kody-ai"]["role"], "advisory")
 
+    def test_context_decodes_quoted_scalars(self):
+        # quoted values are decoded as YAML does: escapes in double quotes, '' in single quotes
+        self.settings("github:\n  login: 'sh1ny'\n"
+                      "planning_store:\n  validate: 'echo ''ok'' # still the value'\n"
+                      "pr:\n  validate: \"python -c \\\"print('ok')\\\" # not a comment\\tdone\\x21\"\n"
+                      "  reviewers:\n    chatgpt-codex-connector: { role: required, request: \"@codex \\\"review, now\\\"\" }\n")
+        c = self.pp("context", "--code", self.code, "--store", self.store)
+        self.assertEqual(c["code"]["validate"], "python -c \"print('ok')\" # not a comment\tdone!")
+        self.assertEqual(c["store"]["validate"], "echo 'ok' # still the value")
+        self.assertEqual(c["code"]["reviewers"]["chatgpt-codex-connector"]["request"], "@codex \"review, now\"")
+
 
 # =======================================================================================================
 class Discover(Base):

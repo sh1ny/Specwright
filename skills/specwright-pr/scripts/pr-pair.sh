@@ -177,10 +177,14 @@ def need(a, *names):
 
 # ---- a small YAML reader: maps, scalars, flow maps/lists, comments (all specwright.yaml uses) ------------------
 def strip_comment(s):
-    q = None
+    q, esc = None, False
     for i, ch in enumerate(s):
-        if q:
-            if ch == q:
+        if esc:
+            esc = False
+        elif q:
+            if q == '"' and ch == "\\":
+                esc = True
+            elif ch == q:
                 q = None
         elif ch in "\"'":
             q = ch
@@ -190,10 +194,14 @@ def strip_comment(s):
 
 
 def split_top(s, sep=","):
-    parts, depth, q, cur = [], 0, None, ""
+    parts, depth, q, esc, cur = [], 0, None, False, ""
     for ch in s:
-        if q:
-            if ch == q:
+        if esc:
+            esc = False
+        elif q:
+            if q == '"' and ch == "\\":
+                esc = True
+            elif ch == q:
                 q = None
         elif ch in "\"'":
             q = ch
@@ -224,7 +232,7 @@ def scalar(v):
     if v[0] == "[" and v[-1] == "]":
         return [scalar(p) for p in split_top(v[1:-1])]
     if v[0] in "\"'" and v[-1] == v[0] and len(v) >= 2:
-        return v[1:-1]
+        return unquote(v)
     if v.lower() in ("true", "yes"):
         return True
     if v.lower() in ("false", "no"):
@@ -236,8 +244,22 @@ def scalar(v):
     return v
 
 
+YAML_ESCAPES = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n", "v": "\v", "f": "\f", "r": "\r",
+                "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", "N": "\x85", "_": "\xa0", "L": " ", "P": " "}
+
+
 def unquote(k):
-    return k[1:-1] if len(k) >= 2 and k[0] in "\"'" and k[-1] == k[0] else k
+    """Strip a scalar's quotes and decode them as YAML does: `''` in single quotes, backslash escapes in double."""
+    if len(k) < 2 or k[0] not in "\"'" or k[-1] != k[0]:
+        return k
+    body = k[1:-1]
+    if k[0] == "'":
+        return body.replace("''", "'")
+
+    def esc(m):
+        e = m.group(1)
+        return chr(int(e[1:], 16)) if len(e) > 1 else YAML_ESCAPES.get(e, m.group(0))
+    return re.sub(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|.)", esc, body)
 
 
 BLOCK_HEADER = re.compile(r"^([|>])([+-]?)\d*$")
@@ -280,7 +302,7 @@ def parse_yaml(text):
         d = {}
         while i < len(lines) and lines[i][0] == indent:
             body = lines[i][1]
-            m = re.match(r"^((?:\"[^\"]*\"|'[^']*'|[^:\s][^:]*?)):(?:\s+(.*))?$", body)
+            m = re.match(r"^((?:\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*'|[^:\s][^:]*?)):(?:\s+(.*))?$", body)
             if not m:
                 i += 1
                 continue
