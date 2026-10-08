@@ -58,12 +58,12 @@ query($owner:String!, $name:String!, $pr:Int!) {
     reviewThreads(first:100) { pageInfo { hasNextPage } nodes {
       id isResolved isOutdated path line originalLine
       comments(first:100) { totalCount nodes { id databaseId author { login } body createdAt lastEditedAt url
-                                               reactionGroups { viewerHasReacted } } }
+                                               up: reactions(content:THUMBS_UP, last:20) { nodes { createdAt user { login } } } down: reactions(content:THUMBS_DOWN, last:20) { nodes { createdAt user { login } } } } }
     } }
     comments(last:100) { pageInfo { hasPreviousPage } nodes { id author { login } body createdAt lastEditedAt url
-                                                              reactionGroups { viewerHasReacted } } }
+                                                              up: reactions(content:THUMBS_UP, last:20) { nodes { createdAt user { login } } } down: reactions(content:THUMBS_DOWN, last:20) { nodes { createdAt user { login } } } } }
     reviews(last:100) { pageInfo { hasPreviousPage } nodes { id author { login } body state submittedAt lastEditedAt url
-                                                             reactionGroups { viewerHasReacted } } }
+                                                             up: reactions(content:THUMBS_UP, last:20) { nodes { createdAt user { login } } } down: reactions(content:THUMBS_DOWN, last:20) { nodes { createdAt user { login } } } } }
   } }
 }
 GQL
@@ -74,9 +74,11 @@ def clip($n): (. // "") | gsub("(?s)<!--.*?-->"; "") | gsub("\n{3,}"; "\n\n")
 # Unhandled: no reply of yours marks it handled, or it was edited after that reply.
 def unhandled($h): (.lastEditedAt // .createdAt // .submittedAt // "") as $rev
   | ($h[.id] == null) or ($rev > $h[.id]);
-# A reaction of yours (👍/👎) answers an item too: the reaction-only answer to
-# a reviewer's follow-up.
-def reacted: [ .reactionGroups[]? | select(.viewerHasReacted) ] | length > 0;
+# A 👍/👎 of yours answers an item too (the reaction-only answer to a
+# reviewer's follow-up), but only until the item is edited after it. Other
+# reactions (👀 and the like) answer nothing.
+def reacted($me): ([ (.up.nodes[]?, .down.nodes[]?) | select((.user.login // "") == $me) | .createdAt ] | max // "")
+  as $t | $t != "" and $t >= (.lastEditedAt // .createdAt // .submittedAt // "");
 def norm: sub("\\[bot\\]$"; "");
 .data.viewer.login as $me
 | .data.repository.pullRequest as $p
@@ -108,7 +110,7 @@ def norm: sub("\\[bot\\]$"; "");
      ([ .comments.nodes[] | select((.author.login // "") == $me) | .createdAt ] | max // "") as $replied |
      ([ .comments.nodes[] | select((.author.login // "") != $me and (.lastEditedAt // "") > $replied) ] | length > 0) as $edited |
      ([ .comments.nodes[] | select((.author.login // "") != $me
-          and (.lastEditedAt // .createdAt // "") > $replied and (reacted | not)) ]) as $open |
+          and (.lastEditedAt // .createdAt // "") > $replied and (reacted($me) | not)) ]) as $open |
      select((.isResolved | not) or ($open | length > 0)) |
      { id, root_id: .comments.nodes[0].databaseId, path, line: (.line // .originalLine),
        outdated: .isOutdated, resolved: .isResolved,
@@ -118,12 +120,12 @@ def norm: sub("\\[bot\\]$"; "");
        resolve_pending: ((.isResolved | not) and (($last.author.login // "") == $me) and ($edited | not)
          and (($last.body // "") | contains("specwright:handled " + $tid + " resolve"))),
        comments: [ .comments.nodes[] | { id, author: (.author.login // "ghost"), body: (.body | clip(2500)),
-                                        at: .createdAt, edited: .lastEditedAt, url, reacted: reacted } ] } ]) as $threads
-| ([ $p.comments.nodes[] | select((.author.login // "") != $me and unhandled($handled) and (reacted | not)) |
+                                        at: .createdAt, edited: .lastEditedAt, url, reacted: reacted($me) } ] } ]) as $threads
+| ([ $p.comments.nodes[] | select((.author.login // "") != $me and unhandled($handled) and (reacted($me) | not)) |
      { id, rev: (.lastEditedAt // .createdAt), author: (.author.login // "ghost"),
        body: (.body | clip(1200)), at: .createdAt, url } ]) as $comments
 | ([ $p.reviews.nodes[] | select(.state != "PENDING" and (.body // "") != ""
-       and (.author.login // "") != $me and unhandled($handled) and (reacted | not)) |
+       and (.author.login // "") != $me and unhandled($handled) and (reacted($me) | not)) |
      { id, rev: (.lastEditedAt // .submittedAt), author: (.author.login // "ghost"), state,
        body: (.body | clip(1200)), at: .submittedAt, url } ]) as $reviews
 # A reviewer's latest verdict stays CHANGES_REQUESTED until they approve or it
