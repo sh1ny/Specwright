@@ -8,7 +8,8 @@
 #   bash pr-reply.sh <PR> thread  <thread-id> <root-comment-id> <body-file> [--resolve] [--react +1|-1] [--waiting] [--repo o/n]
 #   bash pr-reply.sh <PR> comment <source-id> <body-file> [--react +1|-1] [--waiting] [--repo o/n]
 #   bash pr-reply.sh <PR> react   <comment-id> +1|-1 [--repo o/n]
-#   bash pr-reply.sh <PR> resolve <thread-id> [--repo o/n]   (retry a failed resolution only)
+#   bash pr-reply.sh <PR> resolve <thread-id> [--repo o/n]   (retry a failed resolution, or close a
+#                                                              thread the reviewer only acknowledged)
 # --react puts a thumbs up (+1: the finding was right) or down (-1: it was
 # wrong) on the item answered: the thread's root comment, or the comment or
 # review <source-id>. react alone answers a reviewer's follow-up without a

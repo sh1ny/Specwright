@@ -309,7 +309,7 @@ Files are always staged by name — never `git add -A`, never all of `openspec/`
 | Mode | Does | Never |
 |---|---|---|
 | `ship` | Push, create/update the PR with `--body-file`, post the review request | Push the default branch |
-| `feedback` | One snapshot → judge all items → fix → validate once → one commit → one reply (and 👍/👎) per finding, resolve; acknowledgement follow-ups get a reaction only | Resolve needs-human threads; go past `max_fix_rounds` |
+| `feedback` | One snapshot → judge all items → fix → validate once → one commit → one reply (and 👍/👎) per finding, resolve; acknowledgement follow-ups get a reaction only (and resolve the thread if it was still open) | Resolve needs-human threads; go past `max_fix_rounds` |
 | `watch` | Background wait → wait for every reviewer on the head → feedback first → ignore CI for stale heads → fix all failing checks in one pass → at ready, offer the archive on the branch; report stale `CHANGES_REQUESTED` verdicts | Merge, rebase, force-push, approve workflow runs, dismiss reviews |
 </details>
 
