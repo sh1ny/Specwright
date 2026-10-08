@@ -176,7 +176,7 @@ Test kinds:
 
 ## 8. Roadmap status (D9)
 
-- [ ] 8.1 Add agent evals `eval-store-roadmap-local` and `eval-store-roadmap-pr`. Their fixtures hold several archived changes covering every roadmap row: merged with `merge: <name>`, date-prefixed, a cherry-picked task only, a fork PR with the same branch name, a merge into `integration`, planning-only squash-merged, and a fetch that cannot reach `origin`. Use the fake gh for PR proof. Confirm they fail against the current `specwright-roadmap`.
+- [x] 8.1 Add agent evals `eval-store-roadmap-local` and `eval-store-roadmap-pr`. Their fixtures hold several archived changes covering every roadmap row: merged with `merge: <name>`, date-prefixed, a cherry-picked task only, a fork PR with the same branch name, a merge into `integration`, planning-only squash-merged, and a fetch that cannot reach `origin`. Use the fake gh for PR proof. Confirm they fail against the current `specwright-roadmap`.
 - [ ] 8.2 Update `specwright-roadmap`:
   - read archives from the store's main by the archive-name rule;
   - proof is the marker, a first-parent `merge: <name>` (local), or complete discovery of a MERGED code PR into main from the code repo itself (pr);

@@ -369,6 +369,113 @@ def pr_pair_base(dest, store_origin=True, code_pr=False):
     write(dest, "gh-state.json", json.dumps({"user": "eval-bot", "tokens": {"eval-bot": "eval-token"}, "repos": repos}, indent=2))
 
 
+ROADMAP_SETTINGS = "project:\n  roadmap: openspec/roadmap.md\n"
+
+
+def archive_in_store(store, archived, subject, marker=False):
+    """An archived change on the store's main, as a merge left it: one commit adding the archive directory."""
+    d = f"openspec/changes/archive/{archived}"
+    write(store, f"{d}/.openspec.yaml", "schema: specwright\ncreated: 2026-10-07\n")
+    write(store, f"{d}/proposal.md", f"## Why\n\n{archived} was planned, built and archived.\n")
+    write(store, f"{d}/tasks.md", "# Tasks\n\n## 1. Work\n\n- [x] 1.1 Do the work\n")
+    if marker:
+        write(store, f"{d}/specwright-change.yaml", "code_changes: none\n")
+    git(store, "add", "-A")
+    git(store, "commit", "-q", "-m", subject)
+
+
+def code_branch(code, name, files=("1.1", "2.1")):
+    """feat/<name> off main with one commit per task (each adds its own file, so branches never conflict); back on main.
+    Returns the commit hashes, oldest first."""
+    git(code, "checkout", "-q", "-b", f"feat/{name}", "main")
+    hashes = []
+    for t in files:
+        write(code, f"{name}-{t}.txt", f"task {t} of {name}\n")
+        git(code, "add", "-A")
+        git(code, "commit", "-q", "-m", f"feat({name}): task {t} Work for {name}")
+        hashes.append(subprocess.run(["git", "rev-parse", "HEAD"], cwd=code, check=True, capture_output=True, text=True).stdout.strip())
+    git(code, "checkout", "-q", "main")
+    return hashes
+
+
+def cherry_pick(code, commit):
+    """Land one task commit of an unmerged branch on main, as a new commit after unrelated work (so it is not a fast-forward twin)."""
+    write(code, "CHANGELOG.md", "# Changelog\n")
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "docs: add changelog")
+    git(code, "cherry-pick", commit)
+
+
+def roadmap_file(code, changes):
+    """The roadmap (project.roadmap) committed on the code repo's main. `changes` are (name, description) lines."""
+    lines = "".join(f"{i}. `{n}` - {d}\n" for i, (n, d) in enumerate(changes, 1))
+    write(code, "openspec/roadmap.md",
+          "# Greeter Roadmap\n\nStrategy: openspec/strategy.md · Architecture: openspec/architecture.md\n\n"
+          "<!-- Status is derived: a change is done when archived; a milestone is done when its changes are done and its exit criteria pass. Do not add status checkboxes for changes. -->\n\n"
+          "## Now: M2 - Friendly greetings\n\n**Outcome:** Users get greetings, farewells and the first reports.\n\n"
+          "**Exit criteria:**\n- The suite passes on main (agent)\n\n"
+          f"**Changes** (in order; each about one PR):\n{lines}\n"
+          "## Next: M3 - Sharing\n\nSharing greetings between teams; retires the risk of unreadable exports.\n\n"
+          "## Later\n\n- M4 - Localisation: translated greetings\n")
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "docs: add project roadmap")
+
+
+def gh_pull(n, name, merged=False, state=None, base="main", owner="acme"):
+    """A REST pull object for the fake gh: head feat/<name> from `owner`'s greeter repo, into `base`."""
+    return {"number": n, "html_url": f"https://github.com/{PR_SLUG}/pull/{n}", "state": state or ("closed" if merged else "open"),
+            "merged_at": "2026-10-09T10:00:00Z" if merged else None, "title": f"feat({name}): work for {name}", "body": "Work.",
+            "head": {"ref": f"feat/{name}", "label": f"{owner}:feat/{name}", "repo": {"full_name": f"{owner}/greeter"}},
+            "base": {"ref": base}}
+
+
+def build_roadmap(name, dest):
+    """Several archived changes on the store's main, one per roadmap status row; the roadmap lists them all, plus planned
+    changes behind them. Both repos are clean on main."""
+    code, store = dest / "code", dest / "store"
+    pr = name.endswith("pr")
+    store_base(dest, settings=(PR_SETTINGS if pr else "finish: local\n") + ROADMAP_SETTINGS)
+    if pr:
+        git(code, "remote", "add", "origin", f"https://github.com/{PR_SLUG}.git")
+        git(store, "remote", "add", "origin", f"https://github.com/{STORE_SLUG}.git")
+        install_fake_gh(dest)
+        unreachable_proxy(dest)  # every git fetch fails; gh (the fake) works
+        archive_in_store(store, "2026-10-07-add-greeting", "feat(add-greeting): archive change (#1)")
+        archive_in_store(store, "2026-10-08-add-farewell", "feat(add-farewell): archive change (#2)")
+        archive_in_store(store, "2026-10-08-add-shout", "feat(add-shout): archive change (#3)")
+        archive_in_store(store, "2026-10-09-add-metrics", "feat(add-metrics): archive change (#4)")
+        archive_in_store(store, "2026-10-09-plan-release", "feat(plan-release): archive change (#5)", marker=True)  # squash-merged, branch deleted
+        write(code, "add-greeting-1.1.txt", "task 1.1 of add-greeting\n")  # the squash-merged code PR #1
+        git(code, "add", "-A")
+        git(code, "commit", "-q", "-m", "feat(add-greeting): add greet (#1)")
+        farewell = code_branch(code, "add-farewell")  # task 1.1 cherry-picked onto main, PR #2 still open
+        cherry_pick(code, farewell[0])
+        pulls = [gh_pull(1, "add-greeting", merged=True),
+                 gh_pull(2, "add-farewell"),
+                 gh_pull(3, "add-shout"),  # the change's own PR: open
+                 gh_pull(4, "add-shout", merged=True, owner="forkuser"),  # a fork's same-named branch, merged into main
+                 gh_pull(5, "add-metrics", merged=True, base="integration")]  # merged, but not into main
+        repos = {PR_SLUG: {"default_branch": "main", "pulls": pulls}, STORE_SLUG: {"default_branch": "main", "pulls": []}}
+        write(dest, "gh-state.json", json.dumps({"user": "eval-bot", "tokens": {"eval-bot": "eval-token"}, "repos": repos}, indent=2))
+        roadmap_file(code, [("add-greeting", "greet function"), ("add-farewell", "farewell function (after `add-greeting`)"),
+                            ("add-shout", "shout function (after `add-greeting`)"), ("add-metrics", "usage metrics (after `add-greeting`)"),
+                            ("plan-release", "release plan, documents only (after `add-greeting`)"),
+                            ("add-share", "share greetings (after `add-shout`)"), ("add-report", "usage report (after `add-metrics`)"),
+                            ("add-export", "export greetings (after `plan-release`)")])
+    else:
+        archive_in_store(store, "2026-10-07-add-greeting", "feat(add-greeting): archive change")
+        archive_in_store(store, "2026-10-08-add-logging", "feat(2026-10-08-add-logging): archive change")  # the change name carries the date
+        archive_in_store(store, "2026-10-09-add-farewell", "feat(add-farewell): archive change")
+        for n in ("add-greeting", "2026-10-08-add-logging"):
+            code_branch(code, n)
+            merge_into_main(code, f"feat/{n}", n)
+        farewell = code_branch(code, "add-farewell")  # task 1.1 cherry-picked onto main; the branch is never merged
+        cherry_pick(code, farewell[0])
+        roadmap_file(code, [("add-greeting", "greet function"), ("2026-10-08-add-logging", "logging (after `add-greeting`)"),
+                            ("add-farewell", "farewell function (after `add-greeting`)"), ("add-shout", "shout function (after `add-farewell`)"),
+                            ("add-metrics", "usage metrics (after `2026-10-08-add-logging`)")])
+
+
 def build_store(name, dest):
     """Fixtures whose planning lives outside the code repo (or in a folder inside it)."""
     code, store = dest / "code", dest / "store"
@@ -463,6 +570,8 @@ def build_store(name, dest):
         pr_pair_base(dest)  # both repos have a GitHub origin; any push dies at the unreachable proxy
     elif name == "eval-store-archive-before-merge-local-store":
         pr_pair_base(dest, store_origin=False, code_pr=True)  # code PR #7 is open and ready; the store has no GitHub origin
+    elif name in ("eval-store-roadmap-local", "eval-store-roadmap-pr"):
+        build_roadmap(name, dest)
     elif name == "eval-nested-root-finish":
         nested_base(dest)
         finished(code, code / "planning")

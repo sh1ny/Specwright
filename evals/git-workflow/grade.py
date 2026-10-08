@@ -505,6 +505,8 @@ def check_store(name, repo, run):
         R.extend(check_store_finish(name, repo, code, store, rep))
     elif name in ("eval-store-ship-push-rejected", "eval-store-archive-before-merge-local-store"):
         R.extend(check_store_pr(name, repo, code, store, rep))
+    elif name.startswith("eval-store-roadmap-"):
+        R.extend(check_store_roadmap(name, repo, code, store, rep))
     return R
 
 
@@ -801,6 +803,123 @@ def check_store_pr(name, repo, code, store, rep):
                   bool(hand) and bool(why), f"hand sentences={hand[:2]} why sentences={why[:2]}"))
         R.append(no_amend)
     return R
+
+
+# Roadmap evals (fixtures.build_roadmap). status: done | pending ("planning merged, code pending") | open (not done: planned, no archive).
+ROADMAP = {
+    "eval-store-roadmap-local": {
+        "add-greeting": "done",                # merge: add-greeting on code main's first-parent history
+        "2026-10-08-add-logging": "done",      # date-prefixed change name: archive dir and merge subject carry the name as is
+        "add-farewell": "pending",             # archived, but only task 1.1 was cherry-picked; the branch is unmerged
+        "add-shout": "open",                   # planned, after add-farewell (pending)
+        "add-metrics": "open",                 # planned, after the done add-logging: the only change next may start
+    },
+    "eval-store-roadmap-pr": {
+        "add-greeting": "done",                # code PR #1 merged into main
+        "add-farewell": "pending",             # task 1.1 cherry-picked, code PR #2 open
+        "add-shout": "pending",                # own PR #3 open; PR #4 (fork, same branch name) merged: not proof
+        "add-metrics": "pending",              # PR #5 merged into integration: not proof
+        "plan-release": "done",                # planning-only: specwright-change.yaml code_changes: none on the store's main
+        "add-share": "open",                   # planned, after add-shout (pending)
+        "add-report": "open",                  # planned, after add-metrics (pending)
+        "add-export": "open",                  # planned, after plan-release (done): the only change next may start
+    },
+}
+ROADMAP_BLOCKED = {"eval-store-roadmap-local": ("add-shout",), "eval-store-roadmap-pr": ("add-share", "add-report")}
+ROADMAP_STARTABLE = {"eval-store-roadmap-local": ("add-metrics",), "eval-store-roadmap-pr": ("add-export",)}
+ROADMAP_COMMITS = {"eval-store-roadmap-local": (12, 5), "eval-store-roadmap-pr": (7, 7)}  # (code, store) commits over --all, as the fixture leaves them
+PENDING = r"planning merged[^|\n]*code[^|\n]{0,30}pending|code[^|\n]{0,30}pending[^|\n]*planning merged"
+ROADMAP_WHY = {
+    "add-greeting": "its archive is on the store's main and its code side merged as a whole",
+    "2026-10-08-add-logging": "its archive 2026-10-08-add-logging (no second date prefix) is on the store's main and code main has merge: 2026-10-08-add-logging",
+    "add-farewell": "only task 1.1 was cherry-picked onto code main; the rest of the change is unmerged",
+    "add-shout": "its own code PR #3 is open; the merged PR #4 is a fork's same-named branch",
+    "add-metrics": "its code PR #5 was merged into integration, not main",
+    "plan-release": "its archive holds specwright-change.yaml with code_changes: none and there is no code PR",
+}
+
+
+def name_re(n):
+    return rf"(?<![\w-]){re.escape(n)}(?![\w-])"
+
+
+def roadmap_rows(rep, names):
+    """name -> the report lines that are about that change: the line starts with the name (after list or table markup),
+    or it is the only roadmap change the line names."""
+    rows = {n: [] for n in names}
+    for line in rep.splitlines():
+        hit = [n for n in names if re.search(name_re(n), line)]
+        # strip markup and a list or table number ("1.", "2)", "| 3 |"), but not the date of a dated change name
+        lead = re.sub(r"^[\s|*\-+>#`(\[\]]*(?:\d+(?:[.)]|\s*\|)[\s|*`(\[\]]*)?", "", line)
+        for n in hit:
+            if len(hit) == 1 or re.match(name_re(n), lead):
+                rows[n].append(line)
+    return rows
+
+
+def says_done(line):
+    return bool(re.search(r"\bdone\b", line)) and not re.search(
+        r"planning merged|\b(not|isn't|never)\b[^|.\n]{0,15}\bdone\b|pending|unverified|unknown", line)
+
+
+def says_pending(line):
+    return bool(re.search(PENDING, line))
+
+
+def says_open(line):
+    return not says_done(line) and "planning merged" not in line and bool(re.search(
+        r"planned|not (yet )?(done|archived|started|merged)|no archive|to ?do|blocked|waiting|active|upcoming|queued|in progress|open", line))
+
+
+def check_store_roadmap(name, repo, code, store, rep):
+    """Roadmap evals: several archived changes on the store's main, one per status row of D9. Read-only: the report holds
+    one status per change, `next` only starts a change whose prerequisites are done, and nothing in either repo changed."""
+    R = []
+    want = ROADMAP[name]
+    pr = name.endswith("pr")
+    rows = roadmap_rows(rep, list(want))
+    check = {"done": says_done, "pending": says_pending}
+    label = {"done": "done", "pending": "planning merged, code pending"}
+    for n, st in want.items():
+        if st != "open":
+            R.append((f"The report gives {n} the status {label[st]}: {ROADMAP_WHY[n]}",
+                      bool(rows[n]) and all(check[st](l) for l in rows[n]), f"lines={rows[n]}"))
+    planned = [n for n, st in want.items() if st == "open"]
+    R.append((f"The report does not call {', '.join(planned)} done: they are planned and have no archive",
+              all(any(says_open(l) for l in rows[n]) and not any(says_done(l) for l in rows[n]) for n in planned), f"lines={ {n: rows[n] for n in planned} }"))
+    sents = [x for x in sentences(rep) if re.search(r"\bnext\b|\bstart\b|\bbegin\b|\bpropose\b", x)]
+    neg = r"\bnot\b|n't|blocked|until|wait|\bafter\b|cannot|can't|prerequisite|depend|behind|once|unless|rather than|instead"
+    blocked = [(n, x) for n in ROADMAP_BLOCKED[name] for x in sents if re.search(name_re(n), x) and not re.search(neg, x)]
+    started = [n for n in ROADMAP_STARTABLE[name] if any(re.search(name_re(n), x) for x in sents)]
+    R.append((f"`next` uses only done changes as prerequisites: it names {', '.join(ROADMAP_STARTABLE[name])} and does not recommend {' or '.join(ROADMAP_BLOCKED[name])}",
+              bool(started) and not blocked, f"startable named={started} blocked recommended={blocked}"))
+    if pr:
+        stale = [x for x in sentences(rep) if re.search(r"stale|out[- ]of[- ]date", x) and re.search(r"fetch|store|origin|remote|local", x)]
+        R.append(("The report says the store status may be stale because the fetch failed", bool(stale), f"matching sentences={stale[:2]}"))
+        calls = gh_calls(repo)
+        R.append(("The code-side proof came from gh: the fake gh was asked for the code repo's pull requests",
+                  any(c["argv"][:1] == ["api"] and any("repos/acme/greeter/pulls" in a for a in c["argv"]) for c in calls),
+                  f"gh calls={[' '.join(c['argv'])[:90] for c in calls][:6]}"))
+        try:
+            ps = json.loads((repo / "gh-state.json").read_text(encoding="utf-8"))["repos"]["acme/greeter"]["pulls"]
+        except (OSError, ValueError, KeyError):
+            ps = None
+        R.append(("No gh call created or changed anything: the five fixture pull requests are as they were",
+                  not pr_mutations(repo) and ps is not None and [(p["number"], p["state"], bool(p["merged_at"]), p["base"]["ref"]) for p in ps]
+                  == [(1, "closed", True, "main"), (2, "open", False, "main"), (3, "open", False, "main"), (4, "closed", True, "main"), (5, "closed", True, "integration")],
+                  f"mutating calls={pr_mutations(repo)} pulls={[(p['number'], p['state']) for p in ps or []]}"))
+    cc, sc = ROADMAP_COMMITS[name]
+    cbr = (git(code, "branch", "--format=%(refname:short)") or "").splitlines()
+    sbr = (git(store, "branch", "--format=%(refname:short)") or "").splitlines()
+    R.append(("No repo was modified: both repos are on main with no new commit, branch or stash and a clean tree, and code main still ends at the roadmap commit",
+              git(code, "branch", "--show-current") == git(store, "branch", "--show-current") == "main"
+              and count_all(code) == cc and count_all(store) == sc and sorted(cbr) == ["feat/add-farewell", "main"] and sbr == ["main"]
+              and not status_of(code) and not status_of(store) and not git(code, "stash", "list") and not git(store, "stash", "list")
+              and (subjects(code, "-1") or [None])[0] == "docs: add project roadmap",
+              f"commits code={count_all(code)}/{cc} store={count_all(store)}/{sc} branches={cbr} {sbr} status={status_of(code)} {status_of(store)}"))
+    R.append(("No commit was amended in either repo", not (amends(code) + amends(store)), f"amend entries={amends(code) + amends(store)}"))
+    return R
+
 
 
 def check_store_branch(name, code, store, rep):

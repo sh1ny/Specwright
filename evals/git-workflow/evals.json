@@ -526,6 +526,47 @@
         "The report names the store branch feat/add-greeting and says it must be shared by hand because there is no store PR or GitHub remote",
         "No commit was amended in either repo"
       ]
+    },
+    {
+      "id": 31,
+      "name": "eval-store-roadmap-local",
+      "skills": [
+        "specwright-roadmap"
+      ],
+      "prompt": "Show me the roadmap status. For every change on the roadmap, say whether it is done, and tell me which change `next` would start. Read only: don't start, edit or commit anything.",
+      "expected_output": "Local mode, planning in a store. The store's main archives add-greeting, 2026-10-08-add-logging and add-farewell. Reports add-greeting and 2026-10-08-add-logging as done (code main's first-parent history has merge: <name>; the date-prefixed name is not prefixed twice), add-farewell as planning merged, code pending (only its task 1.1 was cherry-picked, no merge: add-farewell), and add-shout and add-metrics as planned. next starts add-metrics (its prerequisite 2026-10-08-add-logging is done) and not add-shout (its prerequisite add-farewell is not done). Changes nothing in either repo.",
+      "assertions": [
+        "The report gives add-greeting the status done: its archive is on the store's main and its code side merged as a whole",
+        "The report gives 2026-10-08-add-logging the status done: its archive 2026-10-08-add-logging (no second date prefix) is on the store's main and code main has merge: 2026-10-08-add-logging",
+        "The report gives add-farewell the status planning merged, code pending: only task 1.1 was cherry-picked onto code main; the rest of the change is unmerged",
+        "The report does not call add-shout, add-metrics done: they are planned and have no archive",
+        "`next` uses only done changes as prerequisites: it names add-metrics and does not recommend add-shout",
+        "No repo was modified: both repos are on main with no new commit, branch or stash and a clean tree, and code main still ends at the roadmap commit",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 32,
+      "name": "eval-store-roadmap-pr",
+      "skills": [
+        "specwright-roadmap"
+      ],
+      "prompt": "Show me the roadmap status. For every change on the roadmap, say whether it is done, and tell me which change `next` would start. Read only: don't start, edit or commit anything.",
+      "expected_output": "PR mode, planning in a store whose git fetch cannot reach origin. Reads the store's local main and says the store status may be stale. The code side comes from the fake gh (complete discovery of PRs from acme:feat/<name>). Reports add-greeting (PR #1 merged into main) and plan-release (planning-only: specwright-change.yaml with code_changes: none in the archive, squash-merged) as done; add-farewell (task 1.1 cherry-picked, PR #2 open), add-shout (own PR #3 open; the merged PR #4 is a fork's same-named branch) and add-metrics (PR #5 merged into integration, not main) as planning merged, code pending; add-share, add-report and add-export as planned. next starts add-export (prerequisite plan-release is done) and neither add-share nor add-report. Changes nothing in either repo and creates or changes no PR.",
+      "assertions": [
+        "The report gives add-greeting the status done: its archive is on the store's main and its code side merged as a whole",
+        "The report gives add-farewell the status planning merged, code pending: only task 1.1 was cherry-picked onto code main; the rest of the change is unmerged",
+        "The report gives add-shout the status planning merged, code pending: its own code PR #3 is open; the merged PR #4 is a fork's same-named branch",
+        "The report gives add-metrics the status planning merged, code pending: its code PR #5 was merged into integration, not main",
+        "The report gives plan-release the status done: its archive holds specwright-change.yaml with code_changes: none and there is no code PR",
+        "The report does not call add-share, add-report, add-export done: they are planned and have no archive",
+        "`next` uses only done changes as prerequisites: it names add-export and does not recommend add-share or add-report",
+        "The report says the store status may be stale because the fetch failed",
+        "The code-side proof came from gh: the fake gh was asked for the code repo's pull requests",
+        "No gh call created or changed anything: the five fixture pull requests are as they were",
+        "No repo was modified: both repos are on main with no new commit, branch or stash and a clean tree, and code main still ends at the roadmap commit",
+        "No commit was amended in either repo"
+      ]
     }
   ]
 }
