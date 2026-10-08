@@ -1,2 +1,11 @@
 __pycache__/
 *.pyc
+
+# Specwright installed into its own repo: copies of skills/, agents/,
+# schemas/ and VERSION, refreshed by the install prompt (see README).
+/.claude/skills/specwright-*/
+/.claude/agents/specwright-*.md
+/.omp/agents/specwright-*.md
+/.agents/skills/specwright-*/
+/openspec/schemas/specwright/
+/openspec/.specwright/

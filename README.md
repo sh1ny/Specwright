@@ -1,6 +1,6 @@
 # Specwright
 
-![version](https://img.shields.io/badge/version-0.1.6-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
+![version](https://img.shields.io/badge/version-0.1.7-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
 
 A lightweight spec-driven development bundle for AI coding agents, built on [OpenSpec](https://github.com/Fission-AI/OpenSpec). It keeps OpenSpec's small artifact set and adds what OpenSpec leaves out — **architecture reasoning scaled to the change**, test discipline, a git and GitHub PR workflow, and project-level planning — as one custom schema plus a handful of auto-activating skills. No OpenSpec core changes.
 
@@ -90,13 +90,14 @@ Step 4 - Install files (track new vs updated)
 - Do not write `openspec/.specwright/VERSION` yet; Step 7 does, last.
 
 Step 5 - Merge openspec/config.yaml (never remove unrelated content)
-- If it does not exist, copy the downloaded `openspec/config.yaml`.
+- If it does not exist, copy the downloaded `templates/openspec/config.yaml`.
 - Otherwise:
   - `schema:` - if it is missing or `spec-driven`, set it to `specwright`. If
     it names another schema, ask the user before changing it; if they
     decline, keep it.
   - `context:` - if there is no `context:` key, add `context: |` holding the
-    downloaded lines (leave any commented-out example alone). Otherwise, a
+    lines from the downloaded `templates/openspec/config.yaml` (leave any
+    commented-out example alone). Otherwise, a
     line is Specwright-managed when it starts with
     `MANDATORY: Invoke the 'specwright-`, `Project-level planning (strategy`
     or `Specwright settings (`. Remove every managed line (older wordings and
@@ -106,7 +107,8 @@ Step 5 - Merge openspec/config.yaml (never remove unrelated content)
     project's own lines that mention Specwright.
 
 Step 6 - Settings (openspec/specwright.yaml)
-- If it does not exist, copy the downloaded file, then ask the user for:
+- If it does not exist, copy the downloaded
+  `templates/openspec/specwright.yaml`, then ask the user for:
   finish mode (`local` merges to main locally; `pr` goes through GitHub PRs),
   the GitHub login for pushes/PRs/replies, an optional review-request comment
   and the login that posts it, whether design reviews may call a different
@@ -117,9 +119,9 @@ Step 6 - Settings (openspec/specwright.yaml)
   Write their answers into the file.
 - If it exists, keep the user's values and add only keys that are missing,
   with the downloaded defaults. List each added key with its default and its
-  comment from the downloaded file, and ask whether to keep the default. If
-  the user's file has keys the downloaded file no longer has, list them and
-  ask before removing them.
+  comment from the downloaded `templates/openspec/specwright.yaml`, and ask
+  whether to keep the default. If the user's file has keys the downloaded
+  file no longer has, list them and ask before removing them.
 
 Step 7 - Verify, stamp the version, clean up
 - Run `openspec schema validate specwright`.
@@ -131,7 +133,8 @@ Step 7 - Verify, stamp the version, clean up
 - `openspec/config.yaml` has `schema: specwright` (or the schema the user
   chose to keep - then report "installed, but not the default schema"),
   every downloaded context line exactly once, and no other managed line.
-- `openspec/specwright.yaml` has every key in the downloaded file, unless
+- `openspec/specwright.yaml` has every key in the downloaded
+  `templates/openspec/specwright.yaml`, unless
   the user chose otherwise in Step 6.
 - If every check passes, copy `VERSION` to `openspec/.specwright/VERSION`.
   If any fails, do not write it: report each failed check and how to fix it,
@@ -209,7 +212,7 @@ All in [`skills/specwright-pr/scripts/`](skills/specwright-pr/scripts/); bash + 
 
 ## ⚙️ Settings
 
-[`openspec/specwright.yaml`](openspec/specwright.yaml) — read by the skills; OpenSpec ignores it.
+`openspec/specwright.yaml` (template: [`templates/openspec/specwright.yaml`](templates/openspec/specwright.yaml)) — read by the skills; OpenSpec ignores it.
 
 ```yaml
 finish: pr                      # local = merge to main locally, pr = GitHub PR
@@ -246,7 +249,7 @@ pr:
 
 Reviewers: `role` is `required` (default) or `advisory`, `timeout` defaults to 20m. Watch waits until every reviewer has reported on the head or timed out before a fix round, so one round covers all their findings. Ready needs every required reviewer to have reported; an advisory one, and its pending check, stops blocking once it has reported or timed out. Codex, Kody and Mira are recognised by their own signals (Codex's `Reviewed commit` SHA, Kody's check run, Mira's walkthrough); any other login counts as reported once it posts after the push.
 
-[`openspec/config.yaml`](openspec/config.yaml) carries the `context:` lines that make the git skills fire at the right phase.
+`openspec/config.yaml` (template: [`templates/openspec/config.yaml`](templates/openspec/config.yaml)) carries the `context:` lines that make the git skills fire at the right phase.
 
 ---
 
@@ -326,8 +329,14 @@ Files are always staged by name — never `git add -A`, never all of `openspec/`
 1. `git clone --depth 1 https://github.com/sh1ny/Specwright.git /tmp/specwright`
 2. Copy `skills/specwright-*` into your agent's skills directory, and `agents/claude/*` into `.claude/agents/` and/or `agents/omp/*` into `.omp/agents/`.
 3. Copy `schemas/specwright/` to `openspec/schemas/specwright/` and `VERSION` to `openspec/.specwright/VERSION`.
-4. Set `schema: specwright` and append the `context:` lines from [`openspec/config.yaml`](openspec/config.yaml) to your `openspec/config.yaml`; copy [`openspec/specwright.yaml`](openspec/specwright.yaml) and fill it in.
+4. Set `schema: specwright` and append the `context:` lines from [`templates/openspec/config.yaml`](templates/openspec/config.yaml) to your `openspec/config.yaml`; copy [`templates/openspec/specwright.yaml`](templates/openspec/specwright.yaml) to `openspec/specwright.yaml` and fill it in.
 5. `openspec schema validate specwright`, then restart your agent.
+
+## 🛠️ Developing Specwright
+
+Specwright is built with Specwright. The repository's own `openspec/` is a normal install made with the prompt above, so changes to Specwright go through the same branch → artifacts → apply → PR → archive flow. The files the installer copies into a project live under [`templates/openspec/`](templates/openspec/), never in `openspec/`, so this repo's settings never ship to users.
+
+The installed copies (`.claude/skills/specwright-*`, `.claude/agents/specwright-*`, `.omp/agents/specwright-*`, `.agents/skills/specwright-*`, `openspec/schemas/specwright/`, `openspec/.specwright/`) are ignored by git: the sources are `skills/`, `agents/`, `schemas/` and `VERSION`. A fresh clone needs `openspec init` and the install prompt before the workflow runs. Agents follow the installed copies, so after a change edits a skill, re-run the install prompt to pick it up.
 
 ## 🗑️ Uninstall
 
