@@ -208,7 +208,7 @@ Test kinds:
 ## 11. Release and integration
 
 - [x] 11.1 Bump `metadata.version` in each changed SKILL.md and the repo `VERSION`. Verify: `git diff main -- VERSION skills/*/SKILL.md | rg "version"` shows one bump per changed skill.
-- [ ] 11.2 Integration check: run the whole agent-eval suite (with-skill) and `python -m unittest discover evals/pr-pair`. Grade with `grade.py`, and confirm every test map row is green and the existing five evals still pass. Run `openspec validate support-openspec-stores --strict`.
+- [x] 11.2 Integration check: run the whole agent-eval suite (with-skill) and `python -m unittest discover evals/pr-pair`. Grade with `grade.py`, and confirm every test map row is green and the existing five evals still pass. Run `openspec validate support-openspec-stores --strict`.
 
 ## Workflow follow-up
 
