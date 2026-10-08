@@ -196,6 +196,68 @@ def finished(code, root):
     write(root, "openspec/specs/greeting/spec.md", spec.replace("# Spec Delta", "# greeting Specification").replace("## ADDED Requirements", "## Requirements"))
 
 
+TASK_SUBJECT = {
+    "1.1": "feat(add-greeting): task 1.1 Add greet(name)",
+    "1.2": "feat(add-greeting): task 1.2 Add farewell(name)",
+    "2.1": "feat(add-greeting): task 2.1 Document greet and farewell",
+}
+VERIFY_TASK = "- [ ] 2.1 Verify the full suite: run `python -m unittest -q` and confirm it passes (verification only, no files change)"
+
+
+def task_code(code, t):
+    """The code files task `t` changes (cumulative: 1.2 builds on 1.1), left uncommitted."""
+    if t == "1.1":
+        write(code, "greet.py", '"""Greeting helpers."""\n\n\ndef greet(name):\n    if not name:\n        raise ValueError("name is required")\n    return f"Hello, {name}!"\n')
+        write(code, "test_greet.py", "import unittest\n\nfrom greet import greet\n\n\nclass GreetTests(unittest.TestCase):\n    def test_greet_named(self):\n        self.assertEqual(greet('Ada'), 'Hello, Ada!')\n\n    def test_greet_empty(self):\n        with self.assertRaises(ValueError):\n            greet('')\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
+    elif t == "1.2":
+        implemented(code)  # greet.py and test_greet.py are final; README is task 2.1's
+        write(code, "README.md", "# greeter\n\nA tiny greeting library.\n")
+    elif t == "2.1":
+        implemented(code)
+
+
+def commit_code(code, t):
+    task_code(code, t)
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", TASK_SUBJECT[t])
+
+
+def tick(store, *tasks):
+    """Tick tasks in the store's tasks.md, uncommitted."""
+    text = (store / CHANGE / "tasks.md").read_text(encoding="utf-8")
+    for t in tasks:
+        text = text.replace(f"- [ ] {t} ", f"- [x] {t} ")
+    write(store, f"{CHANGE}/tasks.md", text)
+
+
+def commit_tick(store, t):
+    git(store, "add", f"{CHANGE}/tasks.md")
+    git(store, "commit", "-q", "-m", TASK_SUBJECT[t])
+
+
+def apply_base(dest, verify_last=False):
+    """store_base, both repos on feat/add-greeting, the planning artifacts committed in the store.
+    verify_last: task 2.1 is a verification-only task instead of the README one."""
+    code, store = dest / "code", dest / "store"
+    store_base(dest)
+    for r in (code, store):
+        git(r, "checkout", "-q", "-b", "feat/add-greeting")
+    change_artifacts(store)
+    if verify_last:
+        text = (store / CHANGE / "tasks.md").read_text(encoding="utf-8")
+        line = next(l for l in text.splitlines() if l.startswith("- [ ] 2.1 "))
+        write(store, f"{CHANGE}/tasks.md", text.replace(line, VERIFY_TASK).replace("## 2. Documentation", "## 2. Verification"))
+    git(store, "add", "-A")
+    git(store, "commit", "-q", "-m", "feat(add-greeting): add planning artifacts")
+
+
+def done_pair(dest, t):
+    """Task t finished normally: code commit, then the store tick with the same subject."""
+    commit_code(dest / "code", t)
+    tick(dest / "store", t)
+    commit_tick(dest / "store", t)
+
+
 def gate_lock(store, when, change="other-change", checkout="C:/elsewhere/code"):
     """Another session's gate lock in the store's git common dir, taken at `when` (a datetime)."""
     r = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=store,
@@ -233,6 +295,35 @@ def build_store(name, dest):
             git(r, "checkout", "-q", "-b", "feat/add-greeting")
         change_artifacts(store)  # planning lives in the store, uncommitted
         write(code, "scratch-notes.txt", "personal notes - not part of the change\n")
+    elif name == "eval-store-apply-wrong-branch":
+        store_base(dest)
+        git(code, "checkout", "-q", "-b", "feat/add-greeting")  # the store stays on main
+        change_artifacts(store)  # planning artifacts uncommitted on the store's main
+    elif name == "eval-store-apply-reconcile":
+        apply_base(dest)  # 1.1: code commit made, the store commit failed (tick uncommitted)
+        commit_code(code, "1.1")
+        tick(store, "1.1")
+    elif name == "eval-store-apply-multi-gap":
+        apply_base(dest)  # 1.1 and 1.2 have code commits; both ticks sit in one uncommitted tasks.md diff
+        commit_code(code, "1.1")
+        commit_code(code, "1.2")
+        tick(store, "1.1", "1.2")
+    elif name == "eval-store-apply-orphan-tick":
+        apply_base(dest)  # 1.1 done; 1.2 ticked, its code changes uncommitted: the session stopped before the code commit
+        done_pair(dest, "1.1")
+        tick(store, "1.2")
+        task_code(code, "1.2")
+    elif name == "eval-store-apply-noop-gap":
+        apply_base(dest, verify_last=True)  # 2.1 is verification-only: ticked, no code commit, store commit failed
+        done_pair(dest, "1.1")
+        done_pair(dest, "1.2")
+        tick(store, "2.1")
+    elif name == "eval-store-complete-gap":
+        apply_base(dest)  # every task ticked and committed in code; the last store commit failed
+        done_pair(dest, "1.1")
+        done_pair(dest, "1.2")
+        commit_code(code, "2.1")
+        tick(store, "2.1")
     elif name == "eval-store-unregistered":
         store_base(dest, registered=False)  # config.yaml says `store: team-plans`; nothing is registered
     elif name == "eval-store-other-worktree":

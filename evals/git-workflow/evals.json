@@ -108,6 +108,7 @@
         "scratch-notes.txt was never committed",
         "The report does not ask whether any task was a no-op",
         "The report gives per-repo completion for the code repo and the store",
+        "The report's completion check gives the task commits and a clean tree separately for the code repo and the store",
         "No commit was amended in either repo"
       ]
     },
@@ -252,6 +253,111 @@
         "The gate lock and its owner file are still there, unchanged",
         "The report shows the date the lock was taken",
         "The report asks the user to confirm before removing the lock"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "eval-store-apply-wrong-branch",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "The code repo is on the change branch but the store is on main, with the planning artifacts uncommitted there: commits nothing in either repo, ticks nothing, and names the store's current branch.",
+      "assertions": [
+        "No new commit in either repo: the code repo and the store are at their fixture tips",
+        "The store is still on main, the code repo on feat/add-greeting, and no branch was created in either",
+        "The planning artifacts are still uncommitted in the store and the code repo is clean",
+        "The report names the store's current branch main and the change branch feat/add-greeting",
+        "The report says it stopped without committing"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "eval-store-apply-reconcile",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Task 1.1 has its code commit but its tick is uncommitted in the store (the store commit failed): before ticking 1.2, commits that tick in the store with 1.1's original subject, without asking about a no-op, then finishes 1.2 and 2.1 as normal pairs.",
+      "assertions": [
+        "Both repos are still on feat/add-greeting and both mains are unchanged",
+        "Exactly one code commit and one store commit per task, with identical subjects, and task 1.1 keeps its original subject",
+        "Each store task commit touches only tasks.md and its diff ticks only its own task, including the reconcile commit for 1.1",
+        "The store's task 1.1 commit comes before any task 1.2 or 2.1 commit in the store",
+        "Every commit subject in both repos is 72 characters or fewer",
+        "All tasks in the store's tasks.md are ticked",
+        "The test suite passes in the code repo",
+        "Both working trees are clean",
+        "The report does not ask whether any task was a no-op",
+        "The report's completion check gives the task commits and a clean tree separately for the code repo and the store",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 18,
+      "name": "eval-store-apply-multi-gap",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "The store's uncommitted tasks.md ticks tasks 1.1 and 1.2, both with code commits and no store commits: makes no commit in either repo, lists both tasks and asks how to record them.",
+      "assertions": [
+        "No new commit in either repo",
+        "The store's tasks.md still has both ticks uncommitted and nothing else changed, and the code repo is clean",
+        "The report lists tasks 1.1 and 1.2 as ticked without a store commit",
+        "The report asks the user how to record them",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 19,
+      "name": "eval-store-apply-orphan-tick",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Task 1.2 is ticked in the store with no code commit while its code changes sit uncommitted in the code repo (a fresh session after a stop): commits nothing, ticks nothing further, and asks whether 1.2 changed code.",
+      "assertions": [
+        "No new commit in either repo",
+        "Task 1.2 is the only uncommitted tick in the store and nothing further is ticked",
+        "The code repo is exactly as the fixture left it: task 1.2's code changes are still uncommitted",
+        "The report names task 1.2 and asks whether it changed code",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 20,
+      "name": "eval-store-apply-noop-gap",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "A verification-only task 2.1 is ticked in the store with no code commit and no store commit: never assumes it is a code no-op, commits nothing, ticks nothing further and asks whether it changed no code.",
+      "assertions": [
+        "No new commit in either repo",
+        "Task 2.1 is the only uncommitted tick in the store and nothing further is ticked",
+        "The code repo is exactly as the fixture left it: clean",
+        "The report names task 2.1 and asks whether it changed code",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 21,
+      "name": "eval-store-complete-gap",
+      "skills": [
+        "specwright-commit"
+      ],
+      "prompt": "Apply the add-greeting OpenSpec change.",
+      "expected_output": "Every task is ticked and has a code commit, but the last tick (2.1) is uncommitted in the store: reconciles it with a store commit carrying 2.1's original subject and reports per-repo completion, or reports the gap and stops; either way it does not hand off to archive or PR while the gap is open.",
+      "assertions": [
+        "Both repos are still on feat/add-greeting and both mains are unchanged",
+        "The store has a commit for task 2.1 that touches only tasks.md and ticks only 2.1, or no commit was made and the report names the gap",
+        "Tasks 1.1 and 1.2 keep exactly one code and one store commit, and task 2.1 has one code commit and at most one store commit",
+        "Either both trees are clean, or only the store's tasks.md tick of 2.1 is uncommitted",
+        "If reconciled, the report gives the task commits and a clean tree separately for the code repo and the store; if not, it states a stop and does not hand off",
+        "The test suite passes in the code repo",
+        "The report does not ask whether any task was a no-op",
+        "No commit was amended in either repo"
       ]
     }
   ]

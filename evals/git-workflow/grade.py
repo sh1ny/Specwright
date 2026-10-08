@@ -105,6 +105,62 @@ def only_code_repo(repo, run, expected):
             f"other repos={others} {ev} commits={allsubs}")
 
 
+FEAT = "feat/add-greeting"
+SUBJ = {"1.1": "feat(add-greeting): task 1.1 Add greet(name)", "1.2": "feat(add-greeting): task 1.2 Add farewell(name)",
+        "2.1": "feat(add-greeting): task 2.1 Document greet and farewell"}  # the fixtures' original task subjects
+NOOP_ASK = r"no-op\?|was [^.\n]*a no-op|did [^.\n]* change (any )?code|whether [^.\n]*no-op"
+
+
+def count_all(repo):
+    return int(git(repo, "rev-list", "--count", "--all") or -1)
+
+
+def ticked_tasks(store):
+    """Task numbers ticked in the store's live tasks.md."""
+    p = store / CHANGE / "tasks.md"
+    return re.findall(r"^- \[x\] (\d+\.\d+) ", p.read_text(encoding="utf-8"), re.M) if p.exists() else []
+
+
+def diff_ticks(store, *args):
+    """Task numbers a diff (`git diff` or `git show`) in the store ticks."""
+    return re.findall(r"^\+- \[x\] (\d+\.\d+) ", git(store, *args) or "", re.M)
+
+
+def untouched(code, store, ccount, scount, tips):
+    """No new commit in either repo: commit counts over --all and each repo's HEAD subject match the fixture."""
+    cc, sc = count_all(code), count_all(store)
+    head = lambda r: (subjects(r, "-1") or [None])[0]
+    return (cc == ccount and sc == scount and head(code) == tips[0] and head(store) == tips[1],
+            f"code commits={cc} (want {ccount}) store commits={sc} (want {scount}) heads={head(code)!r} / {head(store)!r}")
+
+
+def completion_by_repo(rep):
+    """What the report gives per repo: a task-commit count and a clean tree. A line (or ';' part) naming
+    only one repo sets the context for the lines after it, so headings, bullets and tables all work."""
+    found = {"code": set(), "store": set()}
+    ctx = None
+    for line in rep.splitlines():
+        for seg in line.split(";"):
+            c, s_ = re.search(r"\bcode\b", seg), re.search(r"\bstore\b", seg)
+            if c and not s_:
+                ctx = "code"
+            elif s_ and not c:
+                ctx = "store"
+            if ctx is None or (c and s_):
+                continue  # names both repos: cannot be attributed
+            if "task commit" in seg:
+                found[ctx].add("commits")
+            if re.search(r"(?<!not )(?<!un)clean", seg):
+                found[ctx].add("clean")
+    return found
+
+
+def asks_about(rep, topic):
+    """One sentence of the report both names `topic` (a regex) and asks (a question mark, 'whether' or 'confirm')."""
+    ask = r"\?|whether|confirm|let me know|please (tell|say|advise)"
+    return any(re.search(topic, s) and re.search(ask, s) for s in re.split(r"(?<=[.?!])\s+|\n", rep))
+
+
 def report(run):
     p = run / "outputs" / "report.md"
     return p.read_text(encoding="utf-8").lower() if p.exists() else ""
@@ -258,6 +314,125 @@ def check_store(name, repo, run):
         R.append(("The report does not ask whether any task was a no-op", bool(rep) and not hit, f"match={hit.group(0) if hit else None}"))
         per_repo = bool(re.search(r"tree clean|task commits", rep)) and "code" in rep and "store" in rep
         R.append(("The report gives per-repo completion for the code repo and the store", per_repo, f"report excerpt={rep[-200:]!r}"))
+        by = completion_by_repo(rep)
+        R.append(("The report's completion check gives the task commits and a clean tree separately for the code repo and the store",
+                  all(by[r] == {"commits", "clean"} for r in by), f"by repo={by}"))
+        am = amends(code) + amends(store)
+        R.append(("No commit was amended in either repo", not am, f"amend entries={am}"))
+
+    elif name == "eval-store-apply-wrong-branch":
+        st = status_of(store)
+        on_store = git(store, "branch", "--show-current")
+        ok, ev = untouched(code, store, 1, 2, (INITIAL, STORE_MAIN[0]))
+        R.append(("No new commit in either repo: the code repo and the store are at their fixture tips", ok, ev))
+        sbranches = (git(store, "branch", "--format=%(refname:short)") or "").splitlines()
+        R.append(("The store is still on main, the code repo on feat/add-greeting, and no branch was created in either",
+                  on_store == "main" and branch == FEAT and sorted(branches) == [FEAT, "main"] and sbranches == ["main"],
+                  f"store={on_store} {sbranches} code={branch} {branches}"))
+        R.append(("The planning artifacts are still uncommitted in the store and the code repo is clean",
+                  bool(st) and all(l.startswith(f"?? {CHANGE}/") for l in st) and not status_of(code), f"store={st} code={status_of(code)}"))
+        hit = re.search(r"store[^.\n]{0,100}\bmain\b|\bmain\b[^.\n]{0,100}store", rep)
+        R.append(("The report names the store's current branch main and the change branch feat/add-greeting", bool(hit) and FEAT in rep,
+                  f"match={hit.group(0) if hit else None}"))
+        stopped = re.search(r"stop|halt|abort|refus|did not|didn't|not proceed|not continu|won't|cannot|can't|without|no commit|nothing", rep)
+        R.append(("The report says it stopped without committing", bool(stopped), f"match={stopped.group(0) if stopped else None}"))
+
+    elif name == "eval-store-apply-reconcile":
+        csubs, ssubs = subjects(code, "main..HEAD"), subjects(store, "main..HEAD")
+        R.append(("Both repos are still on feat/add-greeting and both mains are unchanged",
+                  git(code, "branch", "--show-current") == git(store, "branch", "--show-current") == FEAT
+                  and subjects(code, "main") == [INITIAL] and subjects(store, "main") == STORE_MAIN,
+                  f"code main={subjects(code, 'main')} store main={subjects(store, 'main')}"))
+        pair = {t: ([s for s in csubs if s.startswith(f"feat(add-greeting): task {t} ")],
+                    [s for s in ssubs if s.startswith(f"feat(add-greeting): task {t} ")]) for t in TASKS}
+        R.append(("Exactly one code commit and one store commit per task, with identical subjects, and task 1.1 keeps its original subject",
+                  all(len(c) == 1 and c == st for c, st in pair.values()) and pair["1.1"][1] == [SUBJ["1.1"]], f"per-task (code, store)={pair}"))
+        ok, ev = True, {}
+        for t in TASKS:
+            hh = find_commit(store, (pair[t][1] or [""])[0], "main..HEAD")
+            ev[t] = (files_of(store, hh), diff_ticks(store, "show", "--format=", hh)) if hh else None
+            ok = ok and ev[t] == ([f"{CHANGE}/tasks.md"], [t])
+        R.append(("Each store task commit touches only tasks.md and its diff ticks only its own task, including the reconcile commit for 1.1", ok, f"{ev}"))
+        i11 = ssubs.index(SUBJ["1.1"]) if SUBJ["1.1"] in ssubs else -1
+        later = [i for i, x in enumerate(ssubs) if x.startswith(("feat(add-greeting): task 1.2 ", "feat(add-greeting): task 2.1 "))]
+        R.append(("The store's task 1.1 commit comes before any task 1.2 or 2.1 commit in the store",
+                  i11 >= 0 and len(later) == 2 and all(i11 > i for i in later), f"store log (newest first)={ssubs}"))
+        long_ = [x for x in csubs + ssubs if len(x) > 72]
+        R.append(("Every commit subject in both repos is 72 characters or fewer", bool(csubs) and bool(ssubs) and not long_, f"too long={long_}"))
+        R.append(("All tasks in the store's tasks.md are ticked", sorted(ticked_tasks(store)) == list(TASKS), f"ticked={ticked_tasks(store)}"))
+        tr = subprocess.run([sys.executable, "-m", "unittest", "-q"], cwd=code, capture_output=True, text=True)
+        R.append(("The test suite passes in the code repo", tr.returncode == 0, (tr.stderr or tr.stdout).strip().splitlines()[-1:] or ["no output"]))
+        R.append(("Both working trees are clean", not status_of(code) and not status_of(store), f"code={status_of(code)} store={status_of(store)}"))
+        hit = re.search(NOOP_ASK, rep)
+        R.append(("The report does not ask whether any task was a no-op", bool(rep) and not hit, f"match={hit.group(0) if hit else None}"))
+        by = completion_by_repo(rep)
+        R.append(("The report's completion check gives the task commits and a clean tree separately for the code repo and the store",
+                  all(by[r] == {"commits", "clean"} for r in by), f"by repo={by}"))
+        am = amends(code) + amends(store)
+        R.append(("No commit was amended in either repo", not am, f"amend entries={am}"))
+
+    elif name == "eval-store-apply-multi-gap":
+        ok, ev = untouched(code, store, 3, 3, (SUBJ["1.2"], PLAN_SUBJECT))
+        R.append(("No new commit in either repo", ok, ev))
+        R.append(("The store's tasks.md still has both ticks uncommitted and nothing else changed, and the code repo is clean",
+                  status_of(store) == [f" M {CHANGE}/tasks.md"] and diff_ticks(store, "diff") == ["1.1", "1.2"]
+                  and sorted(ticked_tasks(store)) == ["1.1", "1.2"] and not status_of(code),
+                  f"store={status_of(store)} diff ticks={diff_ticks(store, 'diff')} code={status_of(code)}"))
+        R.append(("The report lists tasks 1.1 and 1.2 as ticked without a store commit",
+                  "1.1" in rep and "1.2" in rep and "store" in rep, f"report excerpt={rep[-200:]!r}"))
+        hit = re.search(r"\?|how (do|would|should|to|you)|which|let me know|please (tell|say|advise|confirm)", rep)
+        R.append(("The report asks the user how to record them", bool(hit), f"match={hit.group(0) if hit else None}"))
+        am = amends(code) + amends(store)
+        R.append(("No commit was amended in either repo", not am, f"amend entries={am}"))
+
+    elif name in ("eval-store-apply-orphan-tick", "eval-store-apply-noop-gap"):
+        orphan = name.endswith("orphan-tick")
+        t = "1.2" if orphan else "2.1"
+        heads = (SUBJ["1.1"], SUBJ["1.1"]) if orphan else (SUBJ["1.2"], SUBJ["1.2"])
+        ok, ev = untouched(code, store, 2 if orphan else 3, 4 if orphan else 5, heads)
+        R.append(("No new commit in either repo", ok, ev))
+        R.append((f"Task {t} is the only uncommitted tick in the store and nothing further is ticked",
+                  status_of(store) == [f" M {CHANGE}/tasks.md"] and diff_ticks(store, "diff") == [t] and sorted(ticked_tasks(store)) == (["1.1", t] if orphan else ["1.1", "1.2", t]),
+                  f"store={status_of(store)} diff ticks={diff_ticks(store, 'diff')} ticked={ticked_tasks(store)}"))
+        R.append(("The code repo is exactly as the fixture left it: " + ("task 1.2's code changes are still uncommitted" if orphan else "clean"),
+                  status_of(code) == ([" M greet.py", " M test_greet.py"] if orphan else []), f"code={status_of(code)}"))
+        R.append((f"The report names task {t} and asks whether it changed code",
+                  t in rep and asks_about(rep, r"no-op|changed (any )?code|change (any )?code|no code|code (change|commit)"),
+                  f"report excerpt={rep[-240:]!r}"))
+        am = amends(code) + amends(store)
+        R.append(("No commit was amended in either repo", not am, f"amend entries={am}"))
+
+    elif name == "eval-store-complete-gap":
+        # Spec: "reconciles it as above, or reports the gap, and does not hand off". Either path passes (OR logic below).
+        ssubs, csubs = subjects(store, "main..HEAD"), subjects(code, "main..HEAD")
+        h = find_commit(store, SUBJ["2.1"], "main..HEAD")
+        reconciled = bool(h) and files_of(store, h) == [f"{CHANGE}/tasks.md"] and diff_ticks(store, "show", "--format=", h) == ["2.1"]
+        gap = "2.1" in rep and bool(re.search(r"uncommitted|not committed|no store commit|missing|gap|unrecorded|not recorded", rep))
+        stop = bool(re.search(r"not (yet )?(hand|ready|complete|done)|no hand|did not hand|won't hand|will not hand|before (archiv|hand|open|pr)|until|hold|block|not proceed|stop", rep))
+        claims = bool(re.search(r"ready (for|to) (archive|pr\b|pull)|proceed(ing)? to (archive|pr\b)|hand(ing)? off to (archive|pr\b)", rep)) and not stop
+        R.append(("Both repos are still on feat/add-greeting and both mains are unchanged",
+                  git(code, "branch", "--show-current") == git(store, "branch", "--show-current") == FEAT
+                  and subjects(code, "main") == [INITIAL] and subjects(store, "main") == STORE_MAIN,
+                  f"code main={subjects(code, 'main')} store main={subjects(store, 'main')}"))
+        R.append(("The store has a commit for task 2.1 that touches only tasks.md and ticks only 2.1, or no commit was made and the report names the gap",
+                  reconciled or (not h and count_all(store) == 5 and gap), f"reconciled={reconciled} commit={h} gap named={gap}"))
+        pair = {t: ([x for x in csubs if x.startswith(f"feat(add-greeting): task {t} ")], [x for x in ssubs if x.startswith(f"feat(add-greeting): task {t} ")]) for t in TASKS}
+        R.append(("Tasks 1.1 and 1.2 keep exactly one code and one store commit, and task 2.1 has one code commit and at most one store commit",
+                  all(len(pair[t][0]) == 1 and pair[t][0] == pair[t][1] for t in ("1.1", "1.2"))
+                  and len(pair["2.1"][0]) == 1 and pair["2.1"][1] in ([], pair["2.1"][0]) and len(csubs) == 3 and len(ssubs) in (3, 4),
+                  f"per-task (code, store)={pair}"))
+        st, cs = status_of(store), status_of(code)
+        R.append(("Either both trees are clean, or only the store's tasks.md tick of 2.1 is uncommitted",
+                  (not st and not cs) or (not reconciled and st == [f" M {CHANGE}/tasks.md"] and diff_ticks(store, "diff") == ["2.1"] and not cs),
+                  f"store={st} code={cs}"))
+        by = completion_by_repo(rep)
+        R.append(("If reconciled, the report gives the task commits and a clean tree separately for the code repo and the store; if not, it states a stop and does not hand off",
+                  all(by[r] == {"commits", "clean"} for r in by) if reconciled else (gap and stop and not claims),
+                  f"reconciled={reconciled} by repo={by} gap={gap} stop={stop} claims handoff={claims}"))
+        tr = subprocess.run([sys.executable, "-m", "unittest", "-q"], cwd=code, capture_output=True, text=True)
+        R.append(("The test suite passes in the code repo", tr.returncode == 0, (tr.stderr or tr.stdout).strip().splitlines()[-1:] or ["no output"]))
+        hit = re.search(NOOP_ASK, rep)
+        R.append(("The report does not ask whether any task was a no-op", bool(rep) and not hit, f"match={hit.group(0) if hit else None}"))
         am = amends(code) + amends(store)
         R.append(("No commit was amended in either repo", not am, f"amend entries={am}"))
 

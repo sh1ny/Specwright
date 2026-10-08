@@ -121,7 +121,7 @@ Test kinds:
 
 ## 4. Planning and task commits (D4)
 
-- [ ] 4.1 Add agent evals `eval-store-apply-wrong-branch`, `-reconcile`, `-multi-gap`, `-orphan-tick`, `-noop-gap` and `eval-store-complete-gap`. Confirm they fail for the expected reason.
+- [x] 4.1 Add agent evals `eval-store-apply-wrong-branch`, `-reconcile`, `-multi-gap`, `-orphan-tick`, `-noop-gap` and `eval-store-complete-gap`. Confirm they fail for the expected reason.
 - [ ] 4.2 Rewrite the store parts of `specwright-commit`:
   - planning and drift commits go in the store, by path, on the store branch, with a branch check fused into the same shell call;
   - task pairs: code commit first, then the store tick with the same subject;
