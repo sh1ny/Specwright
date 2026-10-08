@@ -105,7 +105,7 @@ Test kinds:
   - the archive-name rule.
 
   Replace the store stop in `specwright-commit` (`SKILL.md:19`). Verify: the evals from 2.1 pass for their resolution checks (store root found, unresolved store stop, worktree stop, nested root, outside-git stop), and the repo-local evals still pass.
-- [ ] 2.3 Update the reviewer agents (`agents/claude/specwright-reviewer.md`, `agents/omp/specwright-reviewer.md`) and the implementers to resolve the planning root the same way and to run `openspec templates --schema specwright --json` in `<root.path>`. Verify: `rg -n "openspec/schemas/specwright/templates" agents/` finds no fixed repo-local path.
+- [x] 2.3 Update the reviewer agents (`agents/claude/specwright-reviewer.md`, `agents/omp/specwright-reviewer.md`) and the implementers to resolve the planning root the same way and to run `openspec templates --schema specwright --json` in `<root.path>`. Verify: `rg -n "openspec/schemas/specwright/templates" agents/` finds no fixed repo-local path.
 
 ## 3. Branch gate for stores (D3)
 
