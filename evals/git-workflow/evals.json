@@ -609,6 +609,63 @@
         "The report names the unresolved reference team-plans and says it is not registered",
         "The task continued: the report does not say it stopped or is waiting for the reference"
       ]
+    },
+    {
+      "id": 35,
+      "name": "eval-install-store",
+      "skills": [],
+      "prompt": "Install Specwright into this project by following the Install / Update prompt in F:/Dev/specwright/README.md (the text block under \"Install / Update\"). Use the local checkout at F:/Dev/specwright as the downloaded copy instead of cloning from GitHub. I use Claude Code only: skills go in .claude/skills/ and agents in .claude/agents/. For Step 6: finish mode local, no GitHub login, no review-request comment, review.cross_model off, no pre-push command, and keep the default project: paths. The current directory is the project's code checkout.",
+      "expected_output": "The code repo declares the registered store team-plans, whose root is the store repo. Runs openspec list --json first, then installs the specwright schema and the config.yaml schema and context into the store's openspec/, and specwright.yaml, skills and agents into the code repo. Creates no openspec/specs or openspec/changes in the code repo, validates the schema inside the store, leaves the store files uncommitted and lists them in the report.",
+      "assertions": [
+        "The store has openspec/schemas/specwright/ identical to the downloaded schemas/specwright/",
+        "The store's openspec/config.yaml has schema: specwright and every Specwright context line exactly once",
+        "The code repo has openspec/specwright.yaml with every key of the template, every specwright-* skill in .claude/skills/ and both agents in .claude/agents/",
+        "Every new or changed file in the store is under openspec/",
+        "openspec schema validate specwright passes when run in the store",
+        "openspec list --json from the code repo still reports the store as the root",
+        "Nothing was committed, branched, stashed or pushed in either repo, and no gh call was made",
+        "The code repo has no openspec/specs, openspec/changes or openspec/schemas directory",
+        "The code repo's openspec/config.yaml still points at the store (store: team-plans) and holds no Specwright context",
+        "The report lists the store's uncommitted files (schemas/specwright and config.yaml) and says they are not committed",
+        "The report says openspec schema validate specwright was run in the store and passed"
+      ]
+    },
+    {
+      "id": 36,
+      "name": "eval-install-store-other-schema",
+      "skills": [],
+      "prompt": "Install Specwright into this project by following the Install / Update prompt in F:/Dev/specwright/README.md (the text block under \"Install / Update\"). Use the local checkout at F:/Dev/specwright as the downloaded copy instead of cloning from GitHub. I use Claude Code only: skills go in .claude/skills/ and agents in .claude/agents/. For Step 6: finish mode local, no GitHub login, no review-request comment, review.cross_model off, no pre-push command, and keep the default project: paths. The current directory is the project's code checkout.",
+      "expected_output": "Same project, but the store's config.yaml already names the project-local schema team-flow and a context line of the team's own. The install does not replace the schema silently: it asks the user before changing it and stops with the question, naming team-flow. The store's schema line and the team's context line stay as they were, and the code repo gets no openspec/specs or openspec/changes.",
+      "assertions": [
+        "The store's openspec/config.yaml still names schema: team-flow and keeps the team's own context line",
+        "The store's team-flow schema is untouched and nothing in the store outside openspec/ changed",
+        "The code repo has no openspec/specs, openspec/changes or openspec/schemas directory",
+        "The code repo's openspec/config.yaml still points at the store (store: team-plans) and holds no Specwright context",
+        "Nothing was committed, branched, stashed or pushed in either repo, and no gh call was made",
+        "The report asks the user whether to change the schema from team-flow to specwright",
+        "The report does not say the schema was set to specwright or that the install completed"
+      ]
+    },
+    {
+      "id": 37,
+      "name": "eval-install-nested-store",
+      "skills": [],
+      "prompt": "Install Specwright into this project by following the Install / Update prompt in F:/Dev/specwright/README.md (the text block under \"Install / Update\"). Use the local checkout at F:/Dev/specwright as the downloaded copy instead of cloning from GitHub. I use Claude Code only: skills go in .claude/skills/ and agents in .claude/agents/. For Step 6: finish mode local, no GitHub login, no review-request comment, review.cross_model off, no pre-push command, and keep the default project: paths. The current directory is the project's code checkout.",
+      "expected_output": "The store's root is planning/ inside the store repo, so the root path is not the store's top level. Installs the schema and config.yaml under planning/openspec/, runs openspec schema validate specwright inside planning/, and leaves nothing at the store repo's own top-level openspec/. specwright.yaml, skills and agents go in the code repo, and the report lists the uncommitted files in planning/.",
+      "assertions": [
+        "The store has planning/openspec/schemas/specwright/ identical to the downloaded schemas/specwright/",
+        "The store's planning/openspec/config.yaml has schema: specwright and every Specwright context line exactly once",
+        "The store repo's top level has no openspec directory",
+        "The code repo has openspec/specwright.yaml with every key of the template, every specwright-* skill in .claude/skills/ and both agents in .claude/agents/",
+        "Every new or changed file in the store is under planning/openspec/",
+        "openspec schema validate specwright passes when run in planning/",
+        "openspec list --json from the code repo still reports planning/ as the root",
+        "Nothing was committed, branched, stashed or pushed in either repo, and no gh call was made",
+        "The code repo has no openspec/specs, openspec/changes or openspec/schemas directory",
+        "The code repo's openspec/config.yaml still points at the store (store: team-plans) and holds no Specwright context",
+        "The report lists the uncommitted files under planning/ and says they are not committed",
+        "The report says openspec schema validate specwright was run in planning/ and passed"
+      ]
     }
   ]
 }

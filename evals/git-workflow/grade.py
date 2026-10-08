@@ -499,6 +499,8 @@ def check_store(name, repo, run):
         ask = re.search(r"git init|initiali[sz]e", rep) and re.search(r"abort", rep)
         R.append(("The report asks whether to initialise git there or abort", bool(ask), f"report excerpt={rep[-200:]!r}"))
 
+    elif name.startswith("eval-install-"):
+        R.extend(check_install(name, repo, code, store, rep))
     elif name.startswith("eval-references-"):
         R.extend(check_references(name, repo, code, rep))
     elif name.startswith("eval-store-branch-"):
@@ -509,6 +511,128 @@ def check_store(name, repo, run):
         R.extend(check_store_pr(name, repo, code, store, rep))
     elif name.startswith("eval-store-roadmap-"):
         R.extend(check_store_roadmap(name, repo, code, store, rep))
+    return R
+
+
+SRC = Path(__file__).resolve().parents[2]  # the Specwright checkout the install copies from
+NEGATION = r"\bnot\b|n't|\bno\b|\bnever\b|without|until|before|unless|\bif\b|whether|would|should|\bcan\b|\bmay\b|\bor\b|keep|kept|left|unchanged|decline|\?"
+
+
+def tree(d):
+    """{relative path: bytes with LF endings} of every file under d; {} if d is missing."""
+    d = Path(d)
+    return {f.relative_to(d).as_posix(): f.read_bytes().replace(b"\r\n", b"\n") for f in sorted(d.rglob("*")) if f.is_file()} if d.is_dir() else {}
+
+
+def openspec_in(cwd, *args, xdg=None):
+    """Run the openspec CLI in cwd with throwaway (or the run's own) XDG dirs; returns (returncode, stdout+stderr)."""
+    exe = shutil.which("openspec")
+    if not exe:
+        return None, "openspec not on PATH"
+    with tempfile.TemporaryDirectory() as tmp:
+        d, c = xdg or (tmp, tmp)
+        env = {**os.environ, "XDG_DATA_HOME": str(Path(d).resolve()), "XDG_CONFIG_HOME": str(Path(c).resolve()), "OPENSPEC_TELEMETRY": "0"}
+        r = subprocess.run([exe, *args], cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8")
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def check_install(name, repo, code, store, rep):
+    """Install evals: the README install prompt runs in a code repo whose planning root is a registered store
+    (the store repo's top level, or planning/ inside it). Schema and config.yaml belong under <root.path>/openspec/;
+    specwright.yaml, skills and agents in the code repo; nothing is committed; the report lists the store's uncommitted files."""
+    R = []
+    nested = name == "eval-install-nested-store"
+    other = name == "eval-install-store-other-schema"
+    root = store / "planning" if nested else store
+    rel = "planning/openspec/" if nested else "openspec/"
+    cfg_p = root / "openspec" / "config.yaml"
+    cfg = cfg_p.read_text(encoding="utf-8").replace("\r\n", "\n") if cfg_p.exists() else ""
+    tpl = (SRC / "templates/openspec/config.yaml").read_text(encoding="utf-8").replace("\r\n", "\n")
+    ctx = [l.strip() for l in tpl.split("context: |\n", 1)[1].splitlines() if l.strip()]
+    cfg_lines = [l.strip() for l in cfg.splitlines()]
+    cfg_lines_nc = [l for l in cfg_lines if not l.startswith("#")]
+    where = "planning" if nested else "store"
+    place = "planning/" if nested else "the store"
+
+    if not other:
+        R.append((f"{rel}schemas/specwright/ in the store is identical to the downloaded schemas/specwright/",
+                  bool(tree(SRC / "schemas/specwright")) and tree(root / "openspec/schemas/specwright") == tree(SRC / "schemas/specwright"),
+                  f"files in store={sorted(tree(root / 'openspec/schemas/specwright'))}"))
+        missing = [l for l in ctx if cfg_lines_nc.count(l) != 1]
+        R.append((f"The store's {rel}config.yaml has schema: specwright and every Specwright context line exactly once",
+                  "schema: specwright" in cfg_lines_nc and not missing and "schema: spec-driven" not in cfg_lines_nc,
+                  f"schema lines={[l for l in cfg_lines_nc if l.startswith('schema:')]} context lines not exactly once={[l[:40] for l in missing]}"))
+        if nested:
+            R.append(("The store repo's top level has no openspec directory", not (store / "openspec").exists(),
+                      f"store/openspec exists={(store / 'openspec').exists()} entries={sorted(x.name for x in store.iterdir() if x.name != '.git')}"))
+        tp = (SRC / "templates/openspec/specwright.yaml").read_text(encoding="utf-8")
+        keys = re.findall(r"^([A-Za-z_]+):", tp, re.M)
+        sw = code / "openspec/specwright.yaml"
+        have = set(re.findall(r"^([A-Za-z_]+):", sw.read_text(encoding="utf-8"), re.M)) if sw.exists() else set()
+        skills = sorted(d.name for d in (SRC / "skills").glob("specwright-*") if d.is_dir())
+        agents = sorted(f.name for f in (SRC / "agents/claude").glob("*.md"))
+        sk_dir, ag_dir = code / ".claude/skills", code / ".claude/agents"
+        bad_skills = [n for n in skills if tree(sk_dir / n) != tree(SRC / "skills" / n)]
+        extra = sorted(x.name for x in sk_dir.iterdir()) if sk_dir.is_dir() else []
+        miss_agents = [a for a in agents if not (ag_dir / a).is_file()]
+        R.append(("The code repo has openspec/specwright.yaml with every key of the template, every specwright-* skill in .claude/skills/ and both agents in .claude/agents/",
+                  sw.exists() and not (set(keys) - have) and not bad_skills and set(extra) <= set(skills) and not miss_agents,
+                  f"missing keys={sorted(set(keys) - have)} skills differing/missing={bad_skills} other entries={sorted(set(extra) - set(skills))} agents missing={miss_agents}"))
+        st = status_of(store)
+        R.append((f"Every new or changed file in the store is under {rel}", bool(st) and all(l[3:].startswith(rel) for l in st), f"status={st}"))
+    else:
+        R.append(("The store's openspec/config.yaml still names schema: team-flow and keeps the team's own context line",
+                  "schema: team-flow" in cfg_lines_nc and "schema: specwright" not in cfg_lines_nc
+                  and "Team convention: write every spec in British English." in cfg_lines,
+                  f"config={cfg!r}"))
+        tf = tree(root / "openspec/schemas/team-flow")
+        st = status_of(store)
+        R.append(("The store's team-flow schema is untouched and nothing in the store outside openspec/ changed",
+                  sorted(tf) == ["schema.yaml", "templates/proposal.md", "templates/tasks.md"]
+                  and not [l for l in st if "schemas/team-flow" in l] and all(l[3:].startswith("openspec/") for l in st),
+                  f"team-flow files={sorted(tf)} status={st}"))
+
+    # the same in every install eval
+    gone = [p for p in ("specs", "changes", "schemas") if (code / "openspec" / p).exists()]
+    R.append(("The code repo has no openspec/specs, openspec/changes or openspec/schemas directory", not gone, f"present={gone}"))
+    cc = code / "openspec/config.yaml"
+    ctext = cc.read_text(encoding="utf-8") if cc.exists() else ""
+    R.append(("The code repo's openspec/config.yaml still points at the store (store: team-plans) and holds no Specwright context",
+              "store: team-plans" in ctext and "specwright-" not in ctext and "context:" not in ctext, f"config={ctext!r}"))
+    branches = [(git(r, "branch", "--format=%(refname:short)") or "").splitlines() for r in (code, store)]
+    stash = [git(r, "stash", "list") or "" for r in (code, store)]
+    R.append(("Nothing was committed, branched, stashed or pushed in either repo, and no gh call was made",
+              subjects(code, "--all") == [INITIAL] and subjects(store, "--all") == STORE_MAIN
+              and branches == [["main"], ["main"]] and not any(stash) and not gh_calls(repo),
+              f"code commits={subjects(code, '--all')} store commits={subjects(store, '--all')} branches={branches} stash={stash} gh calls={len(gh_calls(repo))}"))
+    if other:
+        sents = [x for x in sentences(rep) if "team-flow" in x]
+        ask = [x for x in sents if re.search(r"\?|whether|confirm|let me know|please (tell|say|advise)|your (call|choice)|decide", x)
+               and re.search(r"specwright|replace|chang|switch|overwrit", x)]
+        R.append(("The report asks the user whether to change the schema from team-flow to specwright", bool(ask), f"matching sentences={ask[:2]}"))
+        claims = [x for x in sentences(rep)
+                  if re.search(r"schema[^.\n]{0,40}specwright|specwright[^.\n]{0,40}schema|install(ation)? (is |was )?(complete|done|finished|successful)|successfully installed", x)
+                  and re.search(r"\bset\b|changed|switched|replaced|updated|now (uses|names|has)|is `?specwright|complete|done|finished|successful", x)
+                  and not re.search(NEGATION, x)]
+        R.append(("The report does not say the schema was set to specwright or that the install completed", bool(rep) and not claims, f"claims={claims[:2]}"))
+        return R
+
+    # the registry the fixture built: the code repo's planning root is still the root
+    rc, out = openspec_in(code, "list", "--json", xdg=(repo / "xdg-data", repo / "xdg-config"))
+    try:
+        got = Path(json.JSONDecoder().raw_decode(out[out.index("{"):])[0]["root"]["path"]).resolve()
+    except (ValueError, KeyError, TypeError):
+        got = None
+    R.append((f"openspec list --json from the code repo still reports {place} as the root", got == root.resolve(), f"root={got} want={root.resolve()}"))
+    rc, out = openspec_in(root, "schema", "validate", "specwright")
+    R.append((f"openspec schema validate specwright passes when run in {place}", rc == 0, f"exit={rc} output={out[-160:]!r}"))
+    listed = all(x in rep for x in ("schemas/specwright", "config.yaml", where)) and re.search(
+        r"uncommitted|not (been )?committed|isn't committed|aren't committed|untracked|(did not|didn't|haven't|have not|not) commit", rep)
+    R.append((f"The report lists the store's uncommitted files (schemas/specwright and config.yaml{' under planning/' if nested else ''}) and says they are not committed",
+              bool(listed), f"report excerpt={rep[-240:]!r}"))
+    val = [x for x in sentences(rep) if "schema validate" in x and where in x
+           and re.search(r"\bpass(ed|es)?\b|\bvalid\b|success|\bok\b|no errors", x) and not re.search(r"\bfail|\berror[^s]|not valid|invalid", x)]
+    R.append((f"The report says openspec schema validate specwright was run in {place} and passed", bool(val), f"matching sentences={val[:2]}"))
     return R
 
 

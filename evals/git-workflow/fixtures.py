@@ -93,7 +93,8 @@ def code_repo(code, store_id="team-plans", pointer=True, settings="finish: local
     """The project repo: Specwright settings, an optional config.yaml pointing at the store
     (otherwise the store is the global defaultStore) and the tiny project. No openspec specs/changes."""
     init(code)
-    write(code, "openspec/specwright.yaml", settings)
+    if settings is not None:
+        write(code, "openspec/specwright.yaml", settings)
     if pointer:
         write(code, "openspec/config.yaml", f"store: {store_id}\n")
     project(code)
@@ -583,6 +584,41 @@ def build_store(name, dest):
         raise SystemExit(f"unknown eval {name}")
 
 
+INSTALL_CONFIG = "schema: spec-driven\n\n# Project context (optional)\n# Add only constraints that should guide OpenSpec artifacts and workflows.\n"  # what `openspec store setup` writes, shortened
+INSTALL_OTHER_CONFIG = "schema: team-flow\n\ncontext: |\n  Team convention: write every spec in British English.\n"
+
+
+def install_base(dest, kind):
+    """Install evals: the code repo is a fresh project (no specwright.yaml, no skills) whose openspec/ holds only the
+    `store: team-plans` pointer; its planning root is a healthy, registered, empty OpenSpec root, as `openspec store setup`
+    leaves one (config.yaml naming spec-driven, specs/ and changes/archive/ with .gitkeep files).
+    "store": the root is <dest>/store.
+    "other-schema": the same, but the store's config.yaml names the project-local schema team-flow (in the store) and
+    a context line of the team's own.
+    "nested": the root is <dest>/store/planning, inside the store repo, whose top level has no openspec/.
+    Everything is committed and clean; the install must leave the store's files uncommitted."""
+    code, store = dest / "code", dest / "store"
+    code_repo(code, settings=None)
+    (dest / "bin").mkdir()
+    init(store)
+    root = store / "planning" if kind == "nested" else store
+    write(root, "openspec/config.yaml", INSTALL_CONFIG)
+    write(root, "openspec/specs/.gitkeep", "")
+    write(root, "openspec/changes/archive/.gitkeep", "")
+    if kind == "other-schema":
+        openspec(dest, "schema", "init", "team-flow", "--description", "The team's own flow", "--artifacts", "proposal,tasks",
+                 "--no-default", cwd=root)
+        write(root, "openspec/config.yaml", INSTALL_OTHER_CONFIG)
+    if kind == "nested":
+        write(store, "README.md", "# team plans\n")
+    git(store, "add", "-A")
+    git(store, "commit", "-q", "-m", "chore: initial store")
+    register(dest, root, "team-plans")
+    git(store, "add", "-A")  # registration wrote .openspec-store/store.yaml
+    git(store, "commit", "-q", "-m", "chore: register store")
+    env_file(dest)
+
+
 def references_base(dest, registered=True, ref_id="team-plans"):
     """<dest>/code keeps its own openspec/ root (schema, specs, config.yaml with `references: [team-plans]`),
     so planning is repo-local; <dest>/team-plans is the referenced store: a git repo holding a shared spec,
@@ -613,6 +649,9 @@ def references_base(dest, registered=True, ref_id="team-plans"):
 
 
 def build(name, repo):
+    if name.startswith("eval-install-"):
+        return install_base(repo, {"eval-install-store": "store", "eval-install-store-other-schema": "other-schema",
+                                   "eval-install-nested-store": "nested"}[name])
     if name in ("eval-references-apply", "eval-references-unregistered"):
         return references_base(repo, registered=name == "eval-references-apply")
     if name.startswith(("eval-store-", "eval-nested-", "eval-root-")):
