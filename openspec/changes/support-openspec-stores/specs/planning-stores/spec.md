@@ -59,6 +59,13 @@ When a new change will live in a store, `specwright-branch` SHALL run its gate o
 - **WHEN** the store's checkout is on another change's branch because a second change is in progress against the same store
 - **THEN** Specwright stops, names the branch the store is on, says that one store holds one change in progress at a time on this machine, does not switch the store off that branch (the other change's work would be lost) and leaves both repos on their original branches; the user finishes or abandons that change first
 
+### Requirement: A change name is used once
+`specwright-branch` SHALL stop before creating any branch when the planning repo's main branch already holds an archive of a change with the same name (`<P>/changes/archive/<change-name>/` or `<P>/changes/archive/YYYY-MM-DD-<change-name>/`), and offer another name or abort. PR discovery, the planning-only marker and roadmap merge proofs match a change by its name, so an earlier change of the same name would otherwise count as this one's PR, marker or merge.
+
+#### Scenario: Name of an archived change
+- **WHEN** a store-backed change `add-csv-export` starts and the store's main holds `openspec/changes/archive/2026-09-01-add-csv-export/`
+- **THEN** Specwright creates no branch in either repo, scaffolds nothing, leaves no gate lock, says the name was already used by an archived change and offers another name or abort
+
 ### Requirement: The store gate is exclusive
 `specwright-branch` SHALL run the store checks and the branch creation while holding an exclusive gate lock on the store, so two sessions cannot both pass against the same store checkout. A lock left by an interrupted session SHALL be removed only with the user's confirmation.
 

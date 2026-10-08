@@ -492,6 +492,11 @@ def build_store(name, dest):
         write(store, "openspec/changes/other-change/proposal.md", "## Why\n\nAnother change in progress.\n")
         git(store, "add", "-A")
         git(store, "commit", "-q", "-m", "feat(other-change): add planning artifacts")
+    elif name == "eval-store-branch-reused-name":
+        store_base(dest)
+        write(store, "openspec/changes/archive/2026-09-01-add-csv-export/proposal.md", "## Why\n\nAn earlier CSV export, shipped and archived.\n")
+        git(store, "add", "-A")
+        git(store, "commit", "-q", "-m", "merge: add-csv-export")  # an earlier change of the same name, archived on main
     elif name == "eval-store-branch-locked":
         store_base(dest)
         gate_lock(store, datetime.now(timezone.utc))  # another session is in its gate right now

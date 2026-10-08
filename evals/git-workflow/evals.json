@@ -666,6 +666,21 @@
         "The report lists the uncommitted files under planning/ and says they are not committed",
         "The report says openspec schema validate specwright was run in planning/ and passed"
       ]
+    },
+    {
+      "id": 38,
+      "name": "eval-store-branch-reused-name",
+      "skills": [
+        "specwright-branch"
+      ],
+      "prompt": "Start a new OpenSpec change called add-csv-export for exporting greetings as CSV.",
+      "expected_output": "The store's main already holds openspec/changes/archive/2026-09-01-add-csv-export/: creates no branch in either repo, scaffolds nothing, leaves no gate lock, says the name was used by an archived change and offers another name or abort.",
+      "assertions": [
+        "Both repos are still on main with only the main branch and no new commit",
+        "No change directory add-csv-export was created in either repo",
+        "No gate lock is left in the store",
+        "The report says the name belongs to an archived change and offers another name"
+      ]
     }
   ]
 }

@@ -1165,6 +1165,17 @@ def check_store_branch(name, code, store, rep):
         one = re.search(r"one (change|store)|at a time|in progress|busy", rep)
         R.append(("The report names feat/other-change and says one store holds one change in progress at a time",
                   "feat/other-change" in rep and bool(one), f"match={one.group(0) if one else None}"))
+    elif name == "eval-store-branch-reused-name":
+        R.append(("Both repos are still on main with only the main branch and no new commit",
+                  on(code) == on(store) == "main" and bs(code) == bs(store) == ["main"] and subjects(code, "main") == [INITIAL]
+                  and subjects(store, "main") == ["merge: add-csv-export", *STORE_MAIN],
+                  f"code={on(code)} {bs(code)} store={on(store)} {bs(store)} store main={subjects(store, 'main')}"))
+        R.append(("No change directory add-csv-export was created in either repo", not dirs, f"dirs={dirs}"))
+        R.append(no_lock)
+        used = re.search(r"already (been )?(used|archived)|archived|used before|reuse", rep)
+        other = re.search(r"another name|different name|new name|rename|add-csv-export-2", rep)
+        R.append(("The report says the name belongs to an archived change and offers another name",
+                  bool(used) and bool(other), f"used={used.group(0) if used else None} other={other.group(0) if other else None}"))
     else:  # eval-store-branch-locked, eval-store-branch-stale-lock
         R.append(("Both repos are still on main with only the main branch and no new commit",
                   on(code) == on(store) == "main" and bs(code) == bs(store) == ["main"] and mains,
