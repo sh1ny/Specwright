@@ -262,6 +262,19 @@ class Context(Base):
         self.assertEqual((c["code"]["main"], c["store"]["main"]), ("main", "master"))
         self.assertEqual(c["code"]["reviewers"]["kody-ai"]["timeout"], 1200)
 
+    def test_context_block_scalars(self):
+        # `|` and `>` values are read whole, and the keys after them still count.
+        self.settings("github:\n  login: sh1ny\n"
+                      "planning_store:\n  validate: >-\n    openspec validate\n    --all --strict\n\n  login: KintsugiBot\n"
+                      "pr:\n  validate: |\n    python -m unittest  # not a comment\n\n    openspec validate --all\n"
+                      "  max_fix_rounds: 3\n  reviewers:\n    kody-ai: { role: advisory }\n")
+        c = self.pp("context", "--code", self.code, "--store", self.store)
+        self.assertEqual(c["code"]["validate"], "python -m unittest  # not a comment\n\nopenspec validate --all\n")
+        self.assertEqual(c["store"]["validate"], "openspec validate --all --strict")
+        self.assertEqual(c["store"]["login"], "KintsugiBot")
+        self.assertEqual(c["max_fix_rounds"], 3)
+        self.assertEqual(c["code"]["reviewers"]["kody-ai"]["role"], "advisory")
+
 
 # =======================================================================================================
 class Discover(Base):

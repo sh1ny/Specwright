@@ -194,12 +194,41 @@ def unquote(k):
     return k[1:-1] if len(k) >= 2 and k[0] in "\"'" and k[-1] == k[0] else k
 
 
+BLOCK_HEADER = re.compile(r"^([|>])([+-]?)\d*$")
+
+
+def block_scalar(raw, start, indent, style, chomp):
+    """Read a `|` or `>` block scalar from raw lines after a key at `indent`; returns (value, next raw index)."""
+    end = start
+    while end < len(raw) and (not raw[end].strip() or len(raw[end]) - len(raw[end].lstrip(" ")) > indent):
+        end += 1
+    body = [l.rstrip("\r") for l in raw[start:end]]
+    filled = [l for l in body if l.strip()]
+    pad = len(filled[0]) - len(filled[0].lstrip(" ")) if filled else 0
+    lines = [l[pad:] if l.strip() else "" for l in body]
+    trailing = 0
+    while lines and lines[-1] == "":
+        lines.pop()
+        trailing += 1
+    if style == "|":
+        text = "\n".join(lines)
+    else:
+        text, prev = "", None
+        for l in lines:
+            text += "\n" if l == "" else (" " + l if prev else l)
+            prev = l != ""
+    if not lines or chomp == "-":
+        return text, end
+    return text + "\n" + ("\n" * trailing if chomp == "+" else ""), end
+
+
 def parse_yaml(text):
+    raw = text.splitlines()
     lines = []
-    for raw in text.splitlines():
-        s = strip_comment(raw).rstrip()
+    for n, r in enumerate(raw):
+        s = strip_comment(r).rstrip()
         if s.strip():
-            lines.append((len(s) - len(s.lstrip(" ")), s.strip()))
+            lines.append((len(s) - len(s.lstrip(" ")), s.strip(), n))
 
     def block(i, indent):
         d = {}
@@ -210,8 +239,14 @@ def parse_yaml(text):
                 i += 1
                 continue
             key, val = unquote(m.group(1).strip()), m.group(2)
+            row = lines[i][2]
             i += 1
-            if val is None or val.strip() == "":
+            header = BLOCK_HEADER.match(val.strip()) if val else None
+            if header:
+                d[key], end = block_scalar(raw, row + 1, indent, header.group(1), header.group(2))
+                while i < len(lines) and lines[i][2] < end:
+                    i += 1
+            elif val is None or val.strip() == "":
                 if i < len(lines) and lines[i][0] > indent:
                     d[key], i = block(i, lines[i][0])
                 else:
