@@ -1,6 +1,6 @@
 # Specwright
 
-![version](https://img.shields.io/badge/version-0.1.5-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
+![version](https://img.shields.io/badge/version-0.1.6-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
 
 A lightweight spec-driven development bundle for AI coding agents, built on [OpenSpec](https://github.com/Fission-AI/OpenSpec). It keeps OpenSpec's small artifact set and adds what OpenSpec leaves out — **architecture reasoning scaled to the change**, test discipline, a git and GitHub PR workflow, and project-level planning — as one custom schema plus a handful of auto-activating skills. No OpenSpec core changes.
 
@@ -202,8 +202,8 @@ All in [`skills/specwright-pr/scripts/`](skills/specwright-pr/scripts/); bash + 
 | Script | Does |
 |---|---|
 | [`as.sh`](skills/specwright-pr/scripts/as.sh) | Runs a command as one GitHub login: pins the token per process, verifies it, and feeds it to both `gh` and `git push` (HTTPS to github.com only; SSH, prompts and inherited `http.extraHeader` auth are disabled inside it; run git from inside the target repo, since extraHeaders are scrubbed for the current repository only). Safe against a concurrent `gh auth switch`. |
-| [`pr-snapshot.sh`](skills/specwright-pr/scripts/pr-snapshot.sh) | One GraphQL call → the whole PR as JSON (checks, unresolved threads, unhandled or edited comments, stale `CHANGES_REQUESTED` verdicts, and a `complete` flag when a list was cut off). `--wait` polls in-process and wakes once (at once if the snapshot is already incomplete); `--logs` appends failed CI logs. |
-| [`pr-reply.sh`](skills/specwright-pr/scripts/pr-reply.sh) | Replies over REST, checks for a pending review, resolves the thread, and marks the item handled on GitHub itself. `resolve` retries only a failed resolution. |
+| [`pr-snapshot.sh`](skills/specwright-pr/scripts/pr-snapshot.sh) | One GraphQL call → the whole PR as JSON (checks, unresolved threads and resolved ones with an unanswered reviewer comment, unhandled or edited comments, stale `CHANGES_REQUESTED` verdicts, and a `complete` flag when a list was cut off). `--reviewer login:role:seconds` adds whether each reviewer has reported on the current head (`reported` / `waiting` / `timed_out`). `--wait` polls in-process and wakes once (at once if the snapshot is already incomplete); one watcher per PR: a newer `--wait` on the same PR takes over and the older one exits 4; `--logs` appends failed CI logs. |
+| [`pr-reply.sh`](skills/specwright-pr/scripts/pr-reply.sh) | Replies over REST, checks for a pending review, resolves the thread, optionally adds a 👍/👎 (`--react`), and marks the item handled on GitHub itself. `react` answers a follow-up with a reaction only; `--waiting` marks a "waiting on owner" reply, which keeps the item listed; `resolve` retries only a failed resolution. |
 
 ---
 
@@ -234,8 +234,17 @@ project:                        # point at existing docs instead of duplicating 
 pr:
   validate: "npm test"          # must pass before every push; empty = none
   max_fix_rounds: 2             # address-review-feedback commits allowed per PR
-  after_limit: ask              # at the limit: ask = report and stop, issues = file each new finding as an issue and reply with the link, stop = report only
+  after_limit: ask              # at the limit: ask = reply "waiting on owner" and stop, issues = file each new finding as an issue and reply with the link, stop = like ask, without offering more rounds
+  react: true                   # 👍/👎 on every finding answered (right / wrong); default false
+  poll_interval: 5m             # how often watch polls GitHub; default 5m
+  reviewers:                    # keyed by login, without [bot]; replaces github.review_request
+    chatgpt-codex-connector: { role: required, request: "@codex review" }   # runs only when tagged
+    kody-ai:      { role: advisory, timeout: 15m }   # reviews every push
+    kintsugimira: { role: advisory, timeout: 10m }
+  # request_as: my-account      # posts the requests; default review_request.login, else github.login
 ```
+
+Reviewers: `role` is `required` (default) or `advisory`, `timeout` defaults to 20m. Watch waits until every reviewer has reported on the head or timed out before a fix round, so one round covers all their findings. Ready needs every required reviewer to have reported; an advisory one, and its pending check, stops blocking once it has reported or timed out. Codex, Kody and Mira are recognised by their own signals (Codex's `Reviewed commit` SHA, Kody's check run, Mira's walkthrough); any other login counts as reported once it posts after the push.
 
 [`openspec/config.yaml`](openspec/config.yaml) carries the `context:` lines that make the git skills fire at the right phase.
 
@@ -300,8 +309,8 @@ Files are always staged by name — never `git add -A`, never all of `openspec/`
 | Mode | Does | Never |
 |---|---|---|
 | `ship` | Push, create/update the PR with `--body-file`, post the review request | Push the default branch |
-| `feedback` | One snapshot → judge all items → fix → validate once → one commit → reply and resolve | Resolve needs-human threads; go past `max_fix_rounds` |
-| `watch` | Background wait → feedback first → ignore CI for stale heads → fix all failing checks in one pass → at ready, offer the archive on the branch; report stale `CHANGES_REQUESTED` verdicts | Merge, rebase, force-push, approve workflow runs, dismiss reviews |
+| `feedback` | One snapshot → judge all items → fix → validate once → one commit → one reply (and 👍/👎) per finding, resolve; acknowledgement follow-ups get a reaction only (and resolve the thread if it was still open) | Resolve needs-human threads; go past `max_fix_rounds` |
+| `watch` | Background wait → wait for every reviewer on the head → feedback first → ignore CI for stale heads → fix all failing checks in one pass → at ready, offer the archive on the branch; report stale `CHANGES_REQUESTED` verdicts | Merge, rebase, force-push, approve workflow runs, dismiss reviews |
 </details>
 
 ---

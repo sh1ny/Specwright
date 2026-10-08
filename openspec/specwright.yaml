@@ -39,7 +39,24 @@ pr:
   validate: ""
   # address-review-feedback commits allowed per PR.
   max_fix_rounds: 2
-  # At the limit: ask = report and stop (the user decides), issues = file each
-  # new actionable finding as an issue, reply with the link and resolve,
-  # stop = report and stop.
+  # At the limit every finding is still answered. ask = reply "waiting on
+  # owner" and stop (the user decides), issues = file each new actionable
+  # finding as an issue, reply with the link and resolve, stop = like ask,
+  # without offering more rounds.
   after_limit: ask
+  # true = put a thumbs up (finding right) or down (wrong) on every finding
+  # answered, alongside the one reply.
+  react: false
+  # How often watch polls GitHub (s/m/h). Each poll spends GraphQL points
+  # from the account's hourly budget, shared with every tool using it.
+  poll_interval: 5m
+  # Reviewers keyed by login (without [bot]). role: required | advisory,
+  # timeout: wait per head (default 20m), request: comment that triggers a
+  # reviewer that only runs when tagged. Replaces github.review_request.
+  # reviewers:
+  #   chatgpt-codex-connector: { role: required, request: "@codex review" }
+  #   kody-ai: { role: advisory, timeout: 15m }
+  #   kintsugimira: { role: advisory, timeout: 10m }
+  # Account that posts the requests. Default: review_request.login, else
+  # github.login.
+  # request_as: ""

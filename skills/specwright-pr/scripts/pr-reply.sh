@@ -5,20 +5,30 @@
 # that item and can spot a resolution that failed - dedup state lives on GitHub.
 #
 # Usage:
-#   bash pr-reply.sh <PR> thread  <thread-id> <root-comment-id> <body-file> [--resolve] [--repo o/n]
-#   bash pr-reply.sh <PR> comment <source-id> <body-file> [--repo o/n]
-#   bash pr-reply.sh <PR> resolve <thread-id> [--repo o/n]   (retry a failed resolution only)
+#   bash pr-reply.sh <PR> thread  <thread-id> <root-comment-id> <body-file> [--resolve] [--react +1|-1] [--waiting] [--repo o/n]
+#   bash pr-reply.sh <PR> comment <source-id> <body-file> [--react +1|-1] [--waiting] [--repo o/n]
+#   bash pr-reply.sh <PR> react   <comment-id> +1|-1 [--repo o/n]
+#   bash pr-reply.sh <PR> resolve <thread-id> [--repo o/n]   (retry a failed resolution, or close a
+#                                                              thread the reviewer only acknowledged)
+# --react puts a thumbs up (+1: the finding was right) or down (-1: it was
+# wrong) on the item answered: the thread's root comment, or the comment or
+# review <source-id>. react alone answers a reviewer's follow-up without a
+# reply; <comment-id> is a node id from the snapshot, or a review comment's
+# numeric id. --waiting marks a "waiting on owner" reply (specwright:waiting):
+# the snapshot keeps the item listed, with waiting_owner, until it is handled.
 # Thread replies use REST (GraphQL replies can attach to a pending review and
 # stay invisible). Exit 2: a pending review of yours exists - submit or
 # discard it on GitHub first. Wrap with as.sh to pin the GitHub identity.
 set -euo pipefail
 
 pr=${1:?PR}; kind=${2:?thread|comment|resolve}; shift 2
-repo= resolve=0 args=()
+repo= resolve=0 react= waiting=0 args=()
 while [ $# -gt 0 ]; do
   case $1 in
     --repo) repo=${2:?--repo needs owner/name}; shift 2 ;;
     --resolve) resolve=1; shift ;;
+    --react) react=${2:?--react needs +1 or -1}; shift 2 ;;
+    --waiting) waiting=1; shift ;;
     *) args+=("$1"); shift ;;
   esac
 done
@@ -40,8 +50,27 @@ pending_check() {
 body_with_marker() {  # <body-file> <marker> -> temp file path
   tmp=$(mktemp)
   cat "$1" > "$tmp"
-  printf '\n\n<!-- specwright:handled %s -->\n' "$2" >> "$tmp"
+  kind=handled; [ "$waiting" = 1 ] && kind=waiting
+  printf '\n\n<!-- specwright:%s %s -->\n' "$kind" "$2" >> "$tmp"
   printf '%s' "$tmp"
+}
+
+add_reaction() {  # <comment-id> <+1|-1>: numeric = review comment (REST), else node id
+  case $2 in +1) rest=+1 node=THUMBS_UP ;; -1) rest=-1 node=THUMBS_DOWN ;;
+    *) echo "pr-reply: reaction must be +1 or -1" >&2; exit 2 ;; esac
+  case $1 in
+    *[!0-9]*) gh api graphql -f subjectId="$1" -f content="$node" -f query='
+        mutation($subjectId:ID!,$content:ReactionContent!){ addReaction(input:{subjectId:$subjectId,content:$content}){ reaction{ content } } }'         --jq '"reacted: " + .data.addReaction.reaction.content' ;;
+    *) gh api --method POST "repos/$owner/$name/pulls/comments/$1/reactions" -f content="$rest" --jq '"reacted: " + .content' ;;
+  esac
+}
+failed=0
+react_or_report() {  # <comment-id>: after a posted reply; a failure names the retry
+  [ -n "$react" ] || return 0
+  add_reaction "$1" "$react" || {
+    echo "pr-reply: reply posted but the reaction failed; retry only the reaction: pr-reply.sh $pr react $1 $react" >&2
+    failed=1
+  }
 }
 
 resolve_thread() {  # <thread-id>
@@ -50,10 +79,12 @@ resolve_thread() {  # <thread-id>
     --jq '"resolved: " + (.data.resolveReviewThread.thread.isResolved | tostring)'
 }
 
+[ -z "$react" ] || [ "$react" = +1 ] || [ "$react" = -1 ] || { echo "pr-reply: --react must be +1 or -1" >&2; exit 2; }
+[ "$waiting" = 0 ] || [ "$resolve$react" = 0 ] || { echo "pr-reply: --waiting takes neither --resolve nor --react" >&2; exit 2; }
 pending_check
 case $kind in
   thread)
-    [ ${#args[@]} -eq 3 ] || { echo "usage: pr-reply.sh <PR> thread <thread-id> <root-comment-id> <body-file> [--resolve]" >&2; exit 2; }
+    [ ${#args[@]} -eq 3 ] || { echo "usage: pr-reply.sh <PR> thread <thread-id> <root-comment-id> <body-file> [--resolve] [--react +1|-1]" >&2; exit 2; }
     thread=${args[0]} root=${args[1]}
     marker=$thread; [ "$resolve" = 1 ] && marker="$thread resolve"
     file=$(body_with_marker "${args[2]}" "$marker")
@@ -63,19 +94,26 @@ case $kind in
     if [ "$resolve" = 1 ]; then
       resolve_thread "$thread" || {
         echo "pr-reply: reply posted but resolution failed; retry only the resolution: pr-reply.sh $pr resolve $thread" >&2
-        exit 1
+        failed=1
       }
     fi
+    react_or_report "$root"
     ;;
   comment)
-    [ ${#args[@]} -eq 2 ] || { echo "usage: pr-reply.sh <PR> comment <source-id> <body-file>" >&2; exit 2; }
+    [ ${#args[@]} -eq 2 ] || { echo "usage: pr-reply.sh <PR> comment <source-id> <body-file> [--react +1|-1]" >&2; exit 2; }
     file=$(body_with_marker "${args[1]}" "${args[0]}")
     gh pr comment "$pr" -R "$repo" --body-file "$file"
     rm -f "$file"
+    react_or_report "${args[0]}"
+    ;;
+  react)
+    [ ${#args[@]} -eq 2 ] || { echo "usage: pr-reply.sh <PR> react <comment-id> +1|-1" >&2; exit 2; }
+    add_reaction "${args[0]}" "${args[1]}"
     ;;
   resolve)
     [ ${#args[@]} -eq 1 ] || { echo "usage: pr-reply.sh <PR> resolve <thread-id>" >&2; exit 2; }
     resolve_thread "${args[0]}"
     ;;
-  *) echo "pr-reply: kind must be thread, comment or resolve" >&2; exit 2 ;;
+  *) echo "pr-reply: kind must be thread, comment, react or resolve" >&2; exit 2 ;;
 esac
+exit $failed
