@@ -54,10 +54,10 @@ flowchart LR
 | `specwright-commit` | One commit per task, Reconcile, completion check | Task commits and their subjects/trailers | git in the code repo and the store; `openspec list --json`; `tasks.md`; `specwright-pr` ship in pr mode |
 | `specwright-finish` | Archive commit, local `--no-ff` merge or hand-off to the PR | Archive commit, merge commit, planning-only marker | git in the code repo and the store; OpenSpec archive; `gh` through `as.sh` for the code PR lookup (plain `gh` after merge, #38); `specwright-pr` ship in pr mode |
 | `specwright-pr` + scripts | Ship, feedback and watch for one PR or a code/store PR pair | Feedback pass record, PR reply markers | `gh` GraphQL/REST through `as.sh`; `git` in the code repo and store (push; `pr-pair.sh`); `openspec list --json`; JSON on stdout; `specwright-finish` (archive before merge) and `specwright-debug` (CI failures) |
-| `specwright-roadmap` | Strategy, architecture baseline, milestones | `openspec/strategy.md`, `roadmap.md`; the baseline `architecture.md` and ADRs (see State ownership) | git and the store for its own branch and commits; `gh` through `as.sh` for PR status; `specwright-pr` ship in pr mode |
+| `specwright-roadmap` | Strategy, architecture baseline, milestones | `openspec/strategy.md`, `roadmap.md`; the baseline `architecture.md` and ADRs (see State ownership) | git and the store for its own branch and commits; `gh` through `as.sh` for PR status; OpenSpec CLI (`list`, `templates`, `schema validate`, `context`); `specwright-pr` ship in pr mode |
 | `specwright-debug` | Root-cause debugging discipline | None | git, read-only (`status`, `log`), plus `stash` to test a dirty tree, restored after; returns a verified fix uncommitted to `specwright-pr` in CI mode |
-| `specwright-implementer` agent | Implements one task group test-first from a packet | Nothing committed: the orchestrator verifies, ticks and commits | Packet in, evidence report out |
-| `specwright-reviewer` agent | Fresh-context review when no cross-model CLI is used | The one review file it is asked to write (`review.md` or `architecture-review.md`) | File paths in; the review file out, with exactly one `VERDICT:` line |
+| `specwright-implementer` agent | Implements one task group test-first from a packet | Nothing committed: the orchestrator verifies, ticks and commits | Packet in, evidence report out; OpenSpec CLI (`list`, `templates`, `schema validate`) |
+| `specwright-reviewer` agent | Fresh-context review when no cross-model CLI is used | The one review file it is asked to write (`review.md` or `architecture-review.md`) | File paths in; the review file out, with exactly one `VERDICT:` line; OpenSpec CLI (`list`, `context`, `instructions`, `templates`) |
 | Install prompt (README) | Installs or updates the copies into a project; keeps local `model:` lines | `openspec/.specwright/VERSION` | Copy layout in `CONTRIBUTING.md` |
 | Evals (`evals/`) | Graded agent runs and script tests, with a fake `gh` | Fixtures | `evals.json` + `grade.py`; `unittest` (`python -m unittest discover evals/pr-pair`) |
 
@@ -78,7 +78,7 @@ flowchart LR
 | Store gate lock | `specwright-branch` | The gate only | Never auto-removed; the user confirms removal | `<store git-common-dir>/specwright-gate.lock` |
 | Strategy and roadmap (`strategy.md`, `roadmap.md`) | `specwright-roadmap` init/close, and **next** when it adds a gap-closing change | Project lifetime | The roadmap is updated at each milestone close; status is derived, never stored | Main of the planning repo |
 | Baseline review (`architecture-review.md`) | One writer per round, by path: the orchestrator saves a cross-model CLI's output verbatim; `specwright-reviewer` writes it on the fresh-context path; the orchestrator also records `USER_OVERRIDE` after escalation | Project lifetime | A new review round rewrites it | Main of the planning repo |
-| Architecture file and ADRs (`architecture.md`, `docs/adr/`) | One writer at a time, by path: `specwright-roadmap` init/close, or the apply task of a change whose reviewed design records an ADR (it also updates the index) | Project lifetime | Accepted ADRs are never edited; a new ADR supersedes one and the index is updated | Main of the repo holding them (`project.architecture`, `project.adr_dir`) |
+| Architecture file and ADRs (`architecture.md`, `docs/adr/`) | One writer at a time, by path: `specwright-roadmap` init/close, or the apply task of a change whose reviewed design records an ADR (it also updates the index) | Project lifetime | An ADR is editable until its review gate passes and it reaches main; after that it is never edited, and a new ADR supersedes it and the index is updated. Gap: roadmap marks baseline ADRs `accepted` before its review runs (#44) | Main of the repo holding them (`project.architecture`, `project.adr_dir`) |
 | Settings | The user (install prompt merges; `specwright-roadmap` init may set the `project:` paths) | Project lifetime | Install keeps local values | `openspec/specwright.yaml`, `openspec/config.yaml` |
 | Installed version | Install prompt, last step | Until next install | Rewritten on install | `openspec/.specwright/VERSION` |
 
@@ -126,6 +126,7 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 | Watch cleanup can delete a newer watcher's token, leaving no watcher | #39 |
 | Unbounded metadata reads and no command deadlines in the PR scripts | #40 |
 | Roadmap init/close write to a store without the branch check or gate lock | #43 |
+| Roadmap writes baseline ADRs as `accepted` before the review gate | #44 |
 
 ## In-force ADRs
 
