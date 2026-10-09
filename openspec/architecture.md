@@ -38,8 +38,9 @@ flowchart LR
   PRS & SNAP & PAIR & REPLY --> AS[as.sh identity fence]
   FI & RM -->|PR lookup| AS
   AS --> GH[(GitHub via gh)]
-  BR & CM & FI & RM & PRS & PAIR --> GIT[(git: code repo)]
-  BR & CM & FI & RM & PRS & PAIR --> STORE[(git: planning store, optional)]
+  AS -->|fenced push| GIT & STORE
+  BR & CM & FI & RM & PRS & PAIR -->|local git; fetch, pull| GIT[(git: code repo)]
+  BR & CM & FI & RM & PRS & PAIR -->|local git; fetch, pull| STORE[(git: planning store, optional)]
   DBG -->|read-only history| GIT
   SCH & BR & CM & FI & PRS & RM & IMP & REV --> OS[OpenSpec CLI]
   FI -->|offers next / close| RM
@@ -102,7 +103,7 @@ flowchart LR
 | Fully paginated metadata reads (`pr-pair.sh` discovery, linking, recovery; after-limit issue reuse) | None: every page is read and held in memory; issue reuse scans all issues once per finding (F × I) | — | Large histories slow every call and grow memory (#40) | Nobody until a call is slow or fails |
 | Network commands (`gh`, `git` in the PR scripts) | No Specwright deadline. The watch timeout counts sleep intervals, not elapsed time, and cannot interrupt a poll that hangs | — | A hung command blocks timeout reporting and ownership checks (#40) | Nobody until the user notices |
 | Install / update | One project at a time | — | Interrupted update can leave deleted skills; a store's shared schema is replaced for every project (#36) | The user, on the next failing run |
-| Design review | Roadmap baseline: at most two rounds; change design review: escalate after 2 consecutive REVISE rounds; one verdict line | REVISE escalates to the user (USER_OVERRIDE) | CLI missing → `specwright-reviewer`; neither → stop | The user |
+| Design review | Roadmap baseline: at most two rounds, with no rule for when the count resets after a later edit voids a passing verdict (#49; this baseline's round 3 ran with the user's approval); change design review: escalate after 2 consecutive REVISE rounds; one verdict line | REVISE escalates to the user (USER_OVERRIDE) | CLI missing → `specwright-reviewer`; neither → stop | The user |
 | Store gate | One holder (atomic `mkdir`) | Second gate stops and names the owner | Interrupted gate leaves the lock → the user confirms removal | The user |
 | Task commits | One per task | — | A ticked task without a commit is a gap → Reconcile asks | The agent, then the user |
 | Local finish | Archive commit, then merges (store-backed: store, then code) | — | No resume path: re-entry after the archive commit repeats it; after the store merge it reports `Nothing to finish` and leaves the code branch unmerged (#48) | The user, finding the code unmerged |
@@ -133,6 +134,7 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 | `pass write` needs Python 3.10+ although the gate accepts 3.8+; unexpected errors escape the JSON contract | #46 |
 | Clipped snapshot bodies can be judged without the full text | #47 |
 | Local finish cannot resume after an interrupted archive commit or store merge | #48 |
+| Baseline review caps rounds at two, with no reset after a later edit | #49 |
 
 ## In-force ADRs
 
