@@ -38,7 +38,7 @@ flowchart LR
   PRS & SNAP & PAIR & REPLY --> AS[as.sh identity fence]
   FI & RM -->|PR lookup| AS
   AS --> GH[(GitHub via gh)]
-  AS -->|fenced push| GIT & STORE
+  AS -->|push via as.sh| GIT & STORE
   BR & CM & FI & RM & PRS & PAIR -->|local git; fetch, pull| GIT[(git: code repo)]
   BR & CM & FI & RM & PRS & PAIR -->|local git; fetch, pull| STORE[(git: planning store, optional)]
   DBG -->|read-only history| GIT
@@ -89,7 +89,7 @@ flowchart LR
 - **Settings:** `specwright.yaml` keys are documented in `templates/openspec/specwright.yaml` and the README. A new key has a safe default, so a missing key keeps earlier behaviour.
 - **Git evidence formats:** commit subjects `<type>(<change>): task X.Y …`, trailers `Feedback-Round:` and `Code-Changes: none`, the legacy `address review feedback` subject (counted as a round on a branch without trailers), archive/merge subjects, and the planning-only marker. Later runs and roadmap status parse these, so changing them is a workflow change (minor version).
 - **Script I/O** (ADR 0002): `pr-snapshot.sh` and `pr-pair.sh` print one JSON document (`pr-snapshot.sh --logs` appends plain log text); `pr-reply.sh` prints one plain line per action. Exit codes signal stop conditions. Scripts use only `bash` with a POSIX userland (`sed`, `grep`, `mktemp` and similar; Git Bash on Windows), `git`, `gh` 2.40+ (built-in jq) and the Python standard library (`pr-pair.sh` accepts 3.8+, but `pass write` needs 3.10+ and fails with a traceback, not JSON, on older versions: #46); `pr-pair.sh` runs `git` in the code repo and the store for repo identity, the expected PR set, recovery and cleanup.
-- **GitHub identity** (ADR 0004): every `gh` call for a configured login goes through `as.sh <login>` (or, for `pr-pair.sh`'s reads of the store under `planning_store.login`, its internal fence that resolves and verifies the token the same way), and `gh auth switch` is never run. With `github.login` empty (the shipped default), calls use the active account unfenced (#38). `specwright-finish`'s post-merge check runs a plain `gh pr view` even when a login is set (#38). `pr-pair.sh` fences `gh` calls per repo, but its `git` calls on the store run with the code account's credentials (#35). `git fetch` and `git pull` on main (branch gate, roadmap status, finish and pr cleanup) run with the ambient git credentials, unfenced (#38).
+- **GitHub identity** (ADR 0004): every `gh` call for a configured login goes through `as.sh <login>` (or, for `pr-pair.sh`'s reads of the store under `planning_store.login`, its internal fence that resolves and verifies the token the same way), and `gh auth switch` is never run. With `github.login` empty (the shipped default), calls use the active account unfenced (#38). `specwright-finish`'s post-merge check runs a plain `gh pr view` even when a login is set (#38). `pr-pair.sh` fences `gh` calls per repo, but its `git` calls on the store run with the code account's credentials (#35). `git fetch` and `git pull` on main (branch gate, roadmap status, finish and pr cleanup) run with the ambient git credentials, unfenced (#38). Credentials embedded in a remote URL (`https://user:token@github.com/...`, which `pr-pair.sh identity` accepts) take precedence over `as.sh`'s credential helper, so a push can authenticate as another account while the fence reports the configured login (#38).
 - **Cross-model review:** a read-only CLI run that prints the complete review artifact, which contains exactly one `VERDICT:` line (followed by the template's Required Changes, `CHANGES_APPLIED:` and Rebuttals sections). The CLI can read any file in the repo; the change and the files it reads (referenced source, ADRs) go to that provider. On by default; `review.cross_model: false` keeps reviews in-harness.
 
 ## Resource bounds and failure visibility
@@ -103,7 +103,7 @@ flowchart LR
 | Fully paginated metadata reads (`pr-pair.sh` discovery, linking, recovery; after-limit issue reuse) | None: every page is read and held in memory; issue reuse scans all issues once per finding (F × I) | — | Large histories slow every call and grow memory (#40) | Nobody until a call is slow or fails |
 | Network commands (`gh`, `git` in the PR scripts) | No Specwright deadline. The watch timeout counts sleep intervals, not elapsed time, and cannot interrupt a poll that hangs | — | A hung command blocks timeout reporting and ownership checks (#40) | Nobody until the user notices |
 | Install / update | One project at a time | — | Interrupted update can leave deleted skills; a store's shared schema is replaced for every project (#36) | The user, on the next failing run |
-| Design review | Roadmap baseline: at most two rounds, with no rule for when the count resets after a later edit voids a passing verdict (#49; this baseline's round 3 ran with the user's approval); change design review: escalate after 2 consecutive REVISE rounds; one verdict line | REVISE escalates to the user (USER_OVERRIDE) | CLI missing → `specwright-reviewer`; neither → stop | The user |
+| Design review | Roadmap baseline: at most two rounds, with no rule for when the count resets after a later edit voids a passing verdict (#49; this baseline's rounds 3 and 4 ran with the user's approval); change design review: escalate after 2 consecutive REVISE rounds; one verdict line | REVISE escalates to the user (USER_OVERRIDE) | CLI missing → `specwright-reviewer`; neither → stop | The user |
 | Store gate | One holder (atomic `mkdir`) | Second gate stops and names the owner | Interrupted gate leaves the lock → the user confirms removal | The user |
 | Task commits | One per task | — | A ticked task without a commit is a gap → Reconcile asks | The agent, then the user |
 | Local finish | Archive commit, then merges (store-backed: store, then code) | — | No resume path: re-entry after the archive commit repeats it; after the store merge it reports `Nothing to finish` and leaves the code branch unmerged (#48) | The user, finding the code unmerged |
@@ -125,7 +125,7 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 | `pass write` accepts a malformed `prs` map | #26 |
 | Install/update has no lifecycle for running sessions or shared stores | #36 |
 | OpenSpec pin is not enforced | #37 |
-| Empty `github.login` (default) is unfenced | #38 |
+| Empty `github.login` (default) is unfenced; credential-bearing remote URLs bypass `as.sh`, so a successful push can use another account without reporting the mismatch | #38 |
 | Watch cleanup can delete a newer watcher's token, leaving no watcher | #39 |
 | Unbounded metadata reads and no command deadlines in the PR scripts | #40 |
 | Roadmap init/close write to a store without the branch check or gate lock | #43 |
@@ -138,13 +138,13 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 
 ## In-force ADRs
 
-The baseline ADRs were accepted once the baseline review of their final text passed (round 3, `openspec/architecture-review.md`).
+The baseline ADRs were accepted once the round 4 review of their revised final text passed (`openspec/architecture-review.md`: `APPROVE_WITH_CHANGES`, with the reviewer's re-check setting `CHANGES_APPLIED: yes`).
 
 | ADR | Decision | Supersedes |
 |---|---|---|
 | [0001](../docs/adr/0001-build-on-unmodified-openspec.md) | Extend OpenSpec only through a schema, skills, agents and templates installed as copies | — |
 | [0002](../docs/adr/0002-agent-instructions-with-thin-scripts.md) | The agent follows instructions; deterministic work goes to small bash + git + gh + python3 scripts | — |
 | [0003](../docs/adr/0003-git-and-github-as-the-state-store.md) | Git history and GitHub hold workflow evidence; local state is only recoverable working state | — |
-| [0004](../docs/adr/0004-process-scoped-github-identity.md) | When a login is configured, authenticated GitHub calls run under a process-scoped, verified login; exceptions: the empty default, `specwright-finish`'s post-merge `gh pr view`, and `git fetch`/`git pull` on main are unfenced (#38) | — |
+| [0004](../docs/adr/0004-process-scoped-github-identity.md) | When a login is configured, authenticated GitHub calls run under a process-scoped, verified login; exceptions: the empty default, `specwright-finish`'s post-merge `gh pr view`, and `git fetch`/`git pull` on main are unfenced, and credentials embedded in a remote URL bypass the push fence (#38) | — |
 | [0005](../docs/adr/0005-orchestrator-implementer-reviewer-split.md) | The orchestrator verifies and commits; an implementer agent builds; FULL design reviews run in a fresh context, cross-model when possible | — |
 | [0006](../docs/adr/0006-openspec-resolves-the-planning-root.md) | OpenSpec resolves where planning lives; store-backed changes pair branches and commits across two repos | — |
