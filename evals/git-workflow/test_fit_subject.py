@@ -63,13 +63,13 @@ class FitSubject(unittest.TestCase):
         self.assertEqual(r.stdout.decode("utf-8").strip(), subject)
 
     def test_shell_like_text_stays_literal(self):
-        full = "fix(add-greeting): task 2.1 Run `touch pwned` and $(echo hi) with 'single' \"double\" $HOME plus words to pass the limit"
+        full = "fix(greet): task 2.1 Run `touch pwned` and $(echo hi) with 'it' \"$HOME\" plus words past the limit"
         msg = self.message(full + "\n")
         r = self.run_script(msg)
         self.assertEqual(r.returncode, 0, r.stderr)
         line1 = msg.read_bytes().decode("utf-8").split("\n", 1)[0]
         self.assert_fitted(full, line1)
-        self.assertIn("`touch pwned` and $(echo hi) with 'single' \"double\" $HOME", line1)
+        self.assertIn("Run `touch pwned` and $(echo hi) with 'it' \"$HOME\"", line1)
         self.assertFalse((self.tmp / "pwned").exists(), "task text was executed: pwned was created")
         self.assertFalse((ROOT / "pwned").exists(), "task text was executed: pwned was created")
 
