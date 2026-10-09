@@ -16,10 +16,10 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 | feedback-passes → Pass records are keyed per repository and change | Hyphenated owners and names | evals/pr-pair/test_pr_pair.py | test_record_keys_do_not_alias_hyphenated_identities | red |
 | feedback-passes → Pass records are keyed per repository and change | Record from 0.1.9 | evals/pr-pair/test_pr_pair.py | test_legacy_record_is_moved_to_the_new_key | red |
 | feedback-passes → Pass records are keyed per repository and change | Old key belongs to another repository | evals/pr-pair/test_pr_pair.py | test_legacy_record_of_another_identity_is_left_alone | red |
-| feedback-passes → A pass intent is validated before it is written | Well-formed intent | evals/pr-pair/test_pr_pair.py | test_pass_write_accepts_a_well_formed_intent | red |
-| feedback-passes → A pass intent is validated before it is written | `prs` is a string | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_malformed_prs | red |
-| feedback-passes → A pass intent is validated before it is written | Round is not a positive integer | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_a_bad_round | red |
-| feedback-passes → A pass intent is validated before it is written | Thread finding without a usable root id | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_a_bad_root_id | red |
+| feedback-passes → A pass intent is validated before it is written | Well-formed intent | evals/pr-pair/test_pr_pair.py | test_pass_write_accepts_a_well_formed_intent | green |
+| feedback-passes → A pass intent is validated before it is written | `prs` is a string | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_malformed_prs | green |
+| feedback-passes → A pass intent is validated before it is written | Round is not a positive integer | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_a_bad_round | green |
+| feedback-passes → A pass intent is validated before it is written | Thread finding without a usable root id | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_a_bad_root_id | green |
 | feedback-passes → A pass intent is validated before it is written | Repo-local intent names a store PR | evals/pr-pair/test_pr_pair.py | test_repo_local_pass_write_refuses_a_store_pr | red |
 | feedback-passes → Repo-local changes recover an interrupted pass | Interrupted after the last allowed fix was pushed | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_repo_local_final_pass_resumes_without_a_new_round; test_feedback_uses_pass_record_for_repo_local | red |
 | feedback-passes → Repo-local changes recover an interrupted pass | Repo-local pass completes | evals/pr-pair/test_pr_pair.py | test_repo_local_pass_completes_and_is_removed | red |
@@ -49,7 +49,7 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 | planning-stores → Feedback rounds span the PR pair | Spec fix requested on the code PR | evals/pr-pair/test_pr_pair.py | test_pass_plan_routes_spec_fix_to_store | green |
 | planning-stores → Feedback rounds span the PR pair | Round limit across both repos | evals/pr-pair/test_pr_pair.py | test_rounds_highest_across_branches | green |
 | planning-stores → Feedback rounds span the PR pair | Finishing an interrupted final pass | evals/pr-pair/test_pr_pair.py | test_pass_plan_final_pass_push_pending | green |
-| planning-stores → Feedback rounds span the PR pair | Recovered partial fix | evals/pr-pair/test_pr_pair.py | test_rounds_ignores_subject_count_when_trailers_exist | red |
+| planning-stores → Feedback rounds span the PR pair | Recovered partial fix | evals/pr-pair/test_pr_pair.py | test_rounds_ignores_subject_count_when_trailers_exist | green |
 | planning-stores → Feedback rounds span the PR pair | Legacy branch without trailers | evals/pr-pair/test_pr_pair.py | test_rounds_legacy_subject_count_without_trailers | green |
 | planning-stores → An interrupted feedback pass is completed first | Interrupted between the two fix commits | evals/pr-pair/test_pr_pair.py | test_pass_plan_missing_store_commit | green |
 | planning-stores → An interrupted feedback pass is completed first | Interrupted after both pushes | evals/pr-pair/test_pr_pair.py | test_pass_plan_rerequest_and_replies_pending | green |
@@ -82,7 +82,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
   - `test_rounds_ignores_subject_count_when_trailers_exist`: a round-1 partial recovery leaves two `Feedback-Round: 1` commits, and `rounds` must report 1 with `limit_reached` false at `max_fix_rounds: 2`.
 
   Verify each fails for the stated reason: the record is written, or `rounds` is 2.
-- [ ] 2.2 Implement D3's checks in `pass_write` (including `root_id` for thread findings and `item` for comment and review findings) and D5's rule in `cmd_rounds`. Verify the five tests pass, plus `test_rounds_legacy_subject_count_without_trailers` and `test_pass_write_refuses_findings_pass_plan_cannot_read`. Flip the rows green.
+- [x] 2.2 Implement D3's checks in `pass_write` (including `root_id` for thread findings and `item` for comment and review findings) and D5's rule in `cmd_rounds`. Verify the five tests pass, plus `test_rounds_legacy_subject_count_without_trailers` and `test_pass_write_refuses_findings_pass_plan_cannot_read`. Flip the rows green.
 - [ ] 2.3 Update `openspec/architecture.md`:
   - the Feedback rounds row in Resource bounds: drop the #29 gap clause;
   - Git evidence formats: the legacy subject counts only on a branch with no trailers in either repo;

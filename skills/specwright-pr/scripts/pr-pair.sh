@@ -805,8 +805,9 @@ def cmd_rounds(argv):
         trailers = {sha: max([int(x) for x in TRAILER.findall(body)] or [0]) for sha, _, body in commits}
         per[k] = {"max_trailer": max(trailers.values(), default=0), "trailers": trailers,
                   "subject_count": sum(1 for _, s, _ in commits if LEGACY_SUBJECT.search(s))}
-    rounds = max(per["code"]["max_trailer"], per["store"]["max_trailer"], per["code"]["subject_count"], per["store"]["subject_count"])
     top = max(per["code"]["max_trailer"], per["store"]["max_trailer"])
+    # trailers are exact; the legacy subject count only stands in on a branch that has none in either repo
+    rounds = top or max(per["code"]["subject_count"], per["store"]["subject_count"])
     unpushed, unreadable = {}, []
     if top:
         for k, d in (("code", a["code"]), ("store", a["store"])):
@@ -883,6 +884,27 @@ def pass_args(argv, extra=None):
     return a
 
 
+def is_pos_int(v):
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 1
+
+
+def check_intent_header(intent):
+    """branch, round and prs, before anything is written."""
+    if not isinstance(intent["branch"], str) or not intent["branch"].strip():
+        raise Stop("invalid_intent", "'branch' must be a non-empty string", code=2)
+    if not is_pos_int(intent["round"]):
+        raise Stop("invalid_intent", "'round' must be a positive integer", code=2)
+    prs = intent["prs"]
+    if not isinstance(prs, dict) or set(prs) - {"code", "store"}:
+        raise Stop("invalid_intent", "'prs' must be an object with only 'code' and 'store' entries", code=2)
+    for k, v in prs.items():
+        if v is None:
+            continue
+        if (not isinstance(v, dict) or not isinstance(v.get("repo"), str) or not re.match(r"^[^/\s]+/[^/\s]+$", v["repo"])
+                or not is_pos_int(v.get("number"))):
+            raise Stop("invalid_intent", f"'prs.{k}' must be null or an object with 'repo' as <owner>/<name> and 'number' as a positive integer", code=2)
+
+
 def pass_write(argv):
     a = pass_args(argv, {"--intent": "intent", "--store-prefix": "prefix"})
     need(a, "intent")
@@ -894,6 +916,7 @@ def pass_write(argv):
     for key in ("branch", "round", "prs", "findings"):
         if key not in intent:
             raise Stop("invalid_intent", f"intent lacks '{key}'", code=2)
+    check_intent_header(intent)
     path = record_path(a["code_repo"], a["change"])
     if path.exists():
         raise Stop("record_exists", f"a feedback pass record exists at {path}; resume that pass before starting another", path=str(path))
@@ -912,6 +935,11 @@ def pass_write(argv):
                 or not all(isinstance(e, dict) and isinstance(e.get("file"), str) and e["file"] for e in f["edits"])):
             raise Stop("invalid_intent", f"finding {f['id']} is duplicated or malformed", code=2)
         seen.add(f["id"])
+        if f.get("kind", "thread") == "thread":
+            if not is_pos_int(f.get("root_id")):
+                raise Stop("invalid_intent", f"finding {f['id']}: thread finding needs 'root_id' as a positive integer", code=2)
+        elif not isinstance(f["item"], str) or not f["item"]:
+            raise Stop("invalid_intent", f"finding {f['id']}: {f['kind']} finding needs 'item' as a non-empty string", code=2)
         for e in f["edits"]:
             r = e.get("repo")
             if (f["destination"] == "both" and r not in ("code", "store")) or (f["destination"] != "both" and r not in (None, f["destination"])):
