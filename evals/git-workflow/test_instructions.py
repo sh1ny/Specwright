@@ -197,6 +197,12 @@ BRANCH_TEST_STORE = r'test "\$\(git -C "<store toplevel>" branch --show-current\
 BRANCH_TEST_CD = r'cd "<store toplevel>" && test "\$\(git branch --show-current\)" = <branch> &&'
 
 
+def mode_block(text, n):
+    """Numbered item `n` of a list in `text`, up to the next numbered item or blank line."""
+    m = re.search(r"^%d\. .*?(?=^\d+\. |\n\n|\Z)" % n, text, re.M | re.S)
+    return m.group(0) if m else ""
+
+
 class PlanningStores(unittest.TestCase):
     def test_roadmap_store_branch_under_gate_lock(self):
         s = store_part(committing_project_files())
@@ -220,6 +226,17 @@ class PlanningStores(unittest.TestCase):
         self.assertRegex(held, r"(?i)only the lock (you|it) took|never remove.{0,60}(another|other)|not yours",
                          "the release is not limited to the lock this run took")
         self.assertNotRegex(s, r"specwright-branch`?\s+(store\S*\s+)?steps?\s+\d", "the gate cites specwright-branch step numbers")
+
+    def test_roadmap_store_checks_code_repo_before_any_branch(self):
+        s = store_part(committing_project_files())
+        check = mode_block(s, 2)
+        self.assertRegex(check, r"(?i)code repo", "step 2 does not check the code repo")
+        self.assertRegex(check, r"(?s)(?i)code repo.{0,200}(clean|on its main).{0,200}<branch>.{0,40}exist",
+                         "step 2 does not check that the code repo is clean, on main and without <branch>")
+        branch = mode_block(s, 3)
+        self.assertRegex(branch, r"(?s)(?i)(fails|errors).{0,200}(switch|checkout).{0,80}store.{0,120}(delete|branch -D)",
+                         "a failed code branch does not roll the store branch back")
+        self.assertRegex(branch, r"(?i)releas", "the rollback does not release the lock")
 
     def test_roadmap_store_commits_check_branch_in_same_call(self):
         s = store_part(committing_project_files())

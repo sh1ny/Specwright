@@ -7,6 +7,7 @@ a line 1 with no task prefix. Each test runs it through `bash`, as the skill doe
 
 Run: python -m unittest discover evals/git-workflow -p "test_fit_subject.py"
 """
+import os
 import shutil
 import subprocess
 import tempfile
@@ -107,6 +108,25 @@ class FitSubject(unittest.TestCase):
         self.assertTrue(line1.endswith(b"\r"), line1)
         self.assertEqual(tail, b"\r\nBody.\r\n")
         self.assert_fitted(GREETING, line1[:-1].decode("utf-8"))
+
+    def test_multibyte_text_counted_in_characters_in_any_locale(self):
+        prefix = "feat(add-greeting): task 1.1 "
+        short = prefix + " ".join(["é"] * 20)  # 68 characters, 88 bytes
+        self.assertLessEqual(len(short), LIMIT)
+        self.assertGreater(len(short.encode("utf-8")), LIMIT)
+        long = prefix + " ".join(["café"] * 12)  # 88 characters
+        for loc in ("C", "C.UTF-8", "en_US.UTF-8"):
+            with self.subTest(locale=loc):
+                env = {**os.environ, "LC_ALL": loc}
+                data = (short + "\n\nBody.\n").encode("utf-8")
+                msg = self.message(data)
+                r = subprocess.run(["bash", str(SCRIPT), str(msg)], capture_output=True, cwd=self.tmp, env=env)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(msg.read_bytes(), data, "a subject within 72 characters was cut")
+                msg = self.message(long + "\n")
+                r = subprocess.run(["bash", str(SCRIPT), str(msg)], capture_output=True, cwd=self.tmp, env=env)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assert_fitted(long, msg.read_bytes().decode("utf-8").split("\n", 1)[0])
 
 
 if __name__ == "__main__":

@@ -21,21 +21,24 @@ IFS= read -r line < "$msg" || true
 cr=
 case $line in *$'\r') cr=$'\r'; line=${line%$'\r'} ;; esac
 
-# POSIX awk (length, match, substr); the subject comes in through the
-# environment, so awk -v never reinterprets its backslashes.
-fitted=$(SUBJECT=$line awk -v lim="$limit" 'BEGIN {
+# POSIX awk (length, match, substr, gsub); the subject comes in through the
+# environment, so awk -v never reinterprets its backslashes. awk runs on bytes
+# (LC_ALL=C) in every environment, and chars() counts UTF-8 characters by
+# leaving out continuation bytes (0x80-0xBF), so the limit is in characters
+# whatever the caller's locale.
+fitted=$(SUBJECT=$line LC_ALL=C awk -v lim="$limit" '
+function chars(t) { return length(t) - gsub(/[\200-\277]/, "", t) }
+BEGIN {
   s = ENVIRON["SUBJECT"]
   if (!match(s, /^[^ ]+: task [0-9]+\.[0-9]+ /)) exit 2
-  if (length(s) <= lim) { print s; exit 0 }
+  if (chars(s) <= lim) { print s; exit 0 }
   p = RLENGTH
-  for (i = lim + 1; i > p; i--) {
-    if (substr(s, i, 1) == " ") {
-      out = substr(s, 1, i - 1)
-      sub(/ +$/, "", out)
-      if (length(out) < p) exit 1
-      print out
-      exit 0
-    }
+  for (i = length(s); i > p; i--) {
+    if (substr(s, i, 1) != " ") continue
+    out = substr(s, 1, i - 1)
+    sub(/ +$/, "", out)
+    if (length(out) < p) exit 1
+    if (chars(out) <= lim) { print out; exit 0 }
   }
   exit 1
 }')
