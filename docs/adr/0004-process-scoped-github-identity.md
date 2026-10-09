@@ -10,7 +10,7 @@ Several agents share one `gh` login store. `gh auth switch` changes the active a
 ## Decision
 When a login is configured (`github.login`, `planning_store.login`, `pr.request_as`), every authenticated GitHub call for it runs through `as.sh <login>`. The wrapper resolves that login's token for the one process, verifies the identity with `gh api user`, and pins git's HTTPS credentials to it with SSH disabled. Specwright never runs `gh auth switch`. A missing or mismatched credential stops the step.
 
-With no login configured (`github.login: ""`, the shipped default), calls use the active `gh` account unfenced. This exception is documented as unsafe when agents run concurrently and is tracked as a known gap (sh1ny/specwright#38): a later change should make the fence the default, for example by fencing the active login that was resolved once at the start of the run.
+With no login configured (`github.login: ""`, the shipped default), calls use the active `gh` account unfenced. This exception is documented as unsafe when agents run concurrently and is tracked as a known gap (sh1ny/specwright#38): a later change should make the fence the default, for example by fencing the active login that was resolved once at the start of the run. One call is unfenced even with a login configured: `specwright-finish` checks the merged PR with a plain `gh pr view` (also tracked in #38).
 
 **Rejected: rely on the active `gh` account.** It needs no setup, but it races with concurrent agents and can silently act as the wrong account.
 

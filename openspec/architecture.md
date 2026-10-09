@@ -48,14 +48,14 @@ flowchart LR
 | Component | Responsibility | Owns (state) | Talks to via (contract) |
 |---|---|---|---|
 | `schemas/specwright` | Artifact sequence (proposal, specs, design with triage, review gate, tasks) and apply instructions | Artifact templates | OpenSpec schema format (`openspec schema validate`) |
-| `specwright-branch` | Clean-main gate, `<prefix>/<change-name>` branch, store branch and gate lock | Store gate lock | git; `openspec list --json` |
-| `specwright-commit` | One commit per task, Reconcile, completion check | Task commits and their subjects/trailers | git; `tasks.md` |
-| `specwright-finish` | Archive commit, local `--no-ff` merge or hand-off to the PR | Archive commit, merge commit | git; OpenSpec archive |
-| `specwright-pr` + scripts | Ship, feedback and watch for one PR or a code/store PR pair | Feedback pass record, PR reply markers | `gh` GraphQL/REST through `as.sh`; `git` in the code repo and store (`pr-pair.sh`); JSON on stdout |
+| `specwright-branch` | Clean-main gate, `<prefix>/<change-name>` branch, store branch and gate lock | Store gate lock | git in the code repo and the store; `openspec list --json` |
+| `specwright-commit` | One commit per task, Reconcile, completion check | Task commits and their subjects/trailers | git in the code repo and the store; `openspec list --json`; `tasks.md`; `specwright-pr` ship in pr mode |
+| `specwright-finish` | Archive commit, local `--no-ff` merge or hand-off to the PR | Archive commit, merge commit, planning-only marker | git in the code repo and the store; OpenSpec archive; `gh` through `as.sh` for the code PR lookup (plain `gh` after merge, #38); `specwright-pr` ship in pr mode |
+| `specwright-pr` + scripts | Ship, feedback and watch for one PR or a code/store PR pair | Feedback pass record, PR reply markers | `gh` GraphQL/REST through `as.sh`; `git` in the code repo and store (push; `pr-pair.sh`); `openspec list --json`; JSON on stdout; `specwright-finish` (archive before merge) and `specwright-debug` (CI failures) |
 | `specwright-roadmap` | Strategy, architecture baseline, milestones | `openspec/strategy.md`, `roadmap.md`; the baseline `architecture.md` and ADRs (see State ownership) | git and the store for its own branch and commits; `gh` through `as.sh` for PR status; `specwright-pr` ship in pr mode |
-| `specwright-debug` | Root-cause debugging discipline | None | None |
+| `specwright-debug` | Root-cause debugging discipline | None | git, read-only (`status`, `log`), plus `stash` to test a dirty tree, restored after; returns a verified fix uncommitted to `specwright-pr` in CI mode |
 | `specwright-implementer` agent | Implements one task group test-first from a packet | Nothing committed: the orchestrator verifies, ticks and commits | Packet in, evidence report out |
-| `specwright-reviewer` agent | Fresh-context review when no cross-model CLI is used | `review.md` it writes | File paths in, `VERDICT:` line out |
+| `specwright-reviewer` agent | Fresh-context review when no cross-model CLI is used | The one review file it is asked to write (`review.md` or `architecture-review.md`) | File paths in, `VERDICT:` line out |
 | Install prompt (README) | Installs or updates the copies into a project; keeps local `model:` lines | `openspec/.specwright/VERSION` | Copy layout in `CONTRIBUTING.md` |
 | Evals (`evals/`) | Graded agent runs and script tests, with a fake `gh` | Fixtures | `evals.json`, pytest |
 
@@ -67,11 +67,15 @@ flowchart LR
 | `review.md` | One writer per review, by path: the orchestrator for LIGHT (`SKIPPED_LIGHT`) and for a cross-model review (saves the CLI output verbatim); `specwright-reviewer` for a fresh-context review | Until archive | A new review round rewrites it | Planning repo branch, then main |
 | `tasks.md` ticks | Orchestrator (never the implementer) | Until archive | Reconcile against commits | Planning repo (store when store-backed) |
 | Task commits (`task X.Y` subject, `Code-Changes: none`) | `specwright-commit` | Permanent | Never rewritten without the user | Change branch, then main |
+| Archive and merge commits (`archive change`, `merge: <change>`) | `specwright-finish`; `merge: <branch>` also from `specwright-roadmap` in local mode | Permanent | Never rewritten; roadmap status reads them | Planning repo (archive), code repo main (merge) |
+| Planning-only marker (`specwright-change.yaml`, `code_changes: none`, in the archive directory) | `specwright-finish` writes it at archive; `specwright-pr` feedback deletes it when a code fix follows | Permanent once on the store's main | Proof for roadmap status that a store-backed change has no code side | Store branch, then the store's main |
 | `Feedback-Round: <n>` trailers | `specwright-pr` feedback | Permanent | The round count is derived from them | Change branch in either repo |
-| PR reply markers (`specwright:handled …`) | `pr-reply.sh` | Life of the PR | An item edited after the reply counts as unhandled again. Gap: an edit made while the fix was in progress is hidden by the later reply (#33) | GitHub |
+| PR markers: reply markers (`specwright:handled …`), pair-link marker comments, `specwright:pr-item` in after-limit issue bodies | `pr-reply.sh`; `pr-pair.sh link`; `specwright-pr` after the limit | Life of the PR | An item edited after the reply counts as unhandled again. Gap: an edit made while the fix was in progress is hidden by the later reply (#33) | GitHub |
 | Feedback pass record (store-backed changes only) | The one session running feedback for the change, through `pr-pair.sh pass write/done`. Gap: that exclusivity is assumed, not enforced (#32) | One feedback pass | Deleted at `pass done`; a leftover record blocks the next pass until resumed | `~/.cache/specwright/feedback/` (or `SPECWRIGHT_STATE_DIR`) |
 | Watch ownership token | The newest `pr-snapshot.sh --wait` on the PR | One watch | Released on exit; an older watcher that sees another token exits 4. Gap: cleanup can delete a newer watcher's token, leaving no watcher (#39) | `~/.cache/specwright/watch/<owner>-<repo>-<pr>` |
 | Store gate lock | `specwright-branch` | The gate only | Never auto-removed; the user confirms removal | `<store git-common-dir>/specwright-gate.lock` |
+| Strategy and roadmap (`strategy.md`, `roadmap.md`) | `specwright-roadmap` init/close | Project lifetime | The roadmap is updated at each milestone close; status is derived, never stored | Main of the planning repo |
+| Baseline review (`architecture-review.md`) | One writer per round, by path: the orchestrator saves a cross-model CLI's output verbatim; `specwright-reviewer` writes it on the fresh-context path | Project lifetime | A new review round rewrites it | Main of the planning repo |
 | Architecture file and ADRs (`architecture.md`, `docs/adr/`) | One writer at a time, by path: `specwright-roadmap` init/close, or the apply task of a change whose reviewed design records an ADR (it also updates the index) | Project lifetime | Accepted ADRs are never edited; a new ADR supersedes one and the index is updated | Main of the repo holding them (`project.architecture`, `project.adr_dir`) |
 | Settings | The user (install prompt merges) | Project lifetime | Install keeps local values | `openspec/specwright.yaml`, `openspec/config.yaml` |
 | Installed version | Install prompt, last step | Until next install | Rewritten on install | `openspec/.specwright/VERSION` |
