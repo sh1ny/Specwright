@@ -7,7 +7,7 @@ Specwright is built with Specwright: changes to it go through the same branch â†
 1. Install the OpenSpec CLI at the version in the README badge (`npm i -g @fission-ai/openspec@1.14.1`), plus `git`, `gh` 2.40 or later, and `bash` (Git Bash on Windows).
 2. Clone the repository and run `openspec init` in it.
 3. Run the [install prompt](README.md#-install--update) from the README in the clone. It installs Specwright into the repo's own `openspec/` and asks for this repo's settings; `finish: pr` fits here.
-4. Restart your agent so it loads the installed skills and agents.
+4. Start a new agent session: installed skills and agent definitions load only in a session started after the install.
 
 ## Source vs. installed copies
 

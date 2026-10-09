@@ -160,8 +160,9 @@ models kept), config and settings created/merged/unchanged (keys added or
 removed), legacy files removed, and the result of each Step 7 check. When `<root>`
 is a store, list the files this install left uncommitted there (by path,
 from `git status --porcelain` in the store) and say the user commits them in
-the store; this prompt never commits. Tell the user to restart their agent
-so new skills and agents load.
+the store; this prompt never commits. Tell the user that new skills and
+agent definitions load only in a new agent session started after this
+install: start one before relying on them.
 ```
 
 ## ⚡ First Steps After Install
@@ -355,6 +356,8 @@ Files are always staged by name — never `git add -A`, never all of `openspec/`
 Store evals (`eval-store-*`) need two repos, so the fixture is a directory, not a repo: `code/` is the project, `store/` is its OpenSpec store. The fixture also writes `eval.env`. The agent under test must run `source <repo>/eval.env` first and work from `<repo>/code`. The file points the OpenSpec registry and config (`XDG_DATA_HOME`, `XDG_CONFIG_HOME`) and Specwright's watch state (`SPECWRIGHT_STATE_DIR`) at the run directory, and puts a fake `gh` first on `PATH`. Your own registry and state are never touched. The fake `gh` ([`evals/fakes/gh.py`](evals/fakes/gh.py)) keeps its state in `gh-state.json` and logs every call to `gh-log.jsonl`; `grade.py` reads both repos and that log.
 
 Test the fake `gh` with `python -m unittest discover evals/pr-pair`.
+
+To check that delegated agents can load skills, start a new session after the install, dispatch `specwright-implementer` with a small packet that names one installed skill (with its `SKILL.md` path) and look for its `Skill` call before any edit. A session that was already running before the install still has the old agent definitions, so a check there proves nothing: start a new session and run it again.
 
 ---
 
