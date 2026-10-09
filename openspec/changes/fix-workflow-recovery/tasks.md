@@ -83,7 +83,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
   Verify each fails for the stated reason: the record is written, or `rounds` is 2.
 - [x] 2.2 Implement D3's checks in `pass_write` (including `root_id` for thread findings and `item` for comment and review findings) and D5's rule in `cmd_rounds`. Verify the five tests pass, plus `test_rounds_legacy_subject_count_without_trailers` and `test_pass_write_refuses_findings_pass_plan_cannot_read`. Flip the rows green.
-- [ ] 2.3 Update `openspec/architecture.md`:
+- [x] 2.3 Update `openspec/architecture.md`:
   - the Feedback rounds row in Resource bounds: drop the #29 gap clause;
   - Git evidence formats: the legacy subject counts only on a branch with no trailers in either repo;
   - remove the #29 row from Known gaps if it is listed.
