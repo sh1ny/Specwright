@@ -80,3 +80,7 @@ Reviewer re-check: All four required changes are accepted. Issue extensions were
 - **Required change 2:** accepted; the #32/#39 comments cover both collision cases and the required independent-record/watcher regressions; both roadmap entries are updated.
 - **Required change 3:** accepted; the report-cutoff row describes the commit-time fallback, stale evidence in a fresh snapshot and failure visibility; the #31 Known gaps entry is updated.
 - **Required change 4:** accepted; the #31 comment specifies Mira and a required generic reviewer, `commit(B) < report(A) < push(B)`, unavailable push activity and rejection of A's report for B; the roadmap entry is updated.
+
+Author, after the round-5 re-check: rounds 3, 4 and 5 ran beyond `specwright-roadmap`'s two-round cap at the user's explicit direction on PR #41 (2026-10-09: "more rounds, see where this leads us to", then "keep going until codex is finally happy"); the missing reset rule is #49. After the re-check, one sentence of `openspec/architecture.md` (the Design review row) was reworded to record that approval for every round after the second.
+
+Reviewer re-check of the post-review edit: Accepted. Against HEAD `7091b19`, the baseline edit is limited to that sentence; `git diff HEAD --stat` confirms no changes to strategy, roadmap or ADRs. The wording matches the author note’s approval for rounds 3–5 and preserves the skill’s two-round cap and #49 reset-rule gap. The round-5 `VERDICT: APPROVE_WITH_CHANGES` with `CHANGES_APPLIED: yes` still covers the baseline as edited; its basis is unchanged.
