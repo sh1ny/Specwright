@@ -696,6 +696,23 @@
         "No gate lock is left in the store",
         "The report says the name belongs to an archived change and offers another name"
       ]
+    },
+    {
+      "id": 40,
+      "name": "eval-store-roadmap-close-locked",
+      "skills": [
+        "specwright-roadmap"
+      ],
+      "prompt": "Close milestone M1 on the roadmap.",
+      "expected_output": "Local mode, planning in a store, M1 done (add-greeting archived on the store's main and merged into code main; its agent-verified exit criterion passes). Another session holds the store's gate lock (change add-csv-export, taken just now). Close stops at the gate before creating docs/close-m1 in either repo or writing any project file, shows the lock's owner, and leaves the lock untouched.",
+      "assertions": [
+        "No docs/close-* branch was ever made in either repo",
+        "The gate lock directory and its owner file are byte-identical to the fixture's",
+        "Both repos are on main, and the code and store mains are unchanged",
+        "No project file was written: both working trees are clean",
+        "The report says close stopped because the store's gate is locked or busy, and names the owning change add-csv-export",
+        "No commit was amended in either repo"
+      ]
     }
   ]
 }

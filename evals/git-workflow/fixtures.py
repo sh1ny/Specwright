@@ -478,6 +478,37 @@ def build_roadmap(name, dest):
                             ("add-metrics", "usage metrics (after `2026-10-08-add-logging`)")])
 
 
+def build_roadmap_close_locked(dest):
+    """Local mode, planning in a store. M1's only change (add-greeting) is done: its archive is on the store's main and
+    code main has merge: add-greeting. Its exit criterion is agent-verified and passes. Another session holds the
+    store's gate lock right now. Both repos are clean on main. fixture-state.json records the tips and the owner file."""
+    code, store = dest / "code", dest / "store"
+    store_base(dest, settings="finish: local\n" + ROADMAP_SETTINGS)
+    archive_in_store(store, "2026-10-07-add-greeting", "feat(add-greeting): archive change")
+    code_branch(code, "add-greeting")
+    git(code, "checkout", "-q", "feat/add-greeting")
+    task_code(code, "1.1")  # real greet() and tests, so the exit criterion passes on main
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "feat(add-greeting): task 1.1 Add greet(name) with tests")
+    merge_into_main(code, "feat/add-greeting", "add-greeting")
+    write(code, "openspec/roadmap.md",
+          "# Greeter Roadmap\n\nStrategy: openspec/strategy.md · Architecture: openspec/architecture.md\n\n"
+          "<!-- Status is derived: a change is done when archived; a milestone is done when its changes are done and its exit criteria pass. Do not add status checkboxes for changes. -->\n\n"
+          "## Now: M1 - Greetings\n\n**Outcome:** Users get a greeting by name.\n\n"
+          "**Exit criteria:**\n- `python -m unittest -q` passes on main (agent)\n\n"
+          "**Changes** (in order; each about one PR):\n1. `add-greeting` - greet function\n\n"
+          "## Next: M2 - Farewells\n\nFarewells and shouting greetings.\n\n"
+          "## Later\n\n- M3 - Sharing: greetings shared between teams\n\n## Done\n")
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "docs: add project roadmap")
+    gate_lock(store, datetime.now(timezone.utc), change="add-csv-export")  # another session is in its gate right now
+    lock = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=store,
+                               check=True, capture_output=True, text=True).stdout.strip()) / "specwright-gate.lock"
+    tip = lambda r: subprocess.run(["git", "rev-parse", "main"], cwd=r, check=True, capture_output=True, text=True).stdout.strip()
+    write(dest, "fixture-state.json", json.dumps({"code_main": tip(code), "store_main": tip(store),
+                                                  "owner": (lock / "owner").read_text(encoding="utf-8")}, indent=2))
+
+
 def build_store(name, dest):
     """Fixtures whose planning lives outside the code repo (or in a folder inside it)."""
     code, store = dest / "code", dest / "store"
@@ -594,6 +625,8 @@ def build_store(name, dest):
         pr_pair_base(dest)  # both repos have a GitHub origin; any push dies at the unreachable proxy
     elif name == "eval-store-archive-before-merge-local-store":
         pr_pair_base(dest, store_origin=False, code_pr=True)  # code PR #7 is open and ready; the store has no GitHub origin
+    elif name == "eval-store-roadmap-close-locked":
+        build_roadmap_close_locked(dest)
     elif name in ("eval-store-roadmap-local", "eval-store-roadmap-pr"):
         build_roadmap(name, dest)
     elif name == "eval-nested-root-finish":

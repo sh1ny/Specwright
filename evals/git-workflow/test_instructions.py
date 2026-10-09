@@ -179,5 +179,63 @@ class TaskCommits(unittest.TestCase):
                          "exit 1 does not report the task, the subject and the limit")
 
 
+def committing_project_files():
+    """The roadmap skill's "Committing project files" text, up to the first mode section."""
+    text = read(ROADMAP)
+    start = text.find("**Committing project files**")
+    assert start >= 0, "roadmap SKILL.md has no **Committing project files**"
+    return text[start:text.index("\n## init", start)]
+
+
+def store_part(text):
+    """From the first mention of a store-backed project on."""
+    m = re.search(r"(?i)store-backed", text)
+    return text[m.start():] if m else ""
+
+
+BRANCH_TEST_STORE = r'test "\$\(git -C "<store toplevel>" branch --show-current\)" = <branch>'
+BRANCH_TEST_CD = r'cd "<store toplevel>" && test "\$\(git branch --show-current\)" = <branch> &&'
+
+
+class PlanningStores(unittest.TestCase):
+    def test_roadmap_store_branch_under_gate_lock(self):
+        s = store_part(committing_project_files())
+        self.assertTrue(s, "Committing project files has no store-backed part")
+        lock = re.search(r"specwright-gate\.lock", s)
+        take = re.search(r'mkdir "\$L"', s)
+        owner = re.search(r'> "\$L/owner"', s)
+        clean = re.search(r"(?i)clean\b.{0,40}\bmain|on (its|the store's) main.{0,60}clean", s)
+        busy = re.search(r"(?i)\bbusy\b", s)
+        branch = re.search(r"git checkout -b <branch>", s)
+        release = re.search(r'rm -r "\$L"', s)
+        for name, m in (("the lock path", lock), ("mkdir of the lock", take), ("the owner file", owner),
+                        ("the clean-on-main check", clean), ("the busy check", busy), ("git checkout -b", branch),
+                        ("the release", release)):
+            self.assertTrue(m, f"store-backed Committing project files lacks {name}")
+        self.assertLess(take.start(), clean.start(), "the store is checked before the lock is taken")
+        self.assertLess(clean.start(), branch.start(), "the branch is created before the store checks")
+        self.assertLess(branch.start(), release.start(), "the lock is released before the branch exists")
+        held = find_block(s, r"(?i)mkdir.{0,40}fails|lock (exists|is held)", r"(?i)\bstop", r"(?i)owner")
+        self.assertTrue(held, "a held lock does not stop and show its owner")
+        self.assertRegex(held, r"(?i)only the lock (you|it) took|never remove.{0,60}(another|other)|not yours",
+                         "the release is not limited to the lock this run took")
+        self.assertNotRegex(s, r"specwright-branch`?\s+(store\S*\s+)?steps?\s+\d", "the gate cites specwright-branch step numbers")
+
+    def test_roadmap_store_commits_check_branch_in_same_call(self):
+        s = store_part(committing_project_files())
+        m = re.search(BRANCH_TEST_CD + r"\s*git add -- <files> && git commit", s)
+        self.assertTrue(m, "a store commit does not run the branch check in the same call as `git add` and `git commit`")
+
+    def test_roadmap_store_writes_check_branch_and_stop_on_mismatch(self):
+        s = store_part(committing_project_files())
+        block = find_block(s, BRANCH_TEST_STORE)
+        self.assertTrue(block, "store write steps do not start with the store branch check")
+        self.assertRegex(block, r"(?i)before (each|every)\b.{0,60}\bwrit", "the check does not run before each store write step")
+        stop = find_block(s, r"(?i)mismatch|fails|does not match|another branch", r"(?i)\bstop")
+        self.assertTrue(stop, "a branch mismatch does not stop")
+        self.assertRegex(stop, r"(?i)\bboth branch|expected.{0,60}found|name.{0,30}(expected|both)",
+                         "the stop does not name both the expected and the found branch")
+
+
 if __name__ == "__main__":
     unittest.main()

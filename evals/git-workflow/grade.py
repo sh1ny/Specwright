@@ -509,6 +509,8 @@ def check_store(name, repo, run):
         R.extend(check_store_finish(name, repo, code, store, rep))
     elif name in ("eval-store-ship-push-rejected", "eval-store-archive-before-merge-local-store"):
         R.extend(check_store_pr(name, repo, code, store, rep))
+    elif name == "eval-store-roadmap-close-locked":
+        R.extend(check_store_roadmap_locked(repo, code, store, rep))
     elif name.startswith("eval-store-roadmap-"):
         R.extend(check_store_roadmap(name, repo, code, store, rep))
     return R
@@ -1110,6 +1112,39 @@ def check_store_roadmap(name, repo, code, store, rep):
     R.append(("No commit was amended in either repo", not (amends(code) + amends(store)), f"amend entries={amends(code) + amends(store)}"))
     return R
 
+
+
+def check_store_roadmap_locked(repo, code, store, rep):
+    """Roadmap close in a store-backed project while another session holds the store's gate lock (#43): close must stop
+    before any branch or write, and leave the lock exactly as it found it. fixture-state.json has the starting state."""
+    R = []
+    fx = json.loads((repo / "fixture-state.json").read_text(encoding="utf-8"))
+    on = lambda r: git(r, "branch", "--show-current")
+    # The reflog also catches a close branch that was made, merged and deleted.
+    close = {r.name: [b for b in ((git(r, "branch", "--all", "--format=%(refname:short)") or "").splitlines()
+                                  + (git(r, "reflog", "--format=%gs") or "").splitlines()) if "close-" in b]
+             for r in (code, store)}
+    R.append(("No docs/close-* branch was ever made in either repo", not any(close.values()), f"close branches={close}"))
+    cd = git(store, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    owner = Path(cd) / "specwright-gate.lock" / "owner" if cd else None
+    text = owner.read_text(encoding="utf-8") if owner and owner.is_file() else None
+    extra = sorted(p.name for p in owner.parent.iterdir()) if owner and owner.parent.is_dir() else None
+    R.append(("The gate lock directory and its owner file are byte-identical to the fixture's",
+              text == fx["owner"] and extra == ["owner"], f"owner={text!r} lock contents={extra}"))
+    tips = {"code": git(code, "rev-parse", "main"), "store": git(store, "rev-parse", "main")}
+    R.append(("Both repos are on main, and the code and store mains are unchanged",
+              on(code) == on(store) == "main" and tips == {"code": fx["code_main"], "store": fx["store_main"]},
+              f"code={on(code)} store={on(store)} tips={tips} fixture={fx['code_main'], fx['store_main']}"))
+    st = {"code": status_of(code), "store": status_of(store)}
+    R.append(("No project file was written: both working trees are clean", not st["code"] and not st["store"], f"status={st}"))
+    hit = re.search(r"lock|busy|another session", rep)
+    stop = re.search(r"STOPPED|stopped|did not close|not closed|cannot close|can't close|did not (start|create)", rep)
+    R.append(("The report says close stopped because the store's gate is locked or busy, and names the owning change add-csv-export",
+              bool(hit) and bool(stop) and "add-csv-export" in rep,
+              f"match={hit.group(0) if hit else None} stop={stop.group(0) if stop else None}"))
+    R.append(("No commit was amended in either repo", not amends(code) and not amends(store),
+              f"amends={amends(code) + amends(store)}"))
+    return R
 
 
 def check_store_branch(name, code, store, rep):
