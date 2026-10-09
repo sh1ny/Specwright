@@ -33,6 +33,8 @@ flowchart LR
   PRS --> REPLY[pr-reply.sh]
   SNAP & PAIR & REPLY --> AS[as.sh identity fence]
   AS --> GH[(GitHub via gh)]
+  PAIR -->|identity, expected set,<br/>recovery, cleanup| GIT
+  PAIR --> STORE
   BR & CM & FI --> GIT[(git: code repo)]
   BR & CM & FI --> STORE[(git: planning store, optional)]
   SCH & BR & CM & FI & RM --> OS[OpenSpec CLI]
@@ -45,7 +47,7 @@ flowchart LR
 | `specwright-branch` | Clean-main gate, `<prefix>/<change-name>` branch, store branch and gate lock | Store gate lock | git; `openspec list --json` |
 | `specwright-commit` | One commit per task, Reconcile, completion check | Task commits and their subjects/trailers | git; `tasks.md` |
 | `specwright-finish` | Archive commit, local `--no-ff` merge or hand-off to the PR | Archive commit, merge commit | git; OpenSpec archive |
-| `specwright-pr` + scripts | Ship, feedback and watch for one PR or a code/store PR pair | Feedback pass record, PR reply markers | `gh` GraphQL/REST through `as.sh`; JSON on stdout |
+| `specwright-pr` + scripts | Ship, feedback and watch for one PR or a code/store PR pair | Feedback pass record, PR reply markers | `gh` GraphQL/REST through `as.sh`; `git` in the code repo and store (`pr-pair.sh`); JSON on stdout |
 | `specwright-roadmap` | Strategy, architecture baseline, milestones | `openspec/strategy.md`, `architecture.md`, `roadmap.md`, `docs/adr/` | Status is derived from git and GitHub |
 | `specwright-debug` | Root-cause debugging discipline | None | None |
 | `specwright-implementer` agent | Implements one task group test-first from a packet | Nothing committed: the orchestrator verifies, ticks and commits | Packet in, evidence report out |
@@ -73,7 +75,7 @@ flowchart LR
 - **OpenSpec:** only through the custom schema and the CLI (`openspec list --json`, `instructions`, `archive`, `context --json`). The OpenSpec version is pinned in the README badge and `CONTRIBUTING.md`, but not enforced at install (#37).
 - **Settings:** `specwright.yaml` keys are documented in `templates/openspec/specwright.yaml` and the README. A new key has a safe default, so a missing key keeps earlier behaviour.
 - **Git evidence formats:** commit subjects `<type>(<change>): task X.Y …`, trailers `Feedback-Round:` and `Code-Changes: none`, and archive/merge subjects. Later runs and roadmap status parse these, so changing them is a workflow change (minor version).
-- **Script I/O** (ADR 0002): `pr-snapshot.sh` and `pr-pair.sh` print one JSON document (`pr-snapshot.sh --logs` appends plain log text); `pr-reply.sh` prints one plain line per action. Exit codes signal stop conditions. Scripts use only `bash`, `gh` (built-in jq) and the Python standard library.
+- **Script I/O** (ADR 0002): `pr-snapshot.sh` and `pr-pair.sh` print one JSON document (`pr-snapshot.sh --logs` appends plain log text); `pr-reply.sh` prints one plain line per action. Exit codes signal stop conditions. Scripts use only `bash`, `git`, `gh` (built-in jq) and the Python standard library; `pr-pair.sh` runs `git` in the code repo and the store for repo identity, the expected PR set, recovery and cleanup.
 - **GitHub identity** (ADR 0004): every authenticated call for a configured login goes through `as.sh <login>`, and `gh auth switch` is never run. With `github.login` empty (the shipped default), calls use the active account unfenced (#38). `pr-pair.sh` fences `gh` calls per repo, but its `git` calls on the store run with the code account's credentials (#35).
 - **Cross-model review:** a read-only CLI run that prints the complete artifact and ends with one `VERDICT:` line. Only the change under review leaves the machine.
 
@@ -117,8 +119,8 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 | ADR | Decision | Supersedes |
 |---|---|---|
 | [0001](../docs/adr/0001-build-on-unmodified-openspec.md) | Extend OpenSpec only through a schema, skills, agents and templates installed as copies | — |
-| [0002](../docs/adr/0002-agent-instructions-with-thin-scripts.md) | The agent follows instructions; deterministic work goes to small bash + gh + python3 scripts | — |
+| [0002](../docs/adr/0002-agent-instructions-with-thin-scripts.md) | The agent follows instructions; deterministic work goes to small bash + git + gh + python3 scripts | — |
 | [0003](../docs/adr/0003-git-and-github-as-the-state-store.md) | Git history and GitHub hold workflow evidence; local state is only recoverable working state | — |
-| [0004](../docs/adr/0004-process-scoped-github-identity.md) | Every authenticated GitHub call runs under a process-scoped, verified login | — |
+| [0004](../docs/adr/0004-process-scoped-github-identity.md) | When a login is configured, every authenticated GitHub call runs under a process-scoped, verified login; the empty default is unfenced (#38) | — |
 | [0005](../docs/adr/0005-orchestrator-implementer-reviewer-split.md) | The orchestrator verifies and commits; an implementer agent builds; reviews run in a fresh context, cross-model when possible | — |
 | [0006](../docs/adr/0006-openspec-resolves-the-planning-root.md) | OpenSpec resolves where planning lives; store-backed changes pair branches and commits across two repos | — |
