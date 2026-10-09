@@ -92,7 +92,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
 ## 3. Record key and ownership (#32; D1, D2)
 
-- [ ] 3.1 Add the red tests:
+- [x] 3.1 Add the red tests:
   - `test_record_keys_do_not_alias_hyphenated_identities`, `test_legacy_record_is_moved_to_the_new_key`, `test_legacy_record_of_another_identity_is_left_alone`;
   - `test_pass_write_is_exclusive_under_concurrency`: two `pass write` processes started together; exactly one exits 0, the other `record_exists`, and the record holds the winner's owner id;
   - `test_pass_owner_plans_and_completes`, `test_pass_plan_reports_foreign_owner`, `test_pass_adopt_hands_over_the_record`, `test_pass_adopt_refuses_a_stale_from`, `test_pass_adopt_and_done_refuse_a_held_lock`, `test_pass_done_refuses_a_non_owner`.
