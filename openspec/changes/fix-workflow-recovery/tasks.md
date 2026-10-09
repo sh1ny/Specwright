@@ -8,7 +8,7 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 |---|---|---|---|---|
 | feedback-passes → A feedback pass has one owner | Two sessions start a pass for one change | evals/pr-pair/test_pr_pair.py | test_pass_write_is_exclusive_under_concurrency | green |
 | feedback-passes → A feedback pass has one owner | Resume by the owning session | evals/pr-pair/test_pr_pair.py | test_pass_owner_plans_and_completes | green |
-| feedback-passes → A feedback pass has one owner | Record left by another session | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_pass_plan_reports_foreign_owner; test_feedback_asks_before_adopting_a_foreign_record | red |
+| feedback-passes → A feedback pass has one owner | Record left by another session | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_pass_plan_reports_foreign_owner; test_feedback_asks_before_adopting_a_foreign_record | green |
 | feedback-passes → A feedback pass has one owner | User confirms owner is gone | evals/pr-pair/test_pr_pair.py | test_pass_adopt_hands_over_the_record | green |
 | feedback-passes → A feedback pass has one owner | Handover races another session | evals/pr-pair/test_pr_pair.py | test_pass_adopt_refuses_a_stale_from | green |
 | feedback-passes → A feedback pass has one owner | Lock left by an interrupted handover | evals/pr-pair/test_pr_pair.py | test_pass_adopt_and_done_refuse_a_held_lock | green |
@@ -106,7 +106,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
   - the header usage lines.
 
   Update the existing pass tests' helpers to pass the owner id from `pass write`, changing no assertion. Verify the ten tests and the full `python -m unittest discover evals/pr-pair` pass. Flip the rows green.
-- [ ] 3.3 Update `skills/specwright-pr/SKILL.md` feedback steps 2, 6 and 10:
+- [x] 3.3 Update `skills/specwright-pr/SKILL.md` feedback steps 2, 6 and 10:
   - keep the owner id `pass write` returns;
   - pass `--owner` to `plan` and `done`;
   - on `owned` false or null, post, commit and push nothing for that pass: show the owner (`at`, `checkout`, `host`) and ask whether that session is gone; on yes, `pass adopt --from <shown id|none>` and continue;

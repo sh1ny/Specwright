@@ -97,6 +97,24 @@ class SkillText(unittest.TestCase):
                         "`pass done` comes before `pass plan`")
         self.assertLess(positions(sub("rounds"), fb)[0], w, "`rounds` should be read before the pass record is written")
 
+    def test_feedback_asks_before_adopting_a_foreign_record(self):
+        fb = self.section("feedback")
+        plan, adopt, done = (positions(sub("pass\\s+" + v), fb) for v in ("plan", "adopt", "done"))
+        self.assertTrue(adopt, "the feedback section never runs `pr-pair.sh pass adopt`")
+        w = positions(sub("pass\\s+write"), fb)[0]
+        for name, at in (("plan", plan[0]), ("done", done[0]), ("adopt", adopt[0])):
+            self.assertIn("--owner", fb[at:fb.index("`", at)], f"`pass {name}` is not given `--owner`")
+        self.assertLess(plan[0], adopt[0], "`pass adopt` comes before `pass plan`")
+        before = fb[plan[0]:adopt[0]]
+        self.assertRegex(before, r"\bowned\b", "the text before `pass adopt` never reads `owned`")
+        self.assertRegex(before, r"\bask", "the text before `pass adopt` never asks the user")
+        self.assertRegex(before, r"\bgone\b", "the text before `pass adopt` never asks whether the owner is gone")
+        self.assertIn("--from", fb[adopt[0]:fb.index("`", adopt[0])], "`pass adopt` is not given `--from`")
+        self.assertRegex(fb, r"\bnot_owner\b")
+        self.assertRegex(fb, r"\brecord_busy\b")
+        self.assertRegex(fb, r"never remove a lock", "the lock rule is missing")
+        self.assertRegex(fb[w:w + 700], r"owner", "the text after `pass write` never says to keep the owner id it returns")
+
 
 if __name__ == "__main__":
     unittest.main()
