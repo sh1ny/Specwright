@@ -16,7 +16,7 @@ Specwright already exists (0.1.8), so M1 is not a walking skeleton: it closes th
 - Each change ships as its own release: 0.1.9, 0.1.10 and 0.1.11. (agent)
 
 **Changes** (in order; each about one PR):
-1. `fix-agent-skills-and-subjects` (0.1.9) - #24 add `Skill` to both agent definitions, plus the restart note; #21 commit subjects that stay within 72 characters; #43 the store branch check and gate lock for roadmap init/close; the versioning rule in `CONTRIBUTING.md`.
+1. `fix-agent-skills-and-subjects` (0.1.9) - #24 add `Skill` to both agent definitions, plus the restart note; #21 agents keep task commit subjects within the existing 72-character limit (the format is unchanged, so a fix); #43 the store branch check and gate lock for roadmap init/close; the versioning rule in `CONTRIBUTING.md`.
 2. `fix-pr-pair-recovery` (0.1.10) - interrupted and concurrent feedback passes: #25 rerun reactions, #26 checking the intent before writing, #29 round counting, #30 pair-link repair, #32 pass ownership, #34 repo-local recovery.
 3. `fix-pr-evidence-freshness` (0.1.11) - evidence that matches the current state: #31 readiness bound to the snapshot's PR and head, #33 replies bound to the item revision they answer, #35 store git calls under the store's login, #39 watch token race.
 
