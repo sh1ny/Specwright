@@ -113,6 +113,8 @@ flowchart LR
 
 Defects where the code does not yet meet this baseline, found in the baseline review (`openspec/architecture-review.md`) and earlier PR reviews. The roadmap schedules them. Issue numbers refer to sh1ny/specwright.
 
+This table is frozen at the reviewed baseline. The live list is the open sh1ny/specwright issues labelled `known-gap`: every gap below carries the label, and a gap found later (for example #52, #53) is filed there instead of being added here, so recording a defect does not reopen the baseline review. An issue closes when its fix merges with a regression test.
+
 | Gap | Issue |
 |---|---|
 | Pair readiness accepts a snapshot of another PR or an old head; missing push activity also lets previous-head reports satisfy current-head reviewer readiness | #31 |

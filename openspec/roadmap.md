@@ -29,6 +29,7 @@ A change is reviewed before it ships and can be merged by the agent when the pro
 - M3 - Distribution: #28 versions, tags and releases; #36 a safe update lifecycle; #37 enforcing the OpenSpec pin.
 - M4 - Cost tier: #22 Haiku for bounded work, evals first; #40 bounds and deadlines in the PR scripts.
 - M5 - Commits and VCS backends: #20 one commit per task group, made at the group boundary only, with `Specwright-Task:` trailers; then #19 jj; GitButler as a separate change after that.
+- Unscheduled `known-gap` issues (filed after this baseline, such as #52 and #53) are placed into a milestone at the next **close**, or into an earlier change that touches the same code.
 - Parked: #9 snapshot pagination beyond 100 items; revisit if large PRs become routine.
 
 ## Done
