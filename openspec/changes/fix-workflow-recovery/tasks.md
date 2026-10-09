@@ -153,7 +153,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
   - then plan again.
 
   Add the matching checks to `test_feedback_uses_pass_record_and_rounds` (red first), then verify they pass.
-- [ ] 5.4 Update `openspec/architecture.md` Known gaps: remove the #25 and #30 rows if listed. Verify by reading.
+- [x] 5.4 Update `openspec/architecture.md` Known gaps: remove the #25 and #30 rows if listed. Verify by reading.
 
 ## 6. Finish resumes from git evidence (#48; D8)
 

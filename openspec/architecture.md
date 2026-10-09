@@ -120,8 +120,6 @@ This table is frozen at the reviewed baseline. The live list is the open sh1ny/s
 | Pair readiness accepts a snapshot of another PR or an old head; missing push activity also lets previous-head reports satisfy current-head reviewer readiness | #31 |
 | A reviewer edit during a fix is hidden by the later reply | #33 |
 | `pr-pair.sh` git calls on the store use the code account | #35 |
-| Adopting a newly found code PR skips the pair-link repair (unverified) | #30 |
-| `pass done` deletes the record before a `rerun` reaction is sent | #25 |
 | Install/update has no lifecycle for running sessions or shared stores | #36 |
 | OpenSpec pin is not enforced | #37 |
 | Empty `github.login` (default) is unfenced; credential-bearing remote URLs bypass `as.sh`, so a successful push can use another account without reporting the mismatch | #38 |
