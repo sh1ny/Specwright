@@ -17,6 +17,7 @@ SCHEMA = ROOT / "schemas" / "specwright" / "schema.yaml"
 ROADMAP = ROOT / "skills" / "specwright-roadmap" / "SKILL.md"
 README = ROOT / "README.md"
 CONTRIBUTING = ROOT / "CONTRIBUTING.md"
+COMMIT = ROOT / "skills" / "specwright-commit" / "SKILL.md"
 
 
 def read(p):
@@ -144,6 +145,38 @@ class AgentDelegation(unittest.TestCase):
         self.assertRegex(probe, r"(?is)" + NEW_SESSION, "the probe does not require a session started after install")
         self.assertRegex(probe, r"(?is)(already )?running (before|during)|started before|old session",
                          "the probe does not reject a session that was running before the install")
+
+
+def commit_step2():
+    text = read(COMMIT)
+    s = section(text, r"2\. After each task")
+    assert s, "specwright-commit SKILL.md has no '## 2. After each task' section"
+    return text, s
+
+
+FIT = r"fit-subject\.sh`?\s+<msgfile>"
+
+
+class TaskCommits(unittest.TestCase):
+    def test_commit_skill_reuses_fitted_message_for_store_pair(self):
+        text, s2 = commit_step2()
+        fit = re.search(FIT, s2)
+        self.assertTrue(fit, "step 2 never runs `fit-subject.sh <msgfile>`")
+        self.assertRegex(s2, r"(?is)full message.{0,80}\btemp file|temp file.{0,80}full message",
+                         "step 2 does not write the full message to the temp file first")
+        commit = re.search(r"git commit -F <msgfile>", s2[fit.end():])
+        self.assertTrue(commit, "no `git commit -F <msgfile>` after the fit in step 2")
+        self.assertTrue(find_block(s2, r"store", r"\bsame (message )?file\b|\bsame <msgfile>"),
+                        "step 2 does not reuse the same message file for the store commit of a pair")
+        self.assertRegex(text, r"(?m)^allowed-tools: Bash\(git \*\) Bash\(openspec \*\)$", "allowed-tools changed")
+
+    def test_commit_skill_stops_on_unfittable_subject(self):
+        _, s2 = commit_step2()
+        block = find_block(s2, r"\bexit 1\b", r"fit-subject|the script|it exits")
+        self.assertTrue(block, "step 2 does not say what to do when fit-subject.sh exits 1")
+        self.assertRegex(block, r"(?is)\bno commit\b|\bnever commit|do not commit|make no commit", "exit 1 does not stop the commit")
+        self.assertRegex(block, r"(?is)\breport\b.{0,80}\btask\b.{0,40}\bsubject\b.{0,40}\blimit\b|\b72\b",
+                         "exit 1 does not report the task, the subject and the limit")
 
 
 if __name__ == "__main__":
