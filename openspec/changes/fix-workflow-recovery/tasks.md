@@ -147,7 +147,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
   Replace `test_pass_plan_reaction_is_rerun_after_reply`, which asserts the old `rerun` behaviour. Verify the new tests fail for the right reason.
 - [x] 5.2 Implement D4 (react rows read GitHub with the repo's login; remove `rerun` from the states and from `done_states`) and D7 (factor `cmd_link`'s linked test into one function; read the canonical `html_url` of each PR; add the `link` row with `code.url` and `store.url`). Verify the new tests, the green pass rows of the test map and the full pr-pair suite pass. Flip the rows green.
-- [ ] 5.3 Update `skills/specwright-pr/SKILL.md` feedback step 2 (`resume`):
+- [x] 5.3 Update `skills/specwright-pr/SKILL.md` feedback step 2 (`resume`):
   - run `todo` react rows with `pr-reply.sh react`;
   - run ship step 5 for a `todo` link row, passing the row's `code.url` and `store.url` as `--peer-url`;
   - then plan again.

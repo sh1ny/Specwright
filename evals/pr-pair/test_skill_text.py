@@ -96,6 +96,16 @@ class SkillText(unittest.TestCase):
         self.assertLess(positions(sub("pass\\s+plan"), fb)[0], positions(sub("pass\\s+done"), fb)[0],
                         "`pass done` comes before `pass plan`")
         self.assertLess(positions(sub("rounds"), fb)[0], w, "`rounds` should be read before the pass record is written")
+        # the `resume` bullet of step 2 runs the rows the plan reads from GitHub: reactions (#25) and the pair link (#30)
+        resume = next((l for l in fb.splitlines() if l.lstrip().startswith("- `resume`")), "")
+        self.assertTrue(resume, "feedback step 2 has no `resume` bullet")
+        self.assertRegex(resume, r"`todo` `?react`? rows?[^.;]*pr-reply\.sh[^.;]*react",
+                         "`resume` does not run `todo` react rows with `pr-reply.sh react`")
+        self.assertRegex(resume, r"ship step 5[^.;]*`link` row", "`resume` does not run ship step 5 for a `todo` link row")
+        for token in ("code.url", "store.url", "--peer-url"):
+            self.assertIn(token, resume, f"`resume` does not pass the link row's {token}")
+        self.assertLess(resume.index("react"), resume.rindex("plan again"), "`resume` does not plan again after the react and link rows")
+        self.assertNotRegex(TEXT, r"(?<!gh run )\brerun\b", "SKILL.md still mentions the removed `rerun` reaction state")  # `gh run rerun` is unrelated
 
     def test_feedback_uses_pass_record_for_repo_local(self):
         # a repo-local change (no store) uses the same pass record and rounds, with `--store` left out
