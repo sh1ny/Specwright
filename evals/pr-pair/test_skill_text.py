@@ -97,6 +97,28 @@ class SkillText(unittest.TestCase):
                         "`pass done` comes before `pass plan`")
         self.assertLess(positions(sub("rounds"), fb)[0], w, "`rounds` should be read before the pass record is written")
 
+    def test_feedback_uses_pass_record_for_repo_local(self):
+        # a repo-local change (no store) uses the same pass record and rounds, with `--store` left out
+        repos = self.section("the repos and prs of a change")
+        local = next((l for l in repos.splitlines() if l.lstrip("- ").startswith("**Repo-local changes**")), "")
+        self.assertTrue(local, "the repos section has no repo-local bullet")
+        tail = local.rpartition(";")[2]  # the list of subcommands for store-backed changes only
+        for sub_name in ("expected", "pair-state", "cleanup-plan"):
+            self.assertIn(f"`{sub_name}`", tail, f"the store-backed-only list does not name `{sub_name}`: {local!r}")
+        for sub_name in ("pass", "rounds"):
+            self.assertNotIn(f"`{sub_name}`", tail, f"`{sub_name}` is still listed as store-backed only: {local!r}")
+        fb = self.section("feedback")
+        steps = {int(m.group(1)): fb[m.start():(nxt.start() if (nxt := re.compile(r"^\d+\. ", re.M).search(fb, m.end())) else len(fb))]
+                 for m in re.finditer(r"^(\d+)\. ", fb, re.M)}
+        for n in (2, 3, 6, 10):
+            self.assertIn(n, steps, f"feedback has no step {n}")
+            self.assertRegex(steps[n], r"[Rr]epo-local[^\n]{0,120}without\s+`--store`",
+                             f"feedback step {n} does not run its pass/rounds call for repo-local changes without `--store`")
+        for n in (2, 6):
+            self.assertNotIn("(store-backed)", steps[n], f"feedback step {n} is still store-backed only")
+        self.assertFalse(steps[10].startswith("10. Store-backed"), "feedback step 10 is still store-backed only")
+        self.assertNotIn("repo-local the trailers in `git log", steps[3], "step 3 still reads repo-local rounds from git log by hand")
+
     def test_feedback_asks_before_adopting_a_foreign_record(self):
         fb = self.section("feedback")
         plan, adopt, done = (positions(sub("pass\\s+" + v), fb) for v in ("plan", "adopt", "done"))
