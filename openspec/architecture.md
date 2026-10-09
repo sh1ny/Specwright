@@ -77,7 +77,7 @@ flowchart LR
 | Feedback pass record (store-backed changes only) | The one session running feedback for the change, through `pr-pair.sh pass write/done`. Gap: that exclusivity is assumed, not enforced (#32) | One feedback pass | Deleted at `pass done`; a leftover record blocks the next pass until resumed | `~/.cache/specwright/feedback/` (or `SPECWRIGHT_STATE_DIR`) |
 | Watch ownership token | The newest `pr-snapshot.sh --wait` on the PR | One watch | Released on exit; an older watcher that sees another token exits 4. Gap: cleanup can delete a newer watcher's token, leaving no watcher (#39) | `~/.cache/specwright/watch/<owner>-<repo>-<pr>` (or under `SPECWRIGHT_STATE_DIR`) |
 | Store gate lock | `specwright-branch` | The gate only | Never auto-removed; the user confirms removal | `<store git-common-dir>/specwright-gate.lock` |
-| Strategy and roadmap (`strategy.md`, `roadmap.md`) | `specwright-roadmap` init/close, and **next** when it adds a gap-closing change | Project lifetime | The roadmap is updated at each milestone close; status is derived, never stored | Main of the planning repo |
+| Strategy and roadmap (`strategy.md`, `roadmap.md`) | `specwright-roadmap` init/close, and **next** when it adds a gap-closing change | Project lifetime | The roadmap is updated at each milestone close; status is derived, never stored. Gap: **next** leaves its roadmap edit uncommitted on main, so the branch gate stops (#50) | Main of the planning repo |
 | Baseline review (`architecture-review.md`) | One writer per round, by path: the orchestrator saves a cross-model CLI's output verbatim; `specwright-reviewer` writes it on the fresh-context path; the orchestrator also records `USER_OVERRIDE` after escalation | Project lifetime | A new review round rewrites it | Main of the planning repo |
 | Architecture file and ADRs (`architecture.md`, `docs/adr/`) | One writer at a time, by path: `specwright-roadmap` init/close, or the apply task of a change whose reviewed design records an ADR (it also updates the index) | Project lifetime | An ADR is `Status: proposed` and editable until its review gate passes; it is then marked `accepted` and never edited again: a new ADR supersedes it and the index is updated. Gap: roadmap writes baseline ADRs as `accepted` before its review runs (#44) | Main of the repo holding them (`project.architecture`, `project.adr_dir`) |
 | Settings | The user (install prompt merges; `specwright-roadmap` init may set the `project:` paths) | Project lifetime | Install keeps local values | `openspec/specwright.yaml`, `openspec/config.yaml` |
@@ -135,6 +135,7 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 | Clipped snapshot bodies can be judged without the full text | #47 |
 | Local finish cannot resume after an interrupted archive commit or store merge | #48 |
 | Baseline review caps rounds at two, with no reset after a later edit | #49 |
+| Roadmap **next** never commits its gap-closing roadmap edit, so the branch gate stops | #50 |
 
 ## In-force ADRs
 
