@@ -33,8 +33,8 @@ Text checks (`test_instructions.py`) assert where a rule sits in the delivered s
 | pr-script-runtime → Pass records can be written on Python 3.8 | No Python 3.8 available to the test | evals/pr-pair/test_pr_pair.py | test_embedded_python_passes_no_newline_kwarg | green |
 | pr-script-runtime → Unexpected failures keep the JSON error contract | Filesystem error during pass write | evals/pr-pair/test_pr_pair.py | test_unexpected_error_is_internal_error_json | green |
 | pr-script-runtime → Unexpected failures keep the JSON error contract | Existing structured stop | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_an_existing_record_and_misrouted_edits | green |
-| pr-script-runtime → Prerequisites are stated and checked at install | All prerequisites present | evals/git-workflow/test_instructions.py | test_install_checks_core_and_pr_prerequisites | red |
-| pr-script-runtime → Prerequisites are stated and checked at install | Python missing | evals/git-workflow/test_instructions.py | test_install_reports_pr_workflow_not_ready | red |
+| pr-script-runtime → Prerequisites are stated and checked at install | All prerequisites present | evals/git-workflow/test_instructions.py | test_install_checks_core_and_pr_prerequisites | green |
+| pr-script-runtime → Prerequisites are stated and checked at install | Python missing | evals/git-workflow/test_instructions.py | test_install_reports_pr_workflow_not_ready | green |
 
 Text checks prove the rule is in the instructions, not that a live agent follows it. Live delegation with `Skill` in a fresh Claude Code session is the user-verified M1 exit criterion. Task 1.4 prepares its probe; its result is recorded at milestone close, not here.
 
@@ -91,7 +91,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
 
   Install 3.8 with `uv python install 3.8`. Verify all three fail for the right reason (the newline kwarg, a traceback, `TypeError`).
 - [x] 6.2 Fix `skills/specwright-pr/scripts/pr-pair.sh` per D7: replace the write with the `open(..., newline="\n")` form and add an `except Exception` emitting `internal_error`. Update the header's needs line and exit-code text. Verify the three new tests pass on the uv 3.8 interpreter, and that `python -m unittest discover evals/pr-pair` passes in full, including the existing structured-stop test. Flip the three rows green and re-confirm the green row.
-- [ ] 6.3 Update the README prerequisites, install Step 1 and Step 8 per D8: core is git plus bash with a POSIX userland, which stop the install when missing; PR-only is gh 2.40+ and Python 3.8+, which produce `PR workflow not ready: <missing>` without blocking the stamp. Also update the `specwright-pr` SKILL.md dependency line and CONTRIBUTING Setup and Testing (Python 3.8+, and how to run the 3.8 test with `uv python install 3.8`). Add the two install text tests (red first), then verify they pass and flip their rows green.
+- [x] 6.3 Update the README prerequisites, install Step 1 and Step 8 per D8: core is git plus bash with a POSIX userland, which stop the install when missing; PR-only is gh 2.40+ and Python 3.8+, which produce `PR workflow not ready: <missing>` without blocking the stamp. Also update the `specwright-pr` SKILL.md dependency line and CONTRIBUTING Setup and Testing (Python 3.8+, and how to run the 3.8 test with `uv python install 3.8`). Add the two install text tests (red first), then verify they pass and flip their rows green.
 
 ## 7. Versioning rule, 0.1.9 and integration
 

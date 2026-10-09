@@ -39,7 +39,7 @@ flowchart LR
 
 ## ⚡ Install / Update
 
-> **Prerequisites:** the OpenSpec CLI (`npm i -g @fission-ai/openspec`), `openspec init` run in the project, `git`, and `gh` 2.40 or later for the PR skills. The PR scripts need `bash` (Git Bash on Windows).
+> **Prerequisites:** core: the OpenSpec CLI (`npm i -g @fission-ai/openspec`), `openspec init` run in the project, `git`, and `bash` with a POSIX userland (`awk`, `sed`, `grep`; Git Bash on Windows). The PR skills also need `gh` 2.40 or later and Python 3.8 or later; without them the install still completes and reports `PR workflow not ready`.
 
 Copy the prompt below and paste it into your coding agent. **The same prompt installs and updates.**
 
@@ -54,6 +54,14 @@ also repairs an interrupted or partial install.
 Step 1 - Check prerequisites
 - Run `openspec --version`. If it fails, tell the user to install it
   (`npm i -g @fission-ai/openspec`) and STOP.
+- Core: run `git --version` and `bash -c 'command -v awk sed grep'`. If
+  either fails, tell the user to install git, or bash with a POSIX userland
+  (Git Bash on Windows), and STOP.
+- PR workflow (the `specwright-pr` scripts): run `gh --version` and check
+  it is 2.40 or later. Then look for Python 3.8+: try `python3`, then
+  `python`, each with `-c 'import sys; sys.exit(sys.version_info < (3, 8))'`.
+  Record what is missing (`gh 2.40+`, `Python 3.8+`) for Step 8 and
+  continue: it does not block the install or the version stamp.
 - Run `openspec list --json` in the code checkout and read `root`.
   - `"root": null`: if the error names this project's `openspec/config.yaml`
     (it starts with `Declared in` or `Invalid store declaration in`), show
@@ -162,7 +170,9 @@ is a store, list the files this install left uncommitted there (by path,
 from `git status --porcelain` in the store) and say the user commits them in
 the store; this prompt never commits. Tell the user that new skills and
 agent definitions load only in a new agent session started after this
-install: start one before relying on them.
+install: start one before relying on them. If Step 1 recorded a missing
+PR prerequisite, add the line `PR workflow not ready: <missing>` (for
+example `PR workflow not ready: Python 3.8+`).
 ```
 
 ## ⚡ First Steps After Install
