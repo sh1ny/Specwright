@@ -1835,5 +1835,111 @@ class Cleanup(Base):
         self.assertTrue(p["keep"])
 
 
+class ClosingCheck(Base):
+    """closing-check: the issues a description's closing lines name against what GitHub will close (#61)."""
+
+    def seed(self, body, refs=(), base="main", has_next=False, default=None):
+        self.add_pull(CODE, 7, body=body, base=base)
+        st = self.gh()
+        fake_gh.set_closing_refs(st, CODE, 7, [(n, r) for n, r in refs], has_next)
+        if default:
+            fake_gh.set_default_branch(st, CODE, default)
+        self.save_gh(st)
+
+    def check(self, expect=0):
+        return self.pp("closing-check", "--repo", CODE, "--pr", 7, expect=expect)
+
+    def intended(self, body, refs=()):
+        self.seed(body, refs)
+        return self.check()["intended"]
+
+    def test_closing_check_match(self):
+        self.seed("Fixes #21\nFixes #24\n", refs=[(21, CODE), (24, CODE)])
+        r = self.check()
+        self.assertEqual((r["ok"], r["status"]), (True, "match"))
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#24"])
+        self.assertEqual((r["missing"], r["extra"]), ([], []))
+        self.assertEqual((r["base"], r["default_branch"]), ("main", "main"))
+        self.assertEqual(sorted(r["linked"]), [f"{CODE}#21", f"{CODE}#24"])
+        graphql = [c for c in self.gh_calls() if "graphql" in " ".join(c["argv"])]
+        self.assertEqual(len(graphql), 1, "one GraphQL read")
+
+    def test_closing_check_reports_refs_after_one_keyword_as_missing(self):
+        self.seed("Fixes #24, #21, #43\n", refs=[(24, CODE)])
+        r = self.check()
+        self.assertEqual(r["status"], "mismatch")
+        self.assertEqual(sorted(r["intended"]), [f"{CODE}#21", f"{CODE}#24", f"{CODE}#43"])
+        self.assertEqual(sorted(r["missing"]), [f"{CODE}#21", f"{CODE}#43"])
+
+    def test_closing_check_extra_is_not_a_mismatch(self):
+        self.seed("Fixes #21\n", refs=[(21, CODE), (30, CODE)])
+        r = self.check()
+        self.assertEqual((r["status"], r["missing"], r["extra"]), ("match", [], [f"{CODE}#30"]))
+
+    def test_closing_check_not_default_base(self):
+        self.seed("Fixes #21\n", base="develop")
+        r = self.check()
+        self.assertEqual((r["ok"], r["status"]), (True, "not_default_base"))
+        self.assertEqual((r["base"], r["default_branch"], r["intended"]), ("develop", "main", [f"{CODE}#21"]))
+
+    def test_closing_check_default_branch_is_read_from_the_repository(self):
+        self.seed("Fixes #21\n", refs=[(21, CODE)], base="trunk", default="trunk")
+        self.assertEqual(self.check()["status"], "match")
+
+    def test_closing_check_lookup_failure_is_unknown(self):
+        self.seed("Fixes #21\n", refs=[(21, CODE)])
+        st = self.gh()
+        st["fail"] = ["graphql"]  # the one read carries the closing list and the default branch
+        self.save_gh(st)
+        r = self.check(expect=3)
+        self.assertEqual((r["ok"], r["error"], r["unknown"]), (False, "lookup_failed", True))
+
+    def test_closing_check_unreadable_pr_is_unknown(self):
+        r = self.pp("closing-check", "--repo", CODE, "--pr", 99, expect=3)  # no such repo or PR in the fake
+        self.assertEqual((r["ok"], r["error"]), (False, "lookup_failed"))
+
+    def test_closing_check_next_page_is_unknown(self):
+        self.seed("Fixes #21\n", refs=[(21, CODE)], has_next=True)
+        r = self.check(expect=3)
+        self.assertEqual((r["ok"], r["error"]), (False, "lookup_failed"))
+
+    def test_closing_check_requires_repo_and_pr(self):
+        self.pp("closing-check", "--repo", CODE, expect=2)
+        self.pp("closing-check", "--pr", 7, expect=2)
+
+    # ---- the parser ----
+    def test_closing_check_keywords_and_forms(self):
+        body = ("Close #1\nCLOSES: #2\nclosed #3\nfix #4\nFixed #5\nresolve #6\nResolves #7\nresolved: #8\n"
+                "Prefix #9\nunfixed #10\n")
+        self.assertEqual(self.intended(body), [f"{CODE}#{n}" for n in range(1, 9)])
+
+    def test_closing_check_ignores_refs_in_code(self):
+        body = ("Fixes #1\n```\nFixes #2\n```\n~~~\nFixes #3\n~~~\nand `Fixes #4` inline\n"
+                "Fixes `#5` and #6\n")
+        self.assertEqual(self.intended(body), [f"{CODE}#1", f"{CODE}#6"])
+
+    def test_closing_check_normalises_cross_repo_and_urls(self):
+        body = ("Fixes other/repo#5\nFixes https://github.com/acme/code/issues/8\n"
+                "Resolves https://github.com/other/repo/issues/9\nFixes #1\n")
+        self.assertEqual(self.intended(body), ["other/repo#5", f"{CODE}#8", "other/repo#9", f"{CODE}#1"])
+
+    def test_closing_check_normalises_linked_issues_of_other_repos(self):
+        self.seed("Fixes other/repo#5\n", refs=[(5, "other/repo"), (6, CODE)])
+        r = self.check()
+        self.assertEqual((r["status"], r["extra"]), ("match", [f"{CODE}#6"]))
+
+    def test_closing_check_related_is_not_intended(self):
+        self.assertEqual(self.intended("Fixes #21\nRelated: #52\nSee #53 and other/repo#54\n"), [f"{CODE}#21"])
+
+    def test_closing_check_keyword_mid_line_names_only_the_next_ref(self):
+        self.assertEqual(self.intended("This also fixes #5 but see #6\n"), [f"{CODE}#5"])
+
+    def test_closing_check_keyword_line_names_every_ref(self):
+        self.assertEqual(self.intended("- Fixes #5 and #6, other/repo#7\n"), [f"{CODE}#5", f"{CODE}#6", "other/repo#7"])
+
+    def test_closing_check_lists_each_issue_once(self):
+        self.assertEqual(self.intended("Fixes #5\nFixes #5\n"), [f"{CODE}#5"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -148,5 +148,62 @@ class SkillText(unittest.TestCase):
         self.assertRegex(fb[w:w + 700], r"owner", "the text after `pass write` never says to keep the owner id it returns")
 
 
+DESCRIPTION = SKILL.parent / "references" / "description.md"
+
+
+class ClosingReferences(unittest.TestCase):
+    """description.md and the ship section carry the closing-reference rules (#61)."""
+
+    desc = DESCRIPTION.read_text(encoding="utf-8")
+
+    def test_description_requires_one_closing_keyword_per_issue(self):
+        self.assertRegex(self.desc, r"(?i)one (closing )?keyword per issue")
+        self.assertRegex(self.desc, r"(?i)own line")
+        self.assertRegex(self.desc, r"Fixes #N")
+
+    def test_description_keeps_related_for_partial_fixes(self):
+        self.assertRegex(self.desc, r"Related: #N")
+        self.assertRegex(self.desc, r"(?i)(only in part|partly|not fully)")
+
+    def test_description_uses_cross_repo_form_without_a_pr_in_the_issue_repo(self):
+        self.assertRegex(self.desc, r"Fixes <owner>/<repo>#N")
+        self.assertRegex(self.desc, r"Related: <owner>/<repo>#N")
+        self.assertRegex(self.desc, r"(?i)no PR is expected")
+        self.assertRegex(self.desc, r"(?i)repository that holds the issue")
+
+    def ship_43(self):
+        ship = SECTIONS["ship"][1]
+        m = re.search(r"^   3\. .*$", ship, re.M)
+        self.assertTrue(m, "ship step 4.3 not found")
+        end = re.search(r"^5\. ", ship[m.end():], re.M)
+        return ship[m.start():m.end() + (end.start() if end else len(ship))]
+
+    def test_ship_runs_closing_check_after_ensure_pr(self):
+        step = self.ship_43()
+        checks, ensures = positions(sub("closing-check"), step), positions(sub("ensure-pr"), step)
+        self.assertTrue(checks, "ship step 4.3 never runs `pr-pair.sh closing-check`")
+        self.assertTrue(ensures)
+        self.assertLess(ensures[0], checks[0], "`closing-check` runs before `ensure-pr`")
+        self.assertRegex(step, r"\bnot_default_base\b")
+        self.assertRegex(step, r"(?i)not done", "an unreadable check (exit 3) is not reported as not done")
+
+    def test_ship_never_rewrites_a_found_pr_description_on_mismatch(self):
+        step = self.ship_43()
+        tail = step[step.find("closing-check"):]
+        self.assertNotEqual(step.find("closing-check"), -1)
+        self.assertRegex(tail, r"(?is)mismatch`? on a `found` PR[^.;]*(report|ask)")
+        self.assertRegex(tail, r"(?i)never (edit|rewrite)[^.]*unprompted")
+        self.assertRegex(tail, r"(?is)mismatch`? on a `created` PR[^.;]*rewrite")
+        self.assertRegex(tail, r"(?i)nothing but a keyword and references")
+
+    def test_ship_stops_after_a_second_mismatch(self):
+        step = self.ship_43()
+        tail = step[step.find("closing-check"):]
+        self.assertNotEqual(step.find("closing-check"), -1)
+        self.assertRegex(tail, r"gh pr edit[^.]*--body-file")
+        self.assertRegex(tail, r"(?is)second mismatch[^.]*stop|stop[^.]*second mismatch")
+        self.assertRegex(tail, r"(?i)names? the `?missing`? issues")
+
+
 if __name__ == "__main__":
     unittest.main()

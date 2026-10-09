@@ -174,7 +174,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
 ## 7. Closing references (#61 parts 1-2; D9)
 
-- [ ] 7.1 Add the red tests:
+- [x] 7.1 Add the red tests:
   - `test_closing_check_match`, `test_closing_check_reports_refs_after_one_keyword_as_missing`, `test_closing_check_extra_is_not_a_mismatch`, `test_closing_check_not_default_base` and `test_closing_check_lookup_failure_is_unknown` (closing list and default branch);
   - parser cases: refs in fenced and inline code ignored; `owner/repo#N` and issue URLs normalised; `Related: #N` not intended; `hasNextPage` → exit 3.
 
