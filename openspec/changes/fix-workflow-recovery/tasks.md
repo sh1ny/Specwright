@@ -128,7 +128,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
   - feedback steps 2, 3, 6 and 10 run the `pass` and `rounds` calls for repo-local changes too, without `--store`.
 
   Update `test_feedback_uses_pass_record_and_rounds` and add `test_feedback_uses_pass_record_for_repo_local` (red first), then verify `test_skill_text.py` passes and flip the row green.
-- [ ] 4.4 Update `openspec/architecture.md`:
+- [x] 4.4 Update `openspec/architecture.md`:
   - the Feedback pass record row (no longer store-backed only);
   - the Feedback rounds row (repo-local resume; drop the #34 clause);
   - the `specwright-pr` component row if it names store-only passes;
