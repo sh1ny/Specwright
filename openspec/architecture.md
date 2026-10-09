@@ -28,16 +28,20 @@ flowchart LR
   O -->|dispatches packet| IMP[specwright-implementer agent]
   O -->|dispatches paths| REV[specwright-reviewer agent]
   O -->|shell, read-only| XM[Cross-model CLI<br/>codex / claude]
+  CM & FI & RM -->|pr mode: ship| PRS
+  PRS -->|archive before merge| FI
+  PRS -->|CI failure| DBG
+  RM -->|baseline review| XM & REV
   PRS --> SNAP[pr-snapshot.sh]
   PRS --> PAIR[pr-pair.sh]
   PRS --> REPLY[pr-reply.sh]
-  SNAP & PAIR & REPLY --> AS[as.sh identity fence]
+  PRS & SNAP & PAIR & REPLY --> AS[as.sh identity fence]
+  FI & RM -->|PR lookup| AS
   AS --> GH[(GitHub via gh)]
-  PAIR -->|identity, expected set,<br/>recovery, cleanup| GIT
-  PAIR --> STORE
-  BR & CM & FI --> GIT[(git: code repo)]
-  BR & CM & FI --> STORE[(git: planning store, optional)]
-  SCH & BR & CM & FI & RM --> OS[OpenSpec CLI]
+  BR & CM & FI & RM & PRS & PAIR --> GIT[(git: code repo)]
+  BR & CM & FI & RM & PRS & PAIR --> STORE[(git: planning store, optional)]
+  DBG -->|read-only history| GIT
+  SCH & BR & CM & FI & PRS & RM --> OS[OpenSpec CLI]
   INST[README install prompt] -->|copies| Host
 ```
 
@@ -48,7 +52,7 @@ flowchart LR
 | `specwright-commit` | One commit per task, Reconcile, completion check | Task commits and their subjects/trailers | git; `tasks.md` |
 | `specwright-finish` | Archive commit, local `--no-ff` merge or hand-off to the PR | Archive commit, merge commit | git; OpenSpec archive |
 | `specwright-pr` + scripts | Ship, feedback and watch for one PR or a code/store PR pair | Feedback pass record, PR reply markers | `gh` GraphQL/REST through `as.sh`; `git` in the code repo and store (`pr-pair.sh`); JSON on stdout |
-| `specwright-roadmap` | Strategy, architecture baseline, milestones | `openspec/strategy.md`, `architecture.md`, `roadmap.md`, `docs/adr/` | Status is derived from git and GitHub |
+| `specwright-roadmap` | Strategy, architecture baseline, milestones | `openspec/strategy.md`, `roadmap.md`; the baseline `architecture.md` and ADRs (see State ownership) | git and the store for its own branch and commits; `gh` through `as.sh` for PR status; `specwright-pr` ship in pr mode |
 | `specwright-debug` | Root-cause debugging discipline | None | None |
 | `specwright-implementer` agent | Implements one task group test-first from a packet | Nothing committed: the orchestrator verifies, ticks and commits | Packet in, evidence report out |
 | `specwright-reviewer` agent | Fresh-context review when no cross-model CLI is used | `review.md` it writes | File paths in, `VERDICT:` line out |
@@ -68,6 +72,7 @@ flowchart LR
 | Feedback pass record (store-backed changes only) | The one session running feedback for the change, through `pr-pair.sh pass write/done`. Gap: that exclusivity is assumed, not enforced (#32) | One feedback pass | Deleted at `pass done`; a leftover record blocks the next pass until resumed | `~/.cache/specwright/feedback/` (or `SPECWRIGHT_STATE_DIR`) |
 | Watch ownership token | The newest `pr-snapshot.sh --wait` on the PR | One watch | Released on exit; an older watcher that sees another token exits 4. Gap: cleanup can delete a newer watcher's token, leaving no watcher (#39) | `~/.cache/specwright/watch/<owner>-<repo>-<pr>` |
 | Store gate lock | `specwright-branch` | The gate only | Never auto-removed; the user confirms removal | `<store git-common-dir>/specwright-gate.lock` |
+| Architecture file and ADRs (`architecture.md`, `docs/adr/`) | One writer at a time, by path: `specwright-roadmap` init/close, or the apply task of a change whose reviewed design records an ADR (it also updates the index) | Project lifetime | Accepted ADRs are never edited; a new ADR supersedes one and the index is updated | Main of the repo holding them (`project.architecture`, `project.adr_dir`) |
 | Settings | The user (install prompt merges) | Project lifetime | Install keeps local values | `openspec/specwright.yaml`, `openspec/config.yaml` |
 | Installed version | Install prompt, last step | Until next install | Rewritten on install | `openspec/.specwright/VERSION` |
 
@@ -77,7 +82,7 @@ flowchart LR
 - **Settings:** `specwright.yaml` keys are documented in `templates/openspec/specwright.yaml` and the README. A new key has a safe default, so a missing key keeps earlier behaviour.
 - **Git evidence formats:** commit subjects `<type>(<change>): task X.Y …`, trailers `Feedback-Round:` and `Code-Changes: none`, and archive/merge subjects. Later runs and roadmap status parse these, so changing them is a workflow change (minor version).
 - **Script I/O** (ADR 0002): `pr-snapshot.sh` and `pr-pair.sh` print one JSON document (`pr-snapshot.sh --logs` appends plain log text); `pr-reply.sh` prints one plain line per action. Exit codes signal stop conditions. Scripts use only `bash` with a POSIX userland (`sed`, `grep`, `mktemp` and similar; Git Bash on Windows), `git`, `gh` (built-in jq) and the Python standard library; `pr-pair.sh` runs `git` in the code repo and the store for repo identity, the expected PR set, recovery and cleanup.
-- **GitHub identity** (ADR 0004): every authenticated call for a configured login goes through `as.sh <login>`, and `gh auth switch` is never run. With `github.login` empty (the shipped default), calls use the active account unfenced (#38). `pr-pair.sh` fences `gh` calls per repo, but its `git` calls on the store run with the code account's credentials (#35).
+- **GitHub identity** (ADR 0004): every authenticated call for a configured login goes through `as.sh <login>`, and `gh auth switch` is never run. With `github.login` empty (the shipped default), calls use the active account unfenced (#38). `specwright-finish`'s post-merge check runs a plain `gh pr view` even when a login is set (#38). `pr-pair.sh` fences `gh` calls per repo, but its `git` calls on the store run with the code account's credentials (#35).
 - **Cross-model review:** a read-only CLI run that prints the complete artifact and ends with one `VERDICT:` line. The CLI can read any file in the repo; the change and the files it reads (referenced source, ADRs) go to that provider. On by default; `review.cross_model: false` keeps reviews in-harness.
 
 ## Resource bounds and failure visibility
