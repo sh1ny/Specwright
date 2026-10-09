@@ -10,6 +10,7 @@ prints one JSON line; exit 0 = answered, 1 = stop (error object), 2 = usage,
 Run: python -m unittest discover evals/pr-pair
 """
 import hashlib
+import importlib.util
 import json
 import re
 import os
@@ -26,6 +27,10 @@ ROOT = HERE.parents[1]
 SCRIPT = ROOT / "skills" / "specwright-pr" / "scripts" / "pr-pair.sh"
 sys.path.insert(0, str(ROOT / "evals" / "git-workflow"))
 import fixtures  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("fake_gh", ROOT / "evals" / "fakes" / "gh.py")
+fake_gh = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fake_gh)  # its state helpers (add_review_comment_reaction, add_node_reaction)
 
 CODE, STORE = "acme/code", "acme/plans"
 BRANCH, CHANGE = "feat/add-greeting", "add-greeting"
@@ -1061,7 +1066,8 @@ class PassPlan(PassBase):
         self.plan(store=snap(threads=[]), sub="done", expect=1)
         self.assertTrue(self.record_path().exists())
         # once ship opened the code PR, the pass re-requests review on it and then completes
-        self.add_pull(CODE, 7)
+        self.add_pull(STORE, 3, body=f"Code PR: https://github.com/{CODE}/pull/7")  # ship linked the pair (step 5)
+        self.add_pull(CODE, 7, body=f"Store PR: https://github.com/{STORE}/pull/3")
         p = self.plan(store=snap(threads=[]))
         self.assertEqual(self.row(p, "push", "code")["state"], "done")
         rr = self.row(p, "rerequest", "code")
@@ -1087,19 +1093,152 @@ class PassPlan(PassBase):
         self.assertTrue(p["delete_record"])
         self.assertFalse(p["needs_user"])
 
-    def test_pass_plan_reaction_is_rerun_after_reply(self):
-        self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}], resolve=False)])
+    # ---- reaction evidence (#25) ----
+    def replied_code_fix(self, finding):
+        """A code fix committed, pushed and re-requested; the reply is posted (so only the reaction can be missing)."""
+        self.write_record([finding])
         self.fix_code()
         self.push_all()
         self.pushed_at(CODE, BRANCH, self.tip(self.code), "2026-10-08T12:00:00Z")
         self.add_comment(CODE, 5, "@codex review", "KintsugiBot", 2002, created_at="2026-10-08T12:00:03Z")
-        answered = thread(awaiting=True, rev="12@2026-10-08T12:01:00Z", comments=[
-            {"id": "C11", "author": "chatgpt-codex-connector", "at": T0, "edited": None},
-            {"id": "C12", "author": "KintsugiBot", "at": "2026-10-08T12:01:00Z", "edited": None}])
-        p = self.plan(code=snap(threads=[answered]))
+
+    ANSWERED = thread(awaiting=True, rev="12@2026-10-08T12:01:00Z", comments=[
+        {"id": "C11", "author": "chatgpt-codex-connector", "at": T0, "edited": None},
+        {"id": "C12", "author": "KintsugiBot", "at": "2026-10-08T12:01:00Z", "edited": None}])
+
+    def thread_finding(self):
+        return self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}], resolve=False)
+
+    def react_rest(self, login, content, cid=11):
+        st = self.gh()
+        fake_gh.add_review_comment_reaction(st, CODE, cid, login, content)
+        self.save_gh(st)
+
+    def react_node(self, node, login, content):
+        st = self.gh()
+        fake_gh.add_node_reaction(st, node, login, content)
+        self.save_gh(st)
+
+    def test_pass_plan_reaction_todo_until_github_shows_it(self):
+        self.replied_code_fix(self.thread_finding())
+        p = self.plan(code=snap(threads=[self.ANSWERED]))
         react = self.row(p, "react", finding="F1")
-        self.assertEqual((react["state"], react["react"], react["comment"]), ("rerun", "+1", 11))
-        self.assertTrue(p["delete_record"], "an idempotent reaction re-run does not keep the record")
+        self.assertEqual((react["state"], react["react"], react["comment"]), ("todo", "+1", 11))
+        self.assertNotIn("rerun", {r["state"] for r in p["rows"]})
+        self.assertEqual((p["status"], p["delete_record"]), ("resume", False))
+        done = self.plan(code=snap(threads=[self.ANSWERED]), sub="done", expect=1)
+        self.assertEqual(done["error"], "not_complete")
+        self.assertTrue(self.record_path().exists())
+        # a reaction by someone else, or the opposite one by the viewer, is not this pass's reaction
+        self.react_rest("chatgpt-codex-connector", "+1")
+        self.react_rest("KintsugiBot", "-1")
+        p = self.plan(code=snap(threads=[self.ANSWERED]))
+        self.assertEqual(self.row(p, "react", finding="F1")["state"], "todo")
+        self.react_rest("KintsugiBot", "+1")
+        p = self.plan(code=snap(threads=[self.ANSWERED]))
+        self.assertEqual((self.row(p, "react", finding="F1")["state"], p["status"]), ("done", "complete"))
+        self.assertTrue(self.plan(code=snap(threads=[self.ANSWERED]), sub="done")["deleted"])
+        self.assertFalse(self.record_path().exists())
+
+    def test_pass_plan_reaction_done_when_present(self):
+        self.replied_code_fix(self.thread_finding())
+        self.react_rest("KintsugiBot", "+1")
+        p = self.plan(code=snap(threads=[self.ANSWERED]))
+        react = self.row(p, "react", finding="F1")
+        self.assertEqual((react["state"], react["react"], react["comment"]), ("done", "+1", 11))
+        self.assertEqual((p["status"], p["delete_record"]), ("complete", True))
+        # the thread is gone from the snapshot (answered and resolved): the reaction is still read from GitHub
+        self.assertEqual(self.row(self.plan(code=snap(threads=[])), "react", finding="F1")["state"], "done")
+
+    def test_pass_plan_reaction_on_a_node_id_target(self):
+        self.replied_code_fix(self.finding("F1", dest="code", kind="comment", item="IC_node1", resolve=False,
+                                           edits=[{"file": "greet.py", "contains": ["strip()"]}]))
+        self.react_node("IC_node1", "someone", "THUMBS_DOWN")  # the node exists on GitHub; nobody here has reacted yet
+        p = self.plan(code=snap(comments=[]))  # the comment left the snapshot: answered
+        react =self.row(p, "react", finding="F1")
+        self.assertEqual((react["state"], react["comment"]), ("todo", "IC_node1"))
+        self.react_node("IC_node1", "KintsugiBot", "THUMBS_DOWN")  # the opposite reaction does not count
+        self.react_node("IC_node1", "someone", "THUMBS_UP")  # nor does someone else's
+        self.assertEqual(self.row(self.plan(code=snap(comments=[])), "react", finding="F1")["state"], "todo")
+        self.react_node("IC_node1", "KintsugiBot", "THUMBS_UP")
+        p = self.plan(code=snap(comments=[]))
+        self.assertEqual((self.row(p, "react", finding="F1")["state"], p["status"]), ("done", "complete"))
+
+    def test_pass_plan_reaction_read_failure_is_unknown(self):
+        self.replied_code_fix(self.thread_finding())
+        st = self.gh()
+        st["fail"] = ["/reactions"]
+        self.save_gh(st)
+        p = self.plan(code=snap(threads=[self.ANSWERED]), expect=3)
+        self.assertEqual((p["ok"], p["error"]), (False, "lookup_failed"))
+        self.assertTrue(self.record_path().exists())
+
+    def test_pass_plan_node_reaction_read_failure_is_unknown(self):
+        self.replied_code_fix(self.finding("F1", dest="code", kind="comment", item="IC_node1", resolve=False,
+                                           edits=[{"file": "greet.py", "contains": ["strip()"]}]))
+        st = self.gh()
+        st["fail"] = ["graphql"]
+        self.save_gh(st)
+        p = self.plan(code=snap(comments=[]), expect=3)
+        self.assertEqual((p["ok"], p["error"]), (False, "lookup_failed"))
+
+    # ---- the link row (#30) ----
+    def adopted_code_pr(self, store_url=None):
+        """A store-only pass whose code fix was pushed, and whose code PR was opened without links; replies are done."""
+        intent = {**self.intent([]), "prs": {"store": {"repo": STORE, "number": 3}},
+                  "findings": [self.finding("F1", source="store", dest="code", react=None)]}
+        self.write_record(None, intent=intent)
+        self.fix_code()
+        self.push_all()
+        store_pull = self.pull(STORE, 3)
+        if store_url:
+            store_pull["html_url"] = store_url
+        self.seed_pulls(STORE, [store_pull])
+        self.add_pull(CODE, 7)
+        self.pushed_at(CODE, BRANCH, self.tip(self.code), "2026-10-08T12:00:00Z")
+        self.add_comment(CODE, 7, "@codex review", "KintsugiBot", 2003, created_at="2026-10-08T12:00:03Z")
+
+    def link_args(self, repo, n, kind, peer):
+        return ["link", "--repo", repo, "--pr", n, "--kind", kind, "--peer-url", peer, "--login", "KintsugiBot"]
+
+    def markers(self, slug, n):
+        return [c for c in self.comments(slug, n) if "specwright:link" in c["body"]]
+
+    def test_pass_plan_adopted_code_pr_needs_the_link(self):
+        canonical = "https://github.com/Acme/Plans/pull/3"  # GitHub's own spelling, not the record's slug
+        self.adopted_code_pr(store_url=canonical)
+        p = self.plan(store=snap(threads=[]))
+        # #30: with no link row the pass reports complete although the pair was never linked
+        self.assertNotEqual(p["status"], "complete", "the plan reports complete for an unlinked pair (#30)")
+        link = self.row(p, "link")
+        self.assertEqual((link["state"], link["code"], link["store"]),
+                         ("todo", {"repo": CODE, "number": 7, "url": f"https://github.com/{CODE}/pull/7"},
+                          {"repo": STORE, "number": 3, "url": canonical}))
+        self.assertEqual(p["status"], "resume")
+        self.plan(store=snap(threads=[]), sub="done", expect=1)
+        self.assertTrue(self.record_path().exists())
+        # ship step 5, with the row's URLs
+        self.pp(*self.link_args(CODE, 7, "store", link["store"]["url"]))
+        p = self.plan(store=snap(threads=[]))
+        self.assertEqual((self.row(p, "link")["state"], p["status"]), ("todo", "resume"), "one side linked is not linked")
+        self.pp(*self.link_args(STORE, 3, "code", link["code"]["url"]))
+        p = self.plan(store=snap(threads=[]))
+        self.assertEqual((self.row(p, "link")["state"], p["status"]), ("done", "complete"))
+        self.assertEqual((len(self.markers(CODE, 7)), len(self.markers(STORE, 3))), (1, 1))
+        self.assertTrue(self.plan(store=snap(threads=[]), sub="done")["deleted"])
+        # running both links again changes nothing
+        self.pp(*self.link_args(CODE, 7, "store", link["store"]["url"]))
+        self.assertEqual((len(self.markers(CODE, 7)), len(self.markers(STORE, 3))), (1, 1))
+
+    def test_pass_plan_link_done_when_descriptions_name_the_peer(self):
+        self.adopted_code_pr()
+        st = self.gh()
+        for slug, n, peer in ((CODE, 7, f"https://github.com/{STORE}/pull/3"), (STORE, 3, f"https://github.com/{CODE}/pull/7")):
+            next(p for p in st["repos"][slug]["pulls"] if p["number"] == n)["body"] = f"Peer: {peer}"
+        self.save_gh(st)
+        p = self.plan(store=snap(threads=[]))
+        self.assertEqual((self.row(p, "link")["state"], p["status"]), ("done", "complete"))
+        self.assertEqual([c for c in self.gh_calls() if "POST" in c["argv"] or "PATCH" in c["argv"]], [])
 
     def test_pass_plan_removes_marker_before_code_fix(self):
         # the archive carries the planning-only marker; a code fix must delete it in a store commit first

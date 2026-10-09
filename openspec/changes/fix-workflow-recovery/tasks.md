@@ -138,7 +138,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
 ## 5. Reaction evidence and the link row (#25, #30; D4, D7)
 
-- [ ] 5.1 Add the red tests:
+- [x] 5.1 Add the red tests:
   - `test_pass_plan_reaction_todo_until_github_shows_it`: reply posted, no reaction in the fake; the react row is `todo`, `pass done` refuses, and after the fake gains the reaction the plan completes;
   - `test_pass_plan_reaction_done_when_present`;
   - a node-id comment target;
