@@ -80,7 +80,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
 
   Grade (dirty main): the roadmap file is unchanged and no roadmap commit exists on any branch. Verify a run against the current skill fails the clean-main case.
 - [x] 5.2 Update roadmap **next** steps 3 and 4 per D6: propose without editing; after `specwright-branch` creates the branch, add the entry and commit only the roadmap file as `docs(<change-name>): add <change-name> to the roadmap` (store-backed: with D3's branch check), then continue propose. Verify both evals pass and flip both rows green.
-- [ ] 5.3 Update `openspec/architecture.md`'s Strategy and roadmap ownership row: replace the #50 "Gap:" clause with the new behavior. Note in the commit body that D6 commits after the branch gate, not before it as the roadmap entry phrased it. Verify by reading the row; `git diff -- docs/adr` stays empty.
+- [x] 5.3 Update `openspec/architecture.md`'s Strategy and roadmap ownership row: replace the #50 "Gap:" clause with the new behavior. Note in the commit body that D6 commits after the branch gate, not before it as the roadmap entry phrased it. Verify by reading the row; `git diff -- docs/adr` stays empty.
 
 ## 6. PR script runtime and prerequisites (#45, #46; D7, D8)
 
