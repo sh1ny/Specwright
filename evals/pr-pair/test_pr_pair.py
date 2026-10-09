@@ -682,6 +682,13 @@ class Rounds(Base):
         r = self.rounds()
         self.assertEqual((r["rounds"], r["code"]["subject_count"], r["limit_reached"]), (2, 2, True))
 
+    def test_rounds_ignores_subject_count_when_trailers_exist(self):
+        # a round-1 partial recovery: two commits carry the round-1 trailer, so the subject count of 2 is not the round
+        self.commit(self.code, {"a.py": "1\n"}, "fix(add-greeting): address review feedback\n\nFeedback-Round: 1")
+        self.commit(self.code, {"a.py": "2\n"}, "fix(add-greeting): address review feedback\n\nFeedback-Round: 1")
+        r = self.rounds()
+        self.assertEqual((r["rounds"], r["limit_reached"]), (1, False))
+
     def test_rounds_unpushed_top_round_commits(self):
         for d, slug in ((self.code, CODE), (self.store, STORE)):
             self.attach_bare(d, slug)
@@ -1196,6 +1203,36 @@ class PassPlan(PassBase):
                     {**good, "disposition": "fixed"}, {**good, "revision": None}, {**good, "edits": [{"contains": ["x"]}]}):
             self.assertEqual(self.write_record([bad], expect=2)["error"], "invalid_intent", bad)
         self.assertFalse(self.record_path().exists())
+
+    def refuses(self, intent, key):
+        r = self.write_record(None, intent=intent, expect=2)
+        self.assertEqual(r["error"], "invalid_intent", intent)
+        self.assertIn(key, r["message"])
+        self.assertFalse(self.record_path().exists())
+
+    def test_pass_write_accepts_a_well_formed_intent(self):
+        r = self.write_record([self.finding()], intent={**self.intent([self.finding()]), "prs": {"code": {"repo": CODE, "number": 5}}})
+        self.assertTrue(r["ok"])
+        self.assertTrue(self.record_path().exists())
+        self.assertTrue(self.plan()["ok"])
+
+    def test_pass_write_refuses_malformed_prs(self):
+        base = self.intent([self.finding()])
+        for prs in ("acme/app#5", {"code": "acme/app#5"}, {"code": {"repo": "acme", "number": 5}},
+                    {"code": {"repo": CODE, "number": "5"}}, {"code": {"repo": CODE, "number": 0}},
+                    {"code": {"repo": CODE, "number": True}}, {"other": None}):
+            self.refuses({**base, "prs": prs}, "prs")
+
+    def test_pass_write_refuses_a_bad_round(self):
+        base = self.intent([self.finding()])
+        for rnd in (0, "2", True, -1, 1.5):
+            self.refuses({**base, "round": rnd}, "round")
+
+    def test_pass_write_refuses_a_bad_root_id(self):
+        good = self.finding()
+        for bad in ({k: v for k, v in good.items() if k != "root_id"}, {**good, "root_id": "abc"}, {**good, "root_id": 0},
+                    {**good, "root_id": True}):
+            self.refuses(self.intent([bad]), "root_id")
 
     def test_pass_write_both_needs_a_repo_per_edit(self):
         bad = self.finding("F1", dest="both", edits=[{"file": "greet.py", "contains": ["x"]}])

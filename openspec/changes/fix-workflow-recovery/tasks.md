@@ -77,7 +77,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
 ## 2. Intent validation and round counting (#26, #29; D3, D5)
 
-- [ ] 2.1 Add the red tests:
+- [x] 2.1 Add the red tests:
   - `test_pass_write_accepts_a_well_formed_intent`, `test_pass_write_refuses_malformed_prs`, `test_pass_write_refuses_a_bad_round` and `test_pass_write_refuses_a_bad_root_id`;
   - `test_rounds_ignores_subject_count_when_trailers_exist`: a round-1 partial recovery leaves two `Feedback-Round: 1` commits, and `rounds` must report 1 with `limit_reached` false at `max_fix_rounds: 2`.
 
