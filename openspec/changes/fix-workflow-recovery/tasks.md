@@ -162,7 +162,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
   - `eval-store-finish-resume-code-merge`: the store's main has `merge: add-greeting`, the store branch is deleted, the code branch has commits, and the code main has no merge. Grade: the code main gains `merge: add-greeting`, the code branch is deleted, and the store gets no new commit.
 
   Add the five change-finish text tests to `test_instructions.py`. Verify both evals and the text tests fail against the current skill.
-- [ ] 6.2 Add the **Resume** section to `skills/specwright-finish/SKILL.md` per D8:
+- [x] 6.2 Add the **Resume** section to `skills/specwright-finish/SKILL.md` per D8:
   - the A/M/B facts per repo, and the next-step table, including the pr-mode merged row;
   - `Nothing to finish` only when every repo is done;
   - stop on dirty archive or change paths;

@@ -13,8 +13,34 @@ Start only after the vanilla archive workflow reports success (for bulk archive:
 
 Commit type: the branch prefix, except `bugfix` → `fix`. Archive paths, in the planning repo: `<P>/changes/<change-name>/` (now removed), `<P>/changes/archive/<archived-name>/`, and for each delta `specs/<capability-path>/spec.md` inside the archived change, the main spec `<P>/specs/<capability-path>/spec.md` it updated or created - by file, never the whole `<P>/specs/` directory. Other files are the user's: never stage them.
 
+## Resume
+
+Applies when the change directory is gone and finish runs again: the user asks to finish it, or the archive workflow reports the change already archived. Resolve the **Planning repo** first. On any branch, a repo where A (below) is found resumes here instead of running steps 1-3. Never repeat a done step.
+
+For each repo of the change (repo-local: one; store-backed: the store, then the code repo), find `<branch>` from `<main>`: `<prefix>/<change-name>` by the prefix rule of `specwright-branch` step 6, else a local `chore/archive-<change-name>`, else the one local branch matching `*/<change-name>`; several candidates → list them and ask. Then read three facts:
+- **A** - an archive commit: a subject matching `^[a-z]+\(<change-name>\): archive change$` in `git log --format=%s <main>..<branch>`, or on `<main>`.
+- **M** - the exact subject `merge: <change-name>` in `git log --first-parent --format=%s <main>`.
+- **B** - `<branch>` exists.
+
+None of A, M, B in any repo → report that no archive of `<change-name>` was found, and do nothing. `git status --porcelain` showing changes under `<P>/changes/<change-name>/` or the archive directory (with A found) → stop, list the files and ask the user; merge nothing. Otherwise continue at the first step not done, per repo:
+
+| Facts | Next |
+|---|---|
+| archive paths uncommitted, no A | step 3, as today |
+| A on branch, not M, B, `local` | merge (`## local`) |
+| M and B | `git branch -d <branch>`, no merge |
+| M, not B | repo done |
+| store done; code branch with commits, code not M | code merge (`## local` store-backed step 2) |
+| store done; code branch without commits | `git branch -d <branch>`, no merge |
+| `pr`, A on branch, PR not merged | `## pr` ship; push and PR are idempotent |
+| `pr`, the branch's PR merged | **After the PR is merged** cleanup, not ship |
+
+Report `Nothing to finish - archive is on <main>` only when every repo is done. A resume writes no planning-only marker: step 2 runs only before an archive commit.
+
+## Steps
+
 1. **Branch:** `git branch --show-current`. If the branch's change name differs from the archived change, confirm with the user. On main:
-   - No archive changes left uncommitted (the archive already reached main) → report `Nothing to finish - archive is on <main>` and stop.
+   - No archive changes left uncommitted (the archive already reached main) → **Resume**; report `Nothing to finish - archive is on <main>` only when it finds every repo done.
    - Otherwise (the PR merged before archive ran; normally `specwright-pr` **watch** archives on the PR branch first) → offer `git checkout -b chore/archive-<change-name>`; the uncommitted archive carries over. Continue from step 2 on that branch, or stop if the user declines. Never commit on main.
    - Store-backed: check each repo. The archive lives in the store, so the recovery branch is created there only (`cd "<store toplevel>" && git checkout -b chore/archive-<change-name>`), never a code branch or code PR for it; the code repo stays as it is. It carries only the archive: the planning-only test below still decides the marker, and step 4 then finishes only the store branch - the code repo's branch and PR go their own way.
 2. **Planning-only test** (store-backed only), before the archive commit, with `<prefix>/<change-name>` as the code branch (on a recovery branch, the code repo's local branch ending in `/<change-name>`, if any). The change has code work when any of these holds, and is planning-only otherwise:
