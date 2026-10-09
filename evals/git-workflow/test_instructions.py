@@ -237,5 +237,67 @@ class PlanningStores(unittest.TestCase):
                          "the stop does not name both the expected and the found branch")
 
 
+PR_SKILL = ROOT / "skills" / "specwright-pr" / "SKILL.md"
+
+
+def mode_step(mode, n):
+    """Numbered step `n` of a roadmap mode section (`init`, `close`), up to the next numbered step."""
+    sec = section(read(ROADMAP), mode + r"\b")
+    assert sec, f"roadmap SKILL.md has no ## {mode}"
+    m = re.search(r"^%d\. .*?(?=^\d+\. |\Z)" % n, sec, re.M | re.S)
+    return m.group(0) if m else ""
+
+
+class ProjectPlanning(unittest.TestCase):
+    def test_roadmap_writes_adrs_proposed(self):
+        s4 = mode_step("init", 4)
+        self.assertRegex(s4, r"Status: proposed", "init step 4 does not write ADRs as `Status: proposed`")
+        self.assertNotRegex(s4, r"Status: accepted", "init step 4 writes ADRs already accepted")
+        s45 = s4 + mode_step("init", 5)
+        self.assertRegex(s45, r"(?i)(proposed|REVISE).{0,160}\bedit\w*\b.{0,40}\bin place|in place.{0,120}proposed",
+                         "a proposed ADR is not edited in place when the review asks to change it")
+
+    def test_roadmap_accepts_adrs_only_after_gate(self):
+        sec = section(read(ROADMAP), r"init\b")
+        gate = re.search(r"Gate:", sec)
+        accept = re.search(r"Status: accepted", sec)
+        roadmap = re.search(r"^\d+\. \*\*Roadmap\*\*", sec, re.M)
+        self.assertTrue(gate and accept and roadmap, "init lacks the gate, the acceptance or the roadmap step")
+        self.assertLess(gate.start(), accept.start(), "ADRs are accepted before the review gate")
+        self.assertLess(accept.start(), roadmap.start(), "the roadmap is written before the ADRs are accepted")
+        block = find_block(sec, r"Status: accepted")
+        self.assertRegex(block, r"(?i)\bdate\b", "acceptance does not record the date")
+        self.assertRegex(block, r"(?i)\bindex\b", "acceptance does not add the in-force index rows")
+        self.assertRegex(block, r"(?i)(does not|never) void|not void", "the acceptance edit is not exempt from voiding the verdict")
+
+    def test_roadmap_close_reviews_superseding_adr(self):
+        s5 = mode_step("close", 5)
+        self.assertRegex(s5, r"Status: proposed", "close does not write the superseding ADR as proposed")
+        self.assertRegex(s5, r"Supersedes", "close's new ADR does not name what it supersedes")
+        self.assertRegex(s5, r"(?i)review\w*.{0,80}(init step 5|like the baseline|as the baseline|architecture-review\.md)",
+                         "close does not review the superseding ADR like the baseline")
+        self.assertRegex(s5, r"(?i)accept\w*.{0,60}only after|only after.{0,80}accept",
+                         "close accepts the superseding ADR before the gate passes")
+        self.assertRegex(s5, r"(?i)never edit an accepted ADR|superseded (ADR|file).{0,40}(unchanged|untouched|not touched)",
+                         "close may edit the superseded ADR")
+
+    def test_roadmap_review_escalates_after_two_consecutive_revise(self):
+        s5 = mode_step("init", 5)
+        self.assertNotRegex(s5, r"(?i)at most two rounds", "init step 5 still caps the review at two rounds")
+        self.assertRegex(s5, r"(?i)\b(2|two) consecutive\b.{0,20}REVISE", "init step 5 does not escalate after two consecutive REVISE")
+        self.assertRegex(s5, r"(?i)escalat|ask the user", "init step 5 does not escalate to the user")
+        self.assertRegex(s5, r"USER_OVERRIDE", "init step 5 does not record the user's decision as USER_OVERRIDE")
+        self.assertRegex(s5, r"(?i)\bvoids?\b|new round", "a later edit does not void a passing verdict")
+
+    def test_baseline_edit_after_pass_reruns_review(self):
+        fb = section(read(PR_SKILL), r"feedback\b")
+        block = find_block(fb, r"docs/project-baseline", r"docs/close-")
+        self.assertTrue(block, "PR feedback has no rule for the baseline and close branches")
+        self.assertRegex(block, r"(?i)strategy.{0,40}architecture.{0,40}ADR", "the rule does not name strategy, architecture and ADRs")
+        self.assertRegex(block, r"(?i)(re-?run|run again).{0,60}baseline review|baseline review.{0,60}(again|re-?run)",
+                         "the rule does not re-run the baseline review")
+        self.assertRegex(block, r"(?i)before.{0,60}(reply|report|done)", "the review is not re-run before the fix is reported done")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -60,7 +60,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
 
 ## 4. ADR status and baseline review rounds (#44, #49; D4, D5)
 
-- [ ] 4.1 Add the five project-planning text tests (ADR and review rows) to `test_instructions.py`. Verify they fail against the current roadmap and PR skills.
+- [x] 4.1 Add the five project-planning text tests (ADR and review rows) to `test_instructions.py`. Verify they fail against the current roadmap and PR skills.
 - [ ] 4.2 Update `skills/specwright-roadmap/SKILL.md` per D4 and D5:
   - init step 4 writes ADRs `Status: proposed`;
   - init step 5 drops "at most two rounds" and uses the schema rule;
