@@ -1428,6 +1428,106 @@ class PassOwnership(PassBase):
 
 
 # =======================================================================================================
+class PassRepoLocal(Base):
+    """A repo-local change (no store): the same pass record, plan and rounds, with `--store` left out."""
+
+    def setUp(self):
+        super().setUp()
+        self.code = self.make_repo("code", f"https://github.com/{CODE}.git")
+        self.attach_bare(self.code, CODE)
+        self.git(self.code, "checkout", "-q", "-b", BRANCH)
+        self.commit(self.code, {"greet.py": "def greet(n):\n    return n\n", "openspec/specwright.yaml":
+                                "github:\n  login: KintsugiBot\npr:\n  max_fix_rounds: 2\n"}, "feat(add-greeting): task 1.1")
+        self.git(self.code, "push", "-q", "origin", BRANCH)
+        self.owner = None
+
+    def common(self):
+        return ["--code", self.code, "--code-repo", CODE, "--change", CHANGE]
+
+    def finding(self, fid="F1", source="code", dest="code", item="T1"):
+        return {"id": fid, "source": source, "destination": dest, "kind": "thread", "item": item, "root_id": 11,
+                "edits": [{"file": "greet.py", "contains": ["strip()"]}],
+                "disposition": {"reply": True, "resolve": True, "react": None},
+                "revision": {"rev": REV0, "last_reviewer_comment": {"id": "C11", "at": T0}}}
+
+    def intent(self, findings, prs=None, rnd=2):
+        return {"change": CHANGE, "branch": BRANCH, "round": rnd, "code_repo": CODE,
+                "prs": {"code": {"repo": CODE, "number": 5}, "store": None} if prs is None else prs, "findings": findings}
+
+    def write_record(self, findings, prs=None, expect=0):
+        f = self.write_json("intent.json", self.intent(findings, prs))
+        out = self.pp("pass", "write", *self.common(), "--intent", f, expect=expect)
+        if out.get("ok"):
+            self.owner = out["owner"]
+        return out
+
+    def plan(self, code=None, sub="plan", expect=0):
+        args = ["pass", sub, *self.common()]
+        if self.owner:
+            args += ["--owner", self.owner]
+        args += ["--snapshot", f"code={self.write_json('code-snap.json', code if code is not None else snap())}"]
+        return self.pp(*args, expect=expect)
+
+    def fix_code(self, rnd=2):
+        return self.commit(self.code, {"greet.py": "def greet(n):\n    return n.strip()\n"},
+                           f"fix(add-greeting): address review feedback\n\nFeedback-Round: {rnd}")
+
+    def record_path(self):
+        return self.state_dir / "feedback" / record_key(CODE, CHANGE)
+
+    def test_repo_local_final_pass_resumes_without_a_new_round(self):
+        # max_fix_rounds is 2 and pass 2 committed and pushed its fix, then the session died before replying
+        self.write_record([self.finding()])
+        self.fix_code()
+        self.git(self.code, "push", "-q", "origin", BRANCH)
+        r = self.pp("rounds", "--code", self.code, "--branch", BRANCH)
+        self.assertEqual((r["rounds"], r["limit_reached"], r["unpushed"], r["remote_unreadable"]), (2, True, {}, []))
+        p = self.plan(code=snap(threads=[thread()]))
+        self.assertEqual(self.row(p, "fix_commit", "code")["state"], "done")
+        self.assertEqual(self.row(p, "push", "code")["state"], "done")
+        self.assertEqual(self.row(p, "reply", finding="F1")["state"], "todo")
+        self.assertEqual((p["status"], p["round"], p["new_pass_allowed"], p["delete_record"], p["stops"]), ("resume", 2, False, False, []))
+        self.assertEqual({r["repo"] for r in p["rows"] if "repo" in r}, {"code"})  # code rows only
+
+    def test_repo_local_pass_completes_and_is_removed(self):
+        w = self.write_record([self.finding()])
+        self.assertEqual(self.plan(code=snap(threads=[thread()]))["status"], "resume")
+        self.fix_code()
+        self.git(self.code, "push", "-q", "origin", BRANCH)
+        p = self.plan(code=snap(threads=[]))  # the reply and the resolution are on GitHub: the thread is answered and gone
+        self.assertEqual((p["status"], p["delete_record"], p["owned"]), ("complete", True, True))
+        d = self.plan(code=snap(threads=[]), sub="done")
+        self.assertEqual((d["ok"], d["deleted"]), (True, True))
+        self.assertFalse(self.record_path().exists())
+        self.assertEqual(self.plan()["status"], "none")
+        self.assertTrue(w["owner"])
+
+    def test_repo_local_pass_write_refuses_store_destination(self):
+        for dest in ("store", "both"):
+            f = self.finding(dest=dest)
+            if dest == "both":
+                f["edits"][0]["repo"] = "code"
+            out = self.write_record([f], expect=1)
+            self.assertEqual(out["error"], "misrouted", dest)
+            self.assertFalse(self.record_path().exists())
+        out = self.write_record([self.finding(source="store")], expect=1)
+        self.assertEqual(out["error"], "misrouted")
+        self.assertFalse(self.record_path().exists())
+
+    def test_repo_local_pass_write_refuses_a_store_pr(self):
+        out = self.write_record([self.finding()], prs={"code": {"repo": CODE, "number": 5}, "store": {"repo": STORE, "number": 3}}, expect=2)
+        self.assertEqual(out["error"], "invalid_intent")
+        self.assertIn("prs.store", out["message"])
+        self.assertFalse(self.record_path().exists())
+
+    @staticmethod
+    def row(plan, step, repo=None, finding=None):
+        rows = [r for r in plan["rows"] if r["step"] == step and (repo is None or r.get("repo") == repo)
+                and (finding is None or r.get("finding") == finding)]
+        assert len(rows) == 1, f"want one {step}/{repo}/{finding} row in {[(r['step'], r.get('repo'), r.get('finding')) for r in plan['rows']]}"
+        return rows[0]
+
+
 def embedded_python():
     text = SCRIPT.read_text(encoding="utf-8")
     start = text.index("<<'PYSRC'\n") + len("<<'PYSRC'\n")
