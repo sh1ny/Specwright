@@ -17,14 +17,15 @@
 #                                     one marker comment <!-- specwright:link KIND URL -->; edits its own on a new peer
 #   pair-state --code d --store d --branch b [--snapshot code=f] [--snapshot store=f] [--dropped id@rev]...
 #                                     watch action: ship | wait | ready | split_hand_off | cleanup | no_watch
-#   rounds --code d --store d --branch b
+#   rounds --code d [--store d] --branch b
 #                                     highest Feedback-Round across both branches (+ legacy subject count, unpushed)
-#   pass write --code d --store d --code-repo o/n --change c --intent file [--store-prefix openspec]
-#   pass plan --code d --store d --code-repo o/n --change c --snapshot code=f --snapshot store=f [--owner id]
-#   pass done --code d --store d --code-repo o/n --change c --snapshot code=f --snapshot store=f --owner id
-#   pass adopt --code d --store d --code-repo o/n --change c --owner new-id --from shown-id|none
+#   pass write --code d [--store d] --code-repo o/n --change c --intent file [--store-prefix openspec]
+#   pass plan --code d [--store d] --code-repo o/n --change c --snapshot code=f [--snapshot store=f] [--owner id]
+#   pass done --code d [--store d] --code-repo o/n --change c --snapshot code=f [--snapshot store=f] --owner id
+#   pass adopt --code d [--store d] --code-repo o/n --change c --owner new-id --from shown-id|none
 #                                     the intent record of a feedback pass (write returns the owner id); the evidence-based
 #                                     resume plan (owned: true|false|null); delete, by its owner; hand over, naming the owner shown
+#                                     (no --store: a repo-local change, code repo only)
 #   cleanup-plan --code d --store d --branch b
 #                                     post-merge commands per repo whose expected PR is MERGED
 # Exit: 0 answered, 1 stop (the JSON has "error" and "message"; an unexpected failure is
@@ -803,22 +804,23 @@ def branch_log(d, rng, branch_ref):
 
 def cmd_rounds(argv):
     a, _ = parse_args(argv, {"--code": "code", "--store": "store", "--branch": "branch"})
-    need(a, "code", "store", "branch")
-    ctx = contexts(a["code"], a["store"])
+    need(a, "code", "branch")  # no --store: a repo-local change, whose only branch is the code branch
+    ctx = contexts(a["code"], a.get("store"))
+    repos = pass_repos(a)
     per, rounds_all = {}, {}
-    for k, d in (("code", a["code"]), ("store", a["store"])):
+    for k, d in repos:
         mref = main_ref(d, ctx[k]["main"])
         commits = branch_log(d, f"{mref}..refs/heads/{a['branch']}", None) if mref and has_ref(d, f"refs/heads/{a['branch']}") else []
         commits = commits or []
         trailers = {sha: max([int(x) for x in TRAILER.findall(body)] or [0]) for sha, _, body in commits}
         per[k] = {"max_trailer": max(trailers.values(), default=0), "trailers": trailers,
                   "subject_count": sum(1 for _, s, _ in commits if LEGACY_SUBJECT.search(s))}
-    top = max(per["code"]["max_trailer"], per["store"]["max_trailer"])
+    top = max(p["max_trailer"] for p in per.values())
     # trailers are exact; the legacy subject count only stands in on a branch that has none in either repo
-    rounds = top or max(per["code"]["subject_count"], per["store"]["subject_count"])
+    rounds = top or max(p["subject_count"] for p in per.values())
     unpushed, unreadable = {}, []
     if top:
-        for k, d in (("code", a["code"]), ("store", a["store"])):
+        for k, d in repos:
             shas = [s for s, n in per[k]["trailers"].items() if n == top]
             try:
                 missing = [s for s in shas if not remote_contains(d, a["branch"], s)]
@@ -830,7 +832,7 @@ def cmd_rounds(argv):
     limit = ctx["max_fix_rounds"]
     for k in per:
         del per[k]["trailers"]
-    return {"ok": True, "rounds": rounds, "code": per["code"], "store": per["store"], "max_fix_rounds": limit,
+    return {"ok": True, "rounds": rounds, "code": per["code"], "store": per.get("store"), "max_fix_rounds": limit,
             "limit_reached": rounds >= limit, "after_limit": ctx["after_limit"], "unpushed": unpushed,
             "remote_unreadable": unreadable}
 
@@ -965,16 +967,21 @@ def pass_args(argv, extra=None):
     spec = {"--code": "code", "--store": "store", "--code-repo": "code_repo", "--change": "change", "--snapshot": "+snapshot"}
     spec.update(extra or {})
     a, _ = parse_args(argv, spec)
-    need(a, "code", "store", "code_repo", "change")
+    need(a, "code", "code_repo", "change")  # no --store: a repo-local change (code only)
     return a
+
+
+def pass_repos(a):
+    """[(name, dir)] the call reads: the code repo, and the store when --store is given."""
+    return [("code", a["code"])] + ([("store", a["store"])] if a.get("store") else [])
 
 
 def is_pos_int(v):
     return isinstance(v, int) and not isinstance(v, bool) and v >= 1
 
 
-def check_intent_header(intent):
-    """branch, round and prs, before anything is written."""
+def check_intent_header(intent, local=False):
+    """branch, round and prs, before anything is written; a repo-local change (local) has no store PR."""
     if not isinstance(intent["branch"], str) or not intent["branch"].strip():
         raise Stop("invalid_intent", "'branch' must be a non-empty string", code=2)
     if not is_pos_int(intent["round"]):
@@ -982,6 +989,8 @@ def check_intent_header(intent):
     prs = intent["prs"]
     if not isinstance(prs, dict) or set(prs) - {"code", "store"}:
         raise Stop("invalid_intent", "'prs' must be an object with only 'code' and 'store' entries", code=2)
+    if local and prs.get("store") is not None:
+        raise Stop("invalid_intent", "'prs.store' must be absent or null: this change is repo-local (no --store)", code=2)
     for k, v in prs.items():
         if v is None:
             continue
@@ -1001,7 +1010,8 @@ def pass_write(argv):
     for key in ("branch", "round", "prs", "findings"):
         if key not in intent:
             raise Stop("invalid_intent", f"intent lacks '{key}'", code=2)
-    check_intent_header(intent)
+    local = not a.get("store")
+    check_intent_header(intent, local)
     path, _ = locate_record(a["code_repo"], a["change"])
     if path.exists():
         raise Stop("record_exists", f"a feedback pass record exists at {path}; resume that pass before starting another", path=str(path))
@@ -1020,6 +1030,9 @@ def pass_write(argv):
                 or not all(isinstance(e, dict) and isinstance(e.get("file"), str) and e["file"] for e in f["edits"])):
             raise Stop("invalid_intent", f"finding {f['id']} is duplicated or malformed", code=2)
         seen.add(f["id"])
+        if local and (f["source"] != "code" or f["destination"] != "code"):
+            raise Stop("misrouted", f"finding {f['id']}: a repo-local change has only the code repo, so source and destination must be code",
+                       finding=f["id"])
         if f.get("kind", "thread") == "thread":
             if not is_pos_int(f.get("root_id")):
                 raise Stop("invalid_intent", f"finding {f['id']}: thread finding needs 'root_id' as a positive integer", code=2)
@@ -1034,12 +1047,13 @@ def pass_write(argv):
                 raise Stop("misrouted", f"finding {f['id']}: {e['file']} is not under {prefix}/, so it does not belong to the store branch",
                            finding=f["id"], file=e["file"])
     heads = {}
-    for k in ("code", "store"):
-        r = git(a[k], "rev-parse", f"refs/heads/{intent['branch']}")
+    for k, d in pass_repos(a):
+        r = git(d, "rev-parse", f"refs/heads/{intent['branch']}")
         if r.returncode != 0:
             raise Stop("branch_missing", f"{k} has no branch {intent['branch']}")
         heads[k] = r.stdout.strip()
-    marker = find_marker(a["store"], intent["branch"], a["change"], prefix, (contexts(a["code"], a["store"])["store"] or {}).get("main")) if any(edits_for(f, "code") for f in intent["findings"]) else None
+    marker = (find_marker(a["store"], intent["branch"], a["change"], prefix, (contexts(a["code"], a["store"])["store"] or {}).get("main"))
+              if not local and any(edits_for(f, "code") for f in intent["findings"]) else None)
     owner = new_owner(secrets.token_hex(16), a["code"])
     rec = {**intent, "version": 2, "owner": owner, "change": a["change"], "code_repo": a["code_repo"], "heads": heads, "marker": marker}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1128,10 +1142,12 @@ def pass_plan(argv):
     for src in sorted({f["source"] for f in findings}):
         if src not in snaps:
             raise Stop("snapshot_required", f"pass plan needs --snapshot {src}=<file> (a fresh pr-snapshot.sh of that PR)", code=2, source=src)
-    ctx = contexts(a["code"], a["store"])
-    dirs = {"code": a["code"], "store": a["store"]}
+    ctx = contexts(a["code"], a.get("store"))
+    dirs = {"code": a["code"], "store": a.get("store")}
     marker = rec.get("marker")
     dests = [k for k in ("store", "code") if any(edits_for(f, k) for f in findings) or (k == "store" and marker)]
+    if not a.get("store") and ("store" in dests or prs.get("store") or any(f["source"] == "store" for f in findings)):
+        raise Stop("store_required", "this record names the store repo; pass plan needs --store <dir>", code=2)
     rows, stops = [], []
     fix, tip, pushed, slug = {}, {}, {}, {}
     for k in ("code", "store"):

@@ -20,10 +20,10 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 | feedback-passes → A pass intent is validated before it is written | `prs` is a string | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_malformed_prs | green |
 | feedback-passes → A pass intent is validated before it is written | Round is not a positive integer | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_a_bad_round | green |
 | feedback-passes → A pass intent is validated before it is written | Thread finding without a usable root id | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_a_bad_root_id | green |
-| feedback-passes → A pass intent is validated before it is written | Repo-local intent names a store PR | evals/pr-pair/test_pr_pair.py | test_repo_local_pass_write_refuses_a_store_pr | red |
+| feedback-passes → A pass intent is validated before it is written | Repo-local intent names a store PR | evals/pr-pair/test_pr_pair.py | test_repo_local_pass_write_refuses_a_store_pr | green |
 | feedback-passes → Repo-local changes recover an interrupted pass | Interrupted after the last allowed fix was pushed | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_repo_local_final_pass_resumes_without_a_new_round; test_feedback_uses_pass_record_for_repo_local | red |
-| feedback-passes → Repo-local changes recover an interrupted pass | Repo-local pass completes | evals/pr-pair/test_pr_pair.py | test_repo_local_pass_completes_and_is_removed | red |
-| feedback-passes → Repo-local changes recover an interrupted pass | Repo-local record names a store edit | evals/pr-pair/test_pr_pair.py | test_repo_local_pass_write_refuses_store_destination | red |
+| feedback-passes → Repo-local changes recover an interrupted pass | Repo-local pass completes | evals/pr-pair/test_pr_pair.py | test_repo_local_pass_completes_and_is_removed | green |
+| feedback-passes → Repo-local changes recover an interrupted pass | Repo-local record names a store edit | evals/pr-pair/test_pr_pair.py | test_repo_local_pass_write_refuses_store_destination | green |
 | change-finish → Finish resumes from git evidence | Interrupted after the archive commit, local mode | evals/git-workflow/evals.json | eval-finish-resume-after-archive-commit; eval-finish-resume-from-main | green |
 | change-finish → Finish resumes from git evidence | Interrupted after the merge, before the branch deletion | evals/git-workflow/test_instructions.py | test_finish_resume_deletes_a_merged_branch_without_merging | green |
 | change-finish → Finish resumes from git evidence | Interrupted after the archive commit, pr mode | evals/git-workflow/test_instructions.py | test_finish_resume_pr_mode_ships_without_a_second_archive_commit | green |
@@ -122,7 +122,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 ## 4. Repo-local passes (#34; D6)
 
 - [x] 4.1 Add the red tests `test_repo_local_final_pass_resumes_without_a_new_round`, `test_repo_local_pass_completes_and_is_removed`, `test_repo_local_pass_write_refuses_store_destination` and `test_repo_local_pass_write_refuses_a_store_pr`, using a single repo fixture with no `--store`. Verify they fail with `usage: missing --store`.
-- [ ] 4.2 Make `--store` optional for `pass write|plan|done|adopt` and `rounds` per D6: code-only rows, no marker lookup, `misrouted` for a `store`/`both` destination, `invalid_intent` for a non-null `prs.store`. Verify the four tests and the full pr-pair suite pass. Flip the rows green.
+- [x] 4.2 Make `--store` optional for `pass write|plan|done|adopt` and `rounds` per D6: code-only rows, no marker lookup, `misrouted` for a `store`/`both` destination, `invalid_intent` for a non-null `prs.store`. Verify the four tests and the full pr-pair suite pass. Flip the rows green.
 - [ ] 4.3 Update `skills/specwright-pr/SKILL.md`:
   - "The repos and PRs of a change": the store-only list is `expected`, `pair-state` and `cleanup-plan`;
   - feedback steps 2, 3, 6 and 10 run the `pass` and `rounds` calls for repo-local changes too, without `--store`.
