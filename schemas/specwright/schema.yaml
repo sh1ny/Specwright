@@ -307,6 +307,10 @@ artifacts:
       2. A fresh-context subagent of the current harness - the
          `specwright-reviewer` agent when installed - given file paths, not
          your reasoning.
+      Either way, the request names the installed project skills that apply
+      to the reviewed work, each by name with the path of its installed
+      `SKILL.md` as you resolved it (project or user level), or `none`; never
+      a `specwright-*` workflow skill.
       If neither works, STOP and tell the user. Never review in the authoring
       context and never fabricate a verdict.
 
@@ -430,7 +434,10 @@ apply:
     orchestrator: dispatch one task group at a time to it with a packet -
     the group's tasks and test map rows, the requirement and scenario blocks
     those rows cover, the design decisions and bounds that govern them
-    (quoted or cited by heading), and the files to touch. Not the whole
+    (quoted or cited by heading), the files to touch, and the installed
+    project skills that apply to the group, each by name with the path of
+    its installed `SKILL.md` as you resolved it (project or user level), or
+    `none`. Never name a `specwright-*` workflow skill. Not the whole
     change: the packet is what keeps the cheap model cheap. Run groups in
     parallel only when they touch disjoint files. You own verification:
     re-run the group's tests yourself, then tick tasks, flip test map rows
