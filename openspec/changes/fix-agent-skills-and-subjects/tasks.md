@@ -6,10 +6,10 @@ Text checks (`test_instructions.py`) assert where a rule sits in the delivered s
 
 | Requirement | Scenario | Test file | Test name | State |
 |---|---|---|---|---|
-| agent-delegation → Delegated agents can load named skills | Claude implementer loads a named skill | evals/git-workflow/test_instructions.py | test_claude_agents_list_skill_and_load_named_skills | red |
-| agent-delegation → Delegated agents can load named skills | OMP reviewer loads a named skill | evals/git-workflow/test_instructions.py | test_omp_agents_read_the_given_skill_path | red |
-| agent-delegation → Delegated agents can load named skills | Workflow skills stay with the orchestrator | evals/git-workflow/test_instructions.py | test_agents_never_invoke_specwright_skills | red |
-| agent-delegation → Delegated agents can load named skills | Named skill is not installed | evals/git-workflow/test_instructions.py | test_agents_report_unloaded_skills | red |
+| agent-delegation → Delegated agents can load named skills | Claude implementer loads a named skill | evals/git-workflow/test_instructions.py | test_claude_agents_list_skill_and_load_named_skills | green |
+| agent-delegation → Delegated agents can load named skills | OMP reviewer loads a named skill | evals/git-workflow/test_instructions.py | test_omp_agents_read_the_given_skill_path | green |
+| agent-delegation → Delegated agents can load named skills | Workflow skills stay with the orchestrator | evals/git-workflow/test_instructions.py | test_agents_never_invoke_specwright_skills | green |
+| agent-delegation → Delegated agents can load named skills | Named skill is not installed | evals/git-workflow/test_instructions.py | test_agents_report_unloaded_skills | green |
 | agent-delegation → Delegated agents can load named skills | Packet names no skills | evals/git-workflow/test_instructions.py | test_schema_packets_and_review_requests_name_skills_or_none | red |
 | agent-delegation → Updated agent definitions need a new session | Update changes agent definitions | evals/git-workflow/test_instructions.py | test_install_report_requires_new_session_for_agents | red |
 | agent-delegation → Updated agent definitions need a new session | Old session after update | evals/git-workflow/test_instructions.py | test_readme_probe_rejects_old_session | red |
@@ -41,7 +41,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
 ## 1. Delegated agents load named skills (#24; D1)
 
 - [x] 1.1 Create `evals/git-workflow/test_instructions.py` with the seven agent-delegation tests from the test map (frontmatter `tools` of both Claude agents includes `Skill`; agent bodies: load only named skills, Claude by `Skill` and OMP by `read` of the given path, never `specwright-*`, report unloaded skills; schema DELEGATION and review requests name skills with paths or `none`; README Step 8 and CONTRIBUTING setup require a new session for skills and agents; README probe rejects an old session). Verify `python -m unittest discover evals/git-workflow -p "test_instructions.py"` fails on exactly those tests, for missing text.
-- [ ] 1.2 Update `agents/claude/specwright-{implementer,reviewer}.md` (add `Skill` to `tools`, plus the loading rules) and `agents/omp/specwright-{implementer,reviewer}.md` (`read` of the given path, same rules). Verify the four agent tests pass and flip their rows green.
+- [x] 1.2 Update `agents/claude/specwright-{implementer,reviewer}.md` (add `Skill` to `tools`, plus the loading rules) and `agents/omp/specwright-{implementer,reviewer}.md` (`read` of the given path, same rules). Verify the four agent tests pass and flip their rows green.
 - [ ] 1.3 Update `schemas/specwright/schema.yaml`: the DELEGATION packet and the design-review request name the relevant installed skills with resolved `SKILL.md` paths, or `none`. Do the same for the baseline review request in `skills/specwright-roadmap/SKILL.md` init step 5. Verify `test_schema_packets_and_review_requests_name_skills_or_none` passes, then reinstall the schema copy and confirm `openspec schema validate specwright` passes. Flip the row green.
 - [ ] 1.4 Update README Step 8 and CONTRIBUTING Setup step 4 to say new skills and agent definitions load only in a new session. Add a short fresh-session probe to README Evals: dispatch `specwright-implementer` with a packet naming one installed skill and look for its `Skill` call, in a session started after install. Update the `specwright-implementer` row in `openspec/architecture.md` (component table) to mention named skills. Verify the two session tests pass and flip their rows green.
 
