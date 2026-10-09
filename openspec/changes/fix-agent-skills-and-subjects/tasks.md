@@ -73,7 +73,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
 
 ## 5. Gap-closing roadmap edit (#50; D6)
 
-- [ ] 5.1 Add `eval-roadmap-next-gap` and `eval-roadmap-next-gap-dirty-main` to `evals/git-workflow/evals.json`, `fixtures.py` and `grade.py`. Fixture: repo-local, every M1 change archived on main, an agent-verified criterion that fails. Prompt: run next, accept the proposed change, and only scaffold it. Grade (clean main):
+- [x] 5.1 Add `eval-roadmap-next-gap` and `eval-roadmap-next-gap-dirty-main` to `evals/git-workflow/evals.json`, `fixtures.py` and `grade.py`. Fixture: repo-local, every M1 change archived on main, an agent-verified criterion that fails. Prompt: run next, accept the proposed change, and only scaffold it. Grade (clean main):
   - main unchanged;
   - the change branch has exactly one commit that changes only the roadmap file and adds the change name;
   - the change directory exists.

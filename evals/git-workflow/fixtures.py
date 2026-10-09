@@ -509,6 +509,35 @@ def build_roadmap_close_locked(dest):
                                                   "owner": (lock / "owner").read_text(encoding="utf-8")}, indent=2))
 
 
+def build_roadmap_next_gap(repo, dirty):
+    """Repo-local, local mode. M1's only change (add-greeting) is archived and merged on main, but its agent-verified exit
+    criterion (farewell) fails, so **next** proposes a gap-closing change. `dirty`: README has an uncommitted edit, so the
+    branch gate stops. .git/fixture-state.json (outside the work tree) records main's tip, the roadmap and its commit."""
+    base(repo)
+    write(repo, "openspec/specwright.yaml", "finish: local\n" + ROADMAP_SETTINGS)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "chore: roadmap settings")
+    code_branch(repo, "add-greeting")
+    git(repo, "checkout", "-q", "feat/add-greeting")
+    archive_in_store(repo, "2026-10-07-add-greeting", "feat(add-greeting): archive change")
+    merge_into_main(repo, "feat/add-greeting", "add-greeting")
+    write(repo, "openspec/roadmap.md",
+          "# Greeter Roadmap\n\nStrategy: openspec/strategy.md · Architecture: openspec/architecture.md\n\n"
+          "<!-- Status is derived: a change is done when archived; a milestone is done when its changes are done and its exit criteria pass. Do not add status checkboxes for changes. -->\n\n"
+          "## Now: M1 - Greetings\n\n**Outcome:** Users get a greeting and a farewell by name.\n\n"
+          "**Exit criteria:**\n- `python -c \"from greet import farewell; assert farewell('Ada') == 'Goodbye, Ada!'\"` exits 0 on main (agent)\n\n"
+          "**Changes** (in order; each about one PR):\n1. `add-greeting` - greet function\n\n"
+          "## Next: M2 - Sharing\n\nGreetings shared between teams.\n\n## Later\n\n- M3 - Localisation: translated greetings\n\n## Done\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "docs: add project roadmap")
+    rev = lambda r: subprocess.run(["git", "rev-parse", r], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    state = {"main": rev("main"), "roadmap_commit": rev("HEAD"),
+             "roadmap": (repo / "openspec/roadmap.md").read_text(encoding="utf-8")}
+    write(repo, ".git/fixture-state.json", json.dumps(state, indent=2))
+    if dirty:
+        write(repo, "README.md", "# greeter\n\nA tiny greeting library. WIP edit.\n")
+
+
 def build_store(name, dest):
     """Fixtures whose planning lives outside the code repo (or in a folder inside it)."""
     code, store = dest / "code", dest / "store"
@@ -712,6 +741,8 @@ def build(name, repo):
         return references_base(repo, registered=name == "eval-references-apply")
     if name.startswith(("eval-store-", "eval-nested-", "eval-root-")):
         return build_store(name, repo)
+    if name in ("eval-roadmap-next-gap", "eval-roadmap-next-gap-dirty-main"):
+        return build_roadmap_next_gap(repo, dirty=name.endswith("dirty-main"))
     base(repo)
     if name == "eval-branch-dirty-main":
         write(repo, "README.md", "# greeter\n\nA tiny greeting library. WIP edit.\n")

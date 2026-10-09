@@ -250,6 +250,30 @@ def check(name, repo, run):
         R.append(("The merge commit carries the same trailers as the branch's archive commit",
                   bool(arch) and tr("main") == tr(arch), f"merge={tr('main')} archive={tr(arch) if arch else None}"))
 
+    elif name in ("eval-roadmap-next-gap", "eval-roadmap-next-gap-dirty-main"):
+        fx = json.loads((repo / ".git" / "fixture-state.json").read_text(encoding="utf-8"))
+        rm = "openspec/roadmap.md"
+        roadmap_commits = (git(repo, "log", "--all", "--format=%H", "--", rm) or "").splitlines()
+        if name == "eval-roadmap-next-gap":
+            R.append(("main is unchanged", git(repo, "rev-parse", "main") == fx["main"], f"main={git(repo, 'rev-parse', 'main')}"))
+            on = git(repo, "rev-parse", "--verify", "-q", "feat/add-farewell")
+            new = (git(repo, "log", "--format=%H", "main..feat/add-farewell") or "").splitlines() if on else []
+            files = files_of(repo, new[0]) if len(new) == 1 else None
+            added = git(repo, "show", "--format=", new[0], "--", rm) if len(new) == 1 else ""
+            R.append(("Branch feat/add-farewell has exactly one commit, which changes only the roadmap file and adds add-farewell",
+                      len(new) == 1 and files == [rm] and bool(re.search(r"^\+.*add-farewell", added or "", re.M)),
+                      f"branch={bool(on)} commits={len(new)} files={files}"))
+            d = repo / "openspec/changes/add-farewell"
+            R.append(("The change directory openspec/changes/add-farewell exists", d.is_dir(), f"exists={d.is_dir()}"))
+        else:
+            text = (repo / rm).read_text(encoding="utf-8") if (repo / rm).exists() else None
+            R.append(("The roadmap file is unchanged", text == fx["roadmap"], f"same={text == fx['roadmap']}"))
+            R.append(("No roadmap commit exists on any branch beyond the fixture's",
+                      roadmap_commits == [fx["roadmap_commit"]], f"roadmap commits={roadmap_commits}"))
+            R.append(("main is unchanged and the README edit is still uncommitted",
+                      git(repo, "rev-parse", "main") == fx["main"] and " M README.md" in status, f"status={status}"))
+        R.append(("No commit was amended", not amends(repo), f"amend entries={amends(repo)}"))
+
     elif name == "eval-apply-on-main":
         R.append(("No commit was added to main", main_unchanged(repo), f"main log={subjects(repo, 'main')}"))
         hit = re.search(r"on (the )?main|feature branch|create (a |the )?branch|specwright-branch", rep)

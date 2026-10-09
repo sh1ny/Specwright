@@ -713,6 +713,38 @@
         "The report says close stopped because the store's gate is locked or busy, and names the owning change add-csv-export",
         "No commit was amended in either repo"
       ]
+    },
+    {
+      "id": 41,
+      "name": "eval-roadmap-next-gap",
+      "skills": [
+        "specwright-roadmap",
+        "specwright-branch"
+      ],
+      "prompt": "Run next on the roadmap. If it proposes a new change to close a gap, I accept it: call it add-farewell. Just scaffold the change (don't write the artifacts yet).",
+      "expected_output": "Repo-local, local mode. M1's only change is done but its agent-verified farewell criterion fails, so next proposes add-farewell without editing anything. The branch gate creates feat/add-farewell from the clean main; roadmap then adds add-farewell to M1 and commits only the roadmap file on that branch; the change is scaffolded uncommitted. main is unchanged.",
+      "assertions": [
+        "main is unchanged",
+        "Branch feat/add-farewell has exactly one commit, which changes only the roadmap file and adds add-farewell",
+        "The change directory openspec/changes/add-farewell exists",
+        "No commit was amended"
+      ]
+    },
+    {
+      "id": 42,
+      "name": "eval-roadmap-next-gap-dirty-main",
+      "skills": [
+        "specwright-roadmap",
+        "specwright-branch"
+      ],
+      "prompt": "Run next on the roadmap. If it proposes a new change to close a gap, I accept it: call it add-farewell. Just scaffold the change (don't write the artifacts yet).",
+      "expected_output": "Same as eval-roadmap-next-gap, but main has an uncommitted README edit, so the branch gate stops. The roadmap was never edited, so it is unchanged and no roadmap commit exists anywhere.",
+      "assertions": [
+        "The roadmap file is unchanged",
+        "No roadmap commit exists on any branch beyond the fixture's",
+        "main is unchanged and the README edit is still uncommitted",
+        "No commit was amended"
+      ]
     }
   ]
 }
