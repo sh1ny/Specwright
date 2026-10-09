@@ -170,7 +170,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
   - no marker on resume.
 
   Branch lookup from main (review S7): `<prefix>/<change-name>` by the prefix rule, else a local `chore/archive-<change-name>`, else the one local branch matching `*/<change-name>`; several candidates → list them and ask. The archive subject regex is `^[a-z]+\(<change-name>\): archive change$`. Verify both evals pass (grade with `python evals/git-workflow/grade.py <iteration-dir>`), the text tests pass, and `eval-finish-local` and `eval-store-finish-local` still pass. Flip the rows green.
-- [ ] 6.3 Update `openspec/architecture.md`: the Local finish row in Failure and visibility (the resume path; drop the #48 clause), and Known gaps (remove the #48 row). Verify by reading; `git diff -- docs/adr` stays empty.
+- [x] 6.3 Update `openspec/architecture.md`: the Local finish row in Failure and visibility (the resume path; drop the #48 clause), and Known gaps (remove the #48 row). Verify by reading; `git diff -- docs/adr` stays empty.
 
 ## 7. Closing references (#61 parts 1-2; D9)
 

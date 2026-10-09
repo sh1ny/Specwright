@@ -107,7 +107,7 @@ flowchart LR
 | Design review | Roadmap baseline and change design review alike: escalate after 2 consecutive REVISE rounds, no other cap; a later edit voids a pass and gets a new round (for the baseline, the ADR acceptance edit does not, and a PR fix to strategy, architecture or an ADR on `docs/project-baseline` or `docs/close-*` re-runs the baseline review before the fix is reported done); one verdict line | REVISE escalates to the user (USER_OVERRIDE) | CLI missing → `specwright-reviewer`; neither → stop | The user |
 | Store gate | One holder (atomic `mkdir`) | Second gate stops and names the owner | Interrupted gate leaves the lock → the user confirms removal | The user |
 | Task commits | One per task | — | A ticked task without a commit is a gap → Reconcile asks | The agent, then the user |
-| Local finish | Archive commit, then merges (store-backed: store, then code) | — | No resume path: re-entry after the archive commit repeats it; after the store merge it reports `Nothing to finish` and leaves the code branch unmerged (#48) | The user, finding the code unmerged |
+| Local finish | Archive commit, then merges (store-backed: store, then code) | — | Re-entry resumes from git evidence per repo (archive commit, merge on main, branch exists) and continues at the first step not done, never repeating one; uncommitted change or archive paths stop it and ask; no marker file | The agent, then the user on dirty paths |
 
 ## Known gaps
 
@@ -134,7 +134,6 @@ This table is frozen at the reviewed baseline. The live list is the open sh1ny/s
 | README and `specwright-pr` do not state the Python 3.8+ dependency the scripts enforce | #45 |
 | `pass write` needs Python 3.10+ although the gate accepts 3.8+; unexpected errors escape the JSON contract | #46 |
 | Clipped snapshot bodies can be judged without the full text | #47 |
-| Local finish cannot resume after an interrupted archive commit or store merge | #48 |
 | Baseline review caps rounds at two, with no reset after a later edit | #49 |
 | Roadmap **next** never commits its gap-closing roadmap edit, so the branch gate stops | #50 |
 
