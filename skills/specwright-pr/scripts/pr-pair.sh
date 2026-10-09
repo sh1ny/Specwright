@@ -106,10 +106,11 @@ def git(d, *args):
 REPO_LOGIN, TOKENS = {}, {}  # repo slug (lower) -> login that reads it; login -> its verified token
 
 
-def gh(*args):
+def gh(*args, repo=None):
     # through bash so a `gh` that is a shell script (or a shim) resolves like it does for the caller
+    # `repo` names whose login to use when the arguments carry no repo (a GraphQL node id)
     cmd = [BASH, "-c", 'exec gh "$@"', "gh", *args] if BASH else ["gh", *args]
-    login = REPO_LOGIN.get((repo_of(args) or "").lower())
+    login = REPO_LOGIN.get((repo or repo_of(args) or "").lower())
     if not login:
         return run(cmd)
     try:
@@ -648,24 +649,34 @@ def cmd_ensure_pr(argv):
     return {"ok": True, "action": "created", "pr": {"number": int(m.group(2)), "url": m.group(1), "state": "OPEN", "base": base}}
 
 
+def link_state(repo, n, kind, peer):
+    """Does PR `n` of `repo` already name `peer` (the `kind` PR's URL)? In its description, or in a `specwright:link <kind>` marker.
+    The one test `link` skips on and the feedback pass's `link` row reports. Returns (reason, comment id, the kind's markers)."""
+    pr = gh_obj(f"repos/{repo}/pulls/{n}")
+    if peer in (pr.get("body") or ""):
+        return "description", None, []
+    found = []
+    for c in gh_list(f"repos/{repo}/issues/{n}/comments?per_page=100"):
+        m = MARK.search(c.get("body") or "")
+        if m and m.group(1) == kind:
+            found.append((c, m.group(2)))
+    for c, url in found:
+        if url == peer:
+            return "marker", c["id"], found
+    return None, None, found
+
+
 def cmd_link(argv):
     a, _ = parse_args(argv, {"--repo": "repo", "--pr": "pr", "--kind": "kind", "--peer-url": "peer", "--login": "login"})
     need(a, "repo", "pr", "kind", "peer")
     repo, n, kind, peer = a["repo"], a["pr"], a["kind"], a["peer"]
     if kind not in ("store", "code"):
         usage("--kind is store or code")
-    pr = gh_obj(f"repos/{repo}/pulls/{n}")
-    if peer in (pr.get("body") or ""):
+    reason, cid0, found = link_state(repo, n, kind, peer)
+    if reason == "description":
         return {"ok": True, "action": "skipped", "reason": "description"}
-    comments = gh_list(f"repos/{repo}/issues/{n}/comments?per_page=100")
-    found = []
-    for c in comments:
-        m = MARK.search(c.get("body") or "")
-        if m and m.group(1) == kind:
-            found.append((c, m.group(2)))
-    for c, url in found:
-        if url == peer:
-            return {"ok": True, "action": "skipped", "reason": "marker", "comment_id": c["id"]}
+    if reason:
+        return {"ok": True, "action": "skipped", "reason": "marker", "comment_id": cid0}
     login = (a.get("login") or ambient_login()).lower()
     mine = [c for c, _ in found if ((c.get("user") or {}).get("login") or "").lower() == login]
     label = "Store" if kind == "store" else "Code"
@@ -1128,6 +1139,35 @@ def request_state(repo, num, branch, tip, reqs):
     return out, pushed
 
 
+REACTION_GQL = ("query($id: ID!, $cursor: String) { node(id: $id) { ... on Reactable { reactions(first: 100, content: %s, after: $cursor) "
+                "{ nodes { user { login } } pageInfo { hasNextPage endCursor } } } } }")
+
+
+def has_reaction(repo, kind, target, reaction, viewer):
+    """Has `viewer` put `reaction` (+1 or -1) on the recorded target? A thread's root is a numeric review-comment id (REST);
+    a comment or review is a node id (GraphQL). Any failed read exits 3."""
+    who = (viewer or "").lower()
+    if kind == "thread":
+        content = "%2B1" if reaction == "+1" else "-1"
+        return any(((r.get("user") or {}).get("login") or "").lower() == who and r.get("content") == reaction
+                   for r in gh_list(f"repos/{repo}/pulls/comments/{target}/reactions?content={content}&per_page=100"))
+    query, cursor = REACTION_GQL % ("THUMBS_UP" if reaction == "+1" else "THUMBS_DOWN"), None
+    while True:
+        r = gh("api", "graphql", "-f", f"query={query}", "-f", f"id={target}", *(["-f", f"cursor={cursor}"] if cursor else []), repo=repo)
+        if r.returncode != 0:
+            unknown((r.stderr or r.stdout).strip() or f"gh exited {r.returncode}")
+        try:
+            node = (json.loads(r.stdout).get("data") or {}).get("node")
+            rx = node["reactions"]
+            if any(((n.get("user") or {}).get("login") or "").lower() == who for n in rx["nodes"]):
+                return True
+            more, cursor = rx["pageInfo"]["hasNextPage"], rx["pageInfo"]["endCursor"]
+        except (ValueError, TypeError, KeyError, AttributeError):
+            unknown(f"unreadable reactions of {target}")
+        if not more or not cursor:
+            return False
+
+
 def pass_plan(argv):
     a = pass_args(argv, {"--owner": "owner"})
     path, ignored = locate_record(a["code_repo"], a["change"])
@@ -1195,10 +1235,12 @@ def pass_plan(argv):
     def unmet(*ids):
         return [i for i in ids if not any(r["step"] + ":" + r["repo"] == i and r["state"] in ("done", "not_applicable") for r in rows if "repo" in r)]
 
+    adopted = None
     if "code" in dests and not prs.get("code"):  # a code fix on a store-only change: the code PR is now expected
         opened = [p for p in discover(slug["code"], branch, base=ctx["code"]["main"])["prs"] if p["state"] == "OPEN"]
         if opened:
             prs = {**prs, "code": {"repo": slug["code"], "number": opened[0]["number"]}}
+            adopted = prs["code"]
 
     for k in dests:  # 2. push
         pr = prs.get(k)
@@ -1234,6 +1276,13 @@ def pass_plan(argv):
                 row["requests"], row["push_time"] = states, pushed_at
                 row["state"] = "done" if all(s["done"] for s in states) else "todo"
         rows.append(row)
+
+    if adopted and prs.get("store"):  # 3b. a code PR adopted after the pair was linked (or not): the link is evidence too
+        urls = {k: gh_obj(f"repos/{prs[k]['repo']}/pulls/{prs[k]['number']}")["html_url"] for k in ("code", "store")}  # canonical, never built
+        linked = (link_state(prs["code"]["repo"], prs["code"]["number"], "store", urls["store"])[0]
+                  and link_state(prs["store"]["repo"], prs["store"]["number"], "code", urls["code"])[0])
+        rows.append({"step": "link", "state": "done" if linked else "todo",
+                     **{k: {"repo": prs[k]["repo"], "number": prs[k]["number"], "url": urls[k]} for k in ("code", "store")}})
 
     react_on = ctx["react"]
     for f in findings:  # 4-6. reply, resolution, reaction
@@ -1289,10 +1338,12 @@ def pass_plan(argv):
         if not reaction:
             rows.append({**base, "step": "react", "state": "not_applicable"})
         else:
-            rows.append({**base, "step": "react", "state": "rerun" if answered else "todo", "react": reaction, "comment": target,
-                         "idempotent": True})
+            # a reaction counts once GitHub shows it: read it with the viewer's login, after the reply is posted
+            seen = answered and has_reaction(pr.get("repo") or slug[src], kind, target, reaction, viewer)
+            rows.append({**base, "step": "react", "state": "done" if seen else "todo", "react": reaction, "comment": target,
+                         "pr": {"repo": pr.get("repo"), "number": pr.get("number")}, "idempotent": True})
 
-    done_states = ("done", "not_applicable", "rerun")
+    done_states = ("done", "not_applicable")
     complete = not stops and all(r["state"] in done_states for r in rows)
     status = "stop" if stops else ("complete" if complete else "resume")
     return {"ok": True, "record": True, "round": n, "branch": branch, "new_pass_allowed": False, "status": status, "stops": stops,

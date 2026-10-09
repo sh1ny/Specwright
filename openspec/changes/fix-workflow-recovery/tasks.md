@@ -59,9 +59,9 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 | planning-stores → An interrupted feedback pass is completed first | Interrupted halfway through a spec fix | evals/pr-pair/test_pr_pair.py | test_pass_plan_partial_edit_not_committable | green |
 | planning-stores → An interrupted feedback pass is completed first | Review requests disabled | evals/pr-pair/test_pr_pair.py | test_pass_plan_rerequest_not_applicable | green |
 | planning-stores → An interrupted feedback pass is completed first | Pass with an open question thread | evals/pr-pair/test_pr_pair.py | test_pass_plan_question_thread_done_when_replied | green |
-| planning-stores → An interrupted feedback pass is completed first | Reply posted, reaction not sent | evals/pr-pair/test_pr_pair.py | test_pass_plan_reaction_todo_until_github_shows_it | red |
-| planning-stores → An interrupted feedback pass is completed first | Reaction already present | evals/pr-pair/test_pr_pair.py | test_pass_plan_reaction_done_when_present | red |
-| planning-stores → An interrupted feedback pass is completed first | Code PR adopted before the pair was linked | evals/pr-pair/test_pr_pair.py | test_pass_plan_adopted_code_pr_needs_the_link | red |
+| planning-stores → An interrupted feedback pass is completed first | Reply posted, reaction not sent | evals/pr-pair/test_pr_pair.py | test_pass_plan_reaction_todo_until_github_shows_it | green |
+| planning-stores → An interrupted feedback pass is completed first | Reaction already present | evals/pr-pair/test_pr_pair.py | test_pass_plan_reaction_done_when_present | green |
+| planning-stores → An interrupted feedback pass is completed first | Code PR adopted before the pair was linked | evals/pr-pair/test_pr_pair.py | test_pass_plan_adopted_code_pr_needs_the_link | green |
 
 Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re-runs them after the record format changes (the owner, and the reaction read), and updates their fixtures where the new contract requires it, without weakening an assertion. Text checks prove a rule is in the instructions, not that a live agent follows it. The finish evals cover the live paths that change branch state. They are regression guards, not red-first tests: every one, including the `-from-main` variants added during apply (HEAD on main, where the old step 1 said `Nothing to finish`), also passed against the 0.1.9 skill with Opus and Haiku, because the agents reasoned out the resume from the git state. The red evidence for group 6 is its five text tests.
 
@@ -146,7 +146,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
   - `test_pass_plan_adopted_code_pr_needs_the_link`: a store-only pass, a code fix pushed, the code PR opened without links, replies done. It first reproduces #30 (plan reports `complete`); then `link` is `todo`, and `done` after both `link` calls with the row's URLs, leaving exactly one marker per PR.
 
   Replace `test_pass_plan_reaction_is_rerun_after_reply`, which asserts the old `rerun` behaviour. Verify the new tests fail for the right reason.
-- [ ] 5.2 Implement D4 (react rows read GitHub with the repo's login; remove `rerun` from the states and from `done_states`) and D7 (factor `cmd_link`'s linked test into one function; read the canonical `html_url` of each PR; add the `link` row with `code.url` and `store.url`). Verify the new tests, the green pass rows of the test map and the full pr-pair suite pass. Flip the rows green.
+- [x] 5.2 Implement D4 (react rows read GitHub with the repo's login; remove `rerun` from the states and from `done_states`) and D7 (factor `cmd_link`'s linked test into one function; read the canonical `html_url` of each PR; add the `link` row with `code.url` and `store.url`). Verify the new tests, the green pass rows of the test map and the full pr-pair suite pass. Flip the rows green.
 - [ ] 5.3 Update `skills/specwright-pr/SKILL.md` feedback step 2 (`resume`):
   - run `todo` react rows with `pr-reply.sh react`;
   - run ship step 5 for a `todo` link row, passing the row's `code.url` and `store.url` as `--peer-url`;
