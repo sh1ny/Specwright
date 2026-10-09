@@ -8,7 +8,7 @@
 Planning can live in the code repo, in a folder nested in it, or in a separate planning store shared by several code repos (OpenSpec stores). Assuming `./openspec/` would write planning into the wrong repo.
 
 ## Decision
-Every skill resolves the planning root with `openspec list --json` before any write, and compares git common dirs to classify it as repo-local or store-backed. A store-backed change has a branch with the same name in both repos. Its commits pair by phase:
+Every skill that reads or writes planning state (`specwright-branch`, `-commit`, `-finish`, `-pr` and `-roadmap`) resolves the planning root with `openspec list --json` before any write, and compares git common dirs to classify it as repo-local or store-backed. A store-backed change has a branch with the same name in both repos. Its commits pair by phase:
 - **Task with code:** the code commit comes first, then the matching `tasks.md` tick in the store, with the same subject.
 - **Task without code:** a store commit only, with `Code-Changes: none`.
 - **Planning and archive commits:** may be store-only.
