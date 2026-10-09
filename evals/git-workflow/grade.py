@@ -250,6 +250,30 @@ def check(name, repo, run):
         R.append(("The merge commit carries the same trailers as the branch's archive commit",
                   bool(arch) and tr("main") == tr(arch), f"merge={tr('main')} archive={tr(arch) if arch else None}"))
 
+    elif name in ("eval-roadmap-next-gap", "eval-roadmap-next-gap-dirty-main"):
+        fx = json.loads((repo / ".git" / "fixture-state.json").read_text(encoding="utf-8"))
+        rm = "openspec/roadmap.md"
+        roadmap_commits = (git(repo, "log", "--all", "--format=%H", "--", rm) or "").splitlines()
+        if name == "eval-roadmap-next-gap":
+            R.append(("main is unchanged", git(repo, "rev-parse", "main") == fx["main"], f"main={git(repo, 'rev-parse', 'main')}"))
+            on = git(repo, "rev-parse", "--verify", "-q", "feat/add-farewell")
+            new = (git(repo, "log", "--format=%H", "main..feat/add-farewell") or "").splitlines() if on else []
+            files = files_of(repo, new[0]) if len(new) == 1 else None
+            added = git(repo, "show", "--format=", new[0], "--", rm) if len(new) == 1 else ""
+            R.append(("Branch feat/add-farewell has exactly one commit, which changes only the roadmap file and adds add-farewell",
+                      len(new) == 1 and files == [rm] and bool(re.search(r"^\+.*add-farewell", added or "", re.M)),
+                      f"branch={bool(on)} commits={len(new)} files={files}"))
+            d = repo / "openspec/changes/add-farewell"
+            R.append(("The change directory openspec/changes/add-farewell exists", d.is_dir(), f"exists={d.is_dir()}"))
+        else:
+            text = (repo / rm).read_text(encoding="utf-8") if (repo / rm).exists() else None
+            R.append(("The roadmap file is unchanged", text == fx["roadmap"], f"same={text == fx['roadmap']}"))
+            R.append(("No roadmap commit exists on any branch beyond the fixture's",
+                      roadmap_commits == [fx["roadmap_commit"]], f"roadmap commits={roadmap_commits}"))
+            R.append(("main is unchanged and the README edit is still uncommitted",
+                      git(repo, "rev-parse", "main") == fx["main"] and " M README.md" in status, f"status={status}"))
+        R.append(("No commit was amended", not amends(repo), f"amend entries={amends(repo)}"))
+
     elif name == "eval-apply-on-main":
         R.append(("No commit was added to main", main_unchanged(repo), f"main log={subjects(repo, 'main')}"))
         hit = re.search(r"on (the )?main|feature branch|create (a |the )?branch|specwright-branch", rep)
@@ -509,6 +533,8 @@ def check_store(name, repo, run):
         R.extend(check_store_finish(name, repo, code, store, rep))
     elif name in ("eval-store-ship-push-rejected", "eval-store-archive-before-merge-local-store"):
         R.extend(check_store_pr(name, repo, code, store, rep))
+    elif name == "eval-store-roadmap-close-locked":
+        R.extend(check_store_roadmap_locked(repo, code, store, rep))
     elif name.startswith("eval-store-roadmap-"):
         R.extend(check_store_roadmap(name, repo, code, store, rep))
     return R
@@ -1110,6 +1136,39 @@ def check_store_roadmap(name, repo, code, store, rep):
     R.append(("No commit was amended in either repo", not (amends(code) + amends(store)), f"amend entries={amends(code) + amends(store)}"))
     return R
 
+
+
+def check_store_roadmap_locked(repo, code, store, rep):
+    """Roadmap close in a store-backed project while another session holds the store's gate lock (#43): close must stop
+    before any branch or write, and leave the lock exactly as it found it. fixture-state.json has the starting state."""
+    R = []
+    fx = json.loads((repo / "fixture-state.json").read_text(encoding="utf-8"))
+    on = lambda r: git(r, "branch", "--show-current")
+    # The reflog also catches a close branch that was made, merged and deleted.
+    close = {r.name: [b for b in ((git(r, "branch", "--all", "--format=%(refname:short)") or "").splitlines()
+                                  + (git(r, "reflog", "--format=%gs") or "").splitlines()) if "close-" in b]
+             for r in (code, store)}
+    R.append(("No docs/close-* branch was ever made in either repo", not any(close.values()), f"close branches={close}"))
+    cd = git(store, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    owner = Path(cd) / "specwright-gate.lock" / "owner" if cd else None
+    text = owner.read_text(encoding="utf-8") if owner and owner.is_file() else None
+    extra = sorted(p.name for p in owner.parent.iterdir()) if owner and owner.parent.is_dir() else None
+    R.append(("The gate lock directory and its owner file are byte-identical to the fixture's",
+              text == fx["owner"] and extra == ["owner"], f"owner={text!r} lock contents={extra}"))
+    tips = {"code": git(code, "rev-parse", "main"), "store": git(store, "rev-parse", "main")}
+    R.append(("Both repos are on main, and the code and store mains are unchanged",
+              on(code) == on(store) == "main" and tips == {"code": fx["code_main"], "store": fx["store_main"]},
+              f"code={on(code)} store={on(store)} tips={tips} fixture={fx['code_main'], fx['store_main']}"))
+    st = {"code": status_of(code), "store": status_of(store)}
+    R.append(("No project file was written: both working trees are clean", not st["code"] and not st["store"], f"status={st}"))
+    hit = re.search(r"lock|busy|another session", rep)
+    stop = re.search(r"STOPPED|stopped|did not close|not closed|cannot close|can't close|did not (start|create)", rep)
+    R.append(("The report says close stopped because the store's gate is locked or busy, and names the owning change add-csv-export",
+              bool(hit) and bool(stop) and "add-csv-export" in rep,
+              f"match={hit.group(0) if hit else None} stop={stop.group(0) if stop else None}"))
+    R.append(("No commit was amended in either repo", not amends(code) and not amends(store),
+              f"amends={amends(code) + amends(store)}"))
+    return R
 
 
 def check_store_branch(name, code, store, rep):

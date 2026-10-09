@@ -10,6 +10,7 @@ prints one JSON line; exit 0 = answered, 1 = stop (error object), 2 = usage,
 Run: python -m unittest discover evals/pr-pair
 """
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -1211,6 +1212,87 @@ class PassPlan(PassBase):
         bad = self.finding(edits=[{"file": "greet.py", "contains": ["x"]}])  # destination store, not under openspec/
         self.assertEqual(self.write_record([bad], expect=1)["error"], "misrouted")
         self.assertFalse(self.record_path().exists())
+
+
+# =======================================================================================================
+def embedded_python():
+    text = SCRIPT.read_text(encoding="utf-8")
+    start = text.index("<<'PYSRC'\n") + len("<<'PYSRC'\n")
+    return text[start:text.index("\nPYSRC", start)]
+
+
+def calls(src, name):
+    """The full argument text of every `.name(...)` call, matching nested parentheses."""
+    out = []
+    for m in re.finditer(r"\." + name + r"\(", src):
+        depth, i = 1, m.end()
+        while depth and i < len(src):
+            depth += {"(": 1, ")": -1}.get(src[i], 0)
+            i += 1
+        out.append(src[m.end():i - 1])
+    return out
+
+
+def find_py38():
+    """A Python 3.8 interpreter: SPECWRIGHT_PY38, then `uv python find 3.8`, then `py -3.8`; None if none."""
+    cands = [os.environ.get("SPECWRIGHT_PY38")]
+    for cmd in (["uv", "python", "find", "3.8"], ["py", "-3.8", "-c", "import sys; print(sys.executable)"]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            cands.append(r.stdout.strip() if r.returncode == 0 else None)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    for c in cands:
+        if c and Path(c).exists():
+            r = subprocess.run([c, "-c", "import sys; print(sys.version_info[:2] == (3, 8))"], capture_output=True, text=True)
+            if r.stdout.strip() == "True":
+                return c
+    return None
+
+
+class PassRuntime(PassBase):
+    """pass write on the minimum Python the script accepts, and its JSON error contract for unexpected failures."""
+
+    def test_embedded_python_passes_no_newline_kwarg(self):
+        src = embedded_python()
+        found = [f"{n}({a})" for n in ("write_text", "read_text") for a in calls(src, n) if re.search(r"\bnewline\s*=", a)]
+        self.assertTrue(calls(src, "read_text"), "no read_text call found; the scan would be vacuous")
+        self.assertEqual(found, [], "Path.write_text/read_text take newline= only on Python 3.10+")
+
+    def test_unexpected_error_is_internal_error_json(self):
+        self.state_dir.mkdir(parents=True)
+        (self.state_dir / "feedback").write_text("not a directory\n", encoding="utf-8")  # the record's parent is a file
+        f = self.write_json("intent.json", self.intent([self.finding()]))
+        r = subprocess.run(["bash", str(SCRIPT), "pass", "write", *map(str, self.common()), "--intent", str(f)],
+                           capture_output=True, text=True, env=self.env(), cwd=self.tmp)
+        self.assertNotIn("Traceback", r.stdout + r.stderr)
+        lines = r.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 1, f"want one JSON line, got {r.stdout!r} / {r.stderr!r}")
+        out = json.loads(lines[0])
+        self.assertEqual((r.returncode, out["ok"], out["error"]), (1, False, "internal_error"), out)
+        self.assertTrue(out.get("message"), out)
+
+    def test_pass_write_on_python38(self):
+        py = find_py38()
+        if not py:
+            self.skipTest("no Python 3.8 interpreter (set SPECWRIGHT_PY38, or `uv python install 3.8`)")
+        shims = self.tmp / "py38bin"
+        shims.mkdir()
+        for name in ("python3", "python"):
+            (shims / name).write_text(f'#!/bin/sh\nexec "{fixtures.posix(py)}" "$@"\n', encoding="utf-8", newline="\n")
+            os.chmod(shims / name, 0o755)
+        e = self.env()
+        e["PATH"] = str(shims) + os.pathsep + e["PATH"]
+        v = subprocess.run(["bash", "-c", "python3 -c 'import sys; print(sys.version_info[:2])'"], capture_output=True, text=True, env=e)
+        self.assertEqual(v.stdout.strip(), "(3, 8)", f"the shim does not reach 3.8: {v.stdout!r} {v.stderr!r}")
+        f = self.write_json("intent.json", self.intent([self.finding()]))
+        r = subprocess.run(["bash", str(SCRIPT), "pass", "write", *map(str, self.common()), "--intent", str(f)],
+                           capture_output=True, text=True, env=e, cwd=self.tmp)
+        self.assertEqual(r.returncode, 0, f"stdout: {r.stdout}\nstderr: {r.stderr}")
+        self.assertTrue(json.loads(r.stdout.strip().splitlines()[0])["ok"], r.stdout)
+        data = self.record_path().read_bytes()
+        self.assertNotIn(b"\r", data)
+        self.assertEqual(json.loads(data.decode("utf-8"))["change"], CHANGE)
 
 
 # =======================================================================================================

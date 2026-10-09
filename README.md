@@ -1,6 +1,6 @@
 # Specwright
 
-![version](https://img.shields.io/badge/version-0.1.8-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
+![version](https://img.shields.io/badge/version-0.1.9-blue) ![OpenSpec](https://img.shields.io/badge/OpenSpec-1.14.1-8A2BE2) ![agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20OMP-555)
 
 A lightweight spec-driven development bundle for AI coding agents, built on [OpenSpec](https://github.com/Fission-AI/OpenSpec). It keeps OpenSpec's small artifact set and adds what OpenSpec leaves out — **architecture reasoning scaled to the change**, test discipline, a git and GitHub PR workflow, and project-level planning — as one custom schema plus a handful of auto-activating skills. No OpenSpec core changes.
 
@@ -39,7 +39,7 @@ flowchart LR
 
 ## ⚡ Install / Update
 
-> **Prerequisites:** the OpenSpec CLI (`npm i -g @fission-ai/openspec`), `openspec init` run in the project, `git`, and `gh` 2.40 or later for the PR skills. The PR scripts need `bash` (Git Bash on Windows).
+> **Prerequisites:** core: the OpenSpec CLI (`npm i -g @fission-ai/openspec`), `openspec init` run in the project, `git`, and `bash` with a POSIX userland (`awk`, `sed`, `grep`; Git Bash on Windows). The PR skills also need `gh` 2.40 or later and Python 3.8 or later; without them the install still completes and reports `PR workflow not ready`.
 
 Copy the prompt below and paste it into your coding agent. **The same prompt installs and updates.**
 
@@ -54,6 +54,14 @@ also repairs an interrupted or partial install.
 Step 1 - Check prerequisites
 - Run `openspec --version`. If it fails, tell the user to install it
   (`npm i -g @fission-ai/openspec`) and STOP.
+- Core: run `git --version` and `bash -c 'command -v awk sed grep'`. If
+  either fails, tell the user to install git, or bash with a POSIX userland
+  (Git Bash on Windows), and STOP.
+- PR workflow (the `specwright-pr` scripts): run `gh --version` and check
+  it is 2.40 or later. Then look for Python 3.8+: try `python3`, then
+  `python`, each with `-c 'import sys; sys.exit(sys.version_info < (3, 8))'`.
+  Record what is missing (`gh 2.40+`, `Python 3.8+`) for Step 8 and
+  continue: it does not block the install or the version stamp.
 - Run `openspec list --json` in the code checkout and read `root`.
   - `"root": null`: if the error names this project's `openspec/config.yaml`
     (it starts with `Declared in` or `Invalid store declaration in`), show
@@ -160,8 +168,11 @@ models kept), config and settings created/merged/unchanged (keys added or
 removed), legacy files removed, and the result of each Step 7 check. When `<root>`
 is a store, list the files this install left uncommitted there (by path,
 from `git status --porcelain` in the store) and say the user commits them in
-the store; this prompt never commits. Tell the user to restart their agent
-so new skills and agents load.
+the store; this prompt never commits. Tell the user that new skills and
+agent definitions load only in a new agent session started after this
+install: start one before relying on them. If Step 1 recorded a missing
+PR prerequisite, add the line `PR workflow not ready: <missing>` (for
+example `PR workflow not ready: Python 3.8+`).
 ```
 
 ## ⚡ First Steps After Install
@@ -355,6 +366,8 @@ Files are always staged by name — never `git add -A`, never all of `openspec/`
 Store evals (`eval-store-*`) need two repos, so the fixture is a directory, not a repo: `code/` is the project, `store/` is its OpenSpec store. The fixture also writes `eval.env`. The agent under test must run `source <repo>/eval.env` first and work from `<repo>/code`. The file points the OpenSpec registry and config (`XDG_DATA_HOME`, `XDG_CONFIG_HOME`) and Specwright's watch state (`SPECWRIGHT_STATE_DIR`) at the run directory, and puts a fake `gh` first on `PATH`. Your own registry and state are never touched. The fake `gh` ([`evals/fakes/gh.py`](evals/fakes/gh.py)) keeps its state in `gh-state.json` and logs every call to `gh-log.jsonl`; `grade.py` reads both repos and that log.
 
 Test the fake `gh` with `python -m unittest discover evals/pr-pair`.
+
+To check that delegated agents can load skills, start a new session after the install, dispatch `specwright-implementer` with a small packet that names one installed skill (with its `SKILL.md` path) and look for its `Skill` call before any edit. A session that was already running before the install still has the old agent definitions, so a check there proves nothing: start a new session and run it again.
 
 ---
 

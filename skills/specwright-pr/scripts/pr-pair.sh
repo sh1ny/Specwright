@@ -24,12 +24,13 @@
 #                                     the intent record of a feedback pass; the evidence-based resume plan; delete
 #   cleanup-plan --code d --store d --branch b
 #                                     post-merge commands per repo whose expected PR is MERGED
-# Exit: 0 answered, 1 stop (the JSON has "error" and "message"), 2 usage or missing input,
+# Exit: 0 answered, 1 stop (the JSON has "error" and "message"; an unexpected failure is
+#       error "internal_error"), 2 usage or missing input,
 #       3 GitHub state unknown (a lookup failed; never read it as "no PR").
 # Every gh call names its repository (--repo or repos/<o>/<n>/...) and runs with GH_REPO unset, so an
 # inherited override cannot redirect a store lookup to the code repo. Wrap with as.sh to pin the
 # GitHub identity, started inside the repository it acts on (its header scrub is per working directory).
-# Needs bash, git, gh and python 3.8+.
+# Needs bash, git, gh 2.40+ and Python 3.8+.
 set -euo pipefail
 
 py=
@@ -929,7 +930,8 @@ def pass_write(argv):
     rec = {**intent, "change": a["change"], "code_repo": a["code_repo"], "heads": heads, "marker": marker, "version": 1}
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(rec, indent=2), encoding="utf-8", newline="\n")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(rec, indent=2))
     os.replace(tmp, path)
     return {"ok": True, "path": norm(path), "round": rec["round"], "heads": heads, "marker": marker}
 
@@ -1219,4 +1221,6 @@ try:
     emit(COMMANDS[args[0]](args[1:]))
 except Stop as e:
     emit(e.obj(), e.code)
+except Exception as e:
+    emit({"ok": False, "error": "internal_error", "message": f"{type(e).__name__}: {e}"}, 1)
 PYSRC

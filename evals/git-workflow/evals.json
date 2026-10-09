@@ -696,6 +696,55 @@
         "No gate lock is left in the store",
         "The report says the name belongs to an archived change and offers another name"
       ]
+    },
+    {
+      "id": 40,
+      "name": "eval-store-roadmap-close-locked",
+      "skills": [
+        "specwright-roadmap"
+      ],
+      "prompt": "Close milestone M1 on the roadmap.",
+      "expected_output": "Local mode, planning in a store, M1 done (add-greeting archived on the store's main and merged into code main; its agent-verified exit criterion passes). Another session holds the store's gate lock (change add-csv-export, taken just now). Close stops at the gate before creating docs/close-m1 in either repo or writing any project file, shows the lock's owner, and leaves the lock untouched.",
+      "assertions": [
+        "No docs/close-* branch was ever made in either repo",
+        "The gate lock directory and its owner file are byte-identical to the fixture's",
+        "Both repos are on main, and the code and store mains are unchanged",
+        "No project file was written: both working trees are clean",
+        "The report says close stopped because the store's gate is locked or busy, and names the owning change add-csv-export",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 41,
+      "name": "eval-roadmap-next-gap",
+      "skills": [
+        "specwright-roadmap",
+        "specwright-branch"
+      ],
+      "prompt": "Run next on the roadmap. If it proposes a new change to close a gap, I accept it: call it add-farewell. Just scaffold the change (don't write the artifacts yet).",
+      "expected_output": "Repo-local, local mode. M1's only change is done but its agent-verified farewell criterion fails, so next proposes add-farewell without editing anything. The branch gate creates feat/add-farewell from the clean main; roadmap then adds add-farewell to M1 and commits only the roadmap file on that branch; the change is scaffolded uncommitted. main is unchanged.",
+      "assertions": [
+        "main is unchanged",
+        "Branch feat/add-farewell has exactly one commit, which changes only the roadmap file and adds add-farewell",
+        "The change directory openspec/changes/add-farewell exists",
+        "No commit was amended"
+      ]
+    },
+    {
+      "id": 42,
+      "name": "eval-roadmap-next-gap-dirty-main",
+      "skills": [
+        "specwright-roadmap",
+        "specwright-branch"
+      ],
+      "prompt": "Run next on the roadmap. If it proposes a new change to close a gap, I accept it: call it add-farewell. Just scaffold the change (don't write the artifacts yet).",
+      "expected_output": "Same as eval-roadmap-next-gap, but main has an uncommitted README edit, so the branch gate stops. The roadmap was never edited, so it is unchanged and no roadmap commit exists anywhere.",
+      "assertions": [
+        "The roadmap file is unchanged",
+        "No roadmap commit exists on any branch beyond the fixture's",
+        "main is unchanged and the README edit is still uncommitted",
+        "No commit was amended"
+      ]
     }
   ]
 }

@@ -4,10 +4,10 @@ Specwright is built with Specwright: changes to it go through the same branch â†
 
 ## Setup
 
-1. Install the OpenSpec CLI at the version in the README badge (`npm i -g @fission-ai/openspec@1.14.1`), plus `git`, `gh` 2.40 or later, and `bash` (Git Bash on Windows).
+1. Install the OpenSpec CLI at the version in the README badge (`npm i -g @fission-ai/openspec@1.14.1`), plus `git`, `bash` with a POSIX userland (Git Bash on Windows), `gh` 2.40 or later and Python 3.8 or later.
 2. Clone the repository and run `openspec init` in it.
 3. Run the [install prompt](README.md#-install--update) from the README in the clone. It installs Specwright into the repo's own `openspec/` and asks for this repo's settings; `finish: pr` fits here.
-4. Restart your agent so it loads the installed skills and agents.
+4. Start a new agent session: installed skills and agent definitions load only in a session started after the install.
 
 ## Source vs. installed copies
 
@@ -40,11 +40,12 @@ Your agent follows the installed copies, not the source. A change that edits a s
 
 - Git-skill changes: run the [`evals/git-workflow`](evals/git-workflow/) cases (see the README's Evals section) and add a case when the change adds a stop condition or branch-state rule.
 - Schema or template changes: `openspec schema validate specwright` after re-installing.
-- PR scripts: exercise the changed path against a real PR, and keep them `bash` + `gh` only.
+- PR scripts: exercise the changed path against a real PR, and keep them to bash, git, `gh` and the Python 3.8+ standard library. Run `python -m unittest discover evals/pr-pair`. `test_pass_write_on_python38` runs a pass write on Python 3.8: install one with `uv python install 3.8` (or point `SPECWRIGHT_PY38` at a 3.8 interpreter); without one the test is skipped and names the missing interpreter.
 
 ## Releases
 
 - Every user-visible change bumps the version: `VERSION`, the README badge and `metadata.version` in every `skills/*/SKILL.md`, together.
+- Before 1.0: bump the minor version (0.x.0) for a new feature, configuration key or workflow change, and the patch version (0.x.y) for a fix. 1.0 is the maintainer's call.
 - Any change to the install prompt is a release, because users copy it from the README of `main`. Keep the prompt safe to re-run over every earlier version.
 - An OpenSpec upgrade updates the badge, the pinned version above and the README's "forked from `spec-driven` (1.14.1)" note in the same change.
 
