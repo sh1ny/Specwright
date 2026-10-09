@@ -13,6 +13,8 @@
 #                                     the expected PR set: store (GitHub origin) and code (PR in any state, or commits)
 #   ensure-pr --repo o/n --branch b --base main --title t --body-file f
 #                                     find the open PR or create it; stops on a wrong base; never edits a description
+#   closing-check --repo o/n --pr N   the issues the description's closing lines name vs what GitHub will close
+#                                     status match | mismatch | not_default_base (one GraphQL read; a failure = unknown, exit 3)
 #   link --repo o/n --pr N --kind store|code --peer-url URL [--login L]
 #                                     one marker comment <!-- specwright:link KIND URL -->; edits its own on a new peer
 #   pair-state --code d --store d --branch b [--snapshot code=f] [--snapshot store=f] [--dropped id@rev]...
@@ -647,6 +649,100 @@ def cmd_ensure_pr(argv):
     if not m:
         raise Stop("create_failed", f"gh pr create printed no PR URL: {r.stdout.strip()}")
     return {"ok": True, "action": "created", "pr": {"number": int(m.group(2)), "url": m.group(1), "state": "OPEN", "base": base}}
+
+
+CLOSING_QUERY = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) "
+                 "{ defaultBranchRef { name } pullRequest(number: $number) { body baseRefName "
+                 "closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } "
+                 "pageInfo { hasNextPage } } } } }")
+CLOSE_KW = r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?"
+ISSUE_REF = (r"https?://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)\b|(?<![\w/.-])([\w.-]+/[\w.-]+)#(\d+)\b"
+             r"|(?<![\w/&])#(\d+)\b")
+
+
+def without_code(body):
+    """The description's lines with fenced blocks and inline code spans removed (GitHub reads closing keywords outside code only)."""
+    out, fence = [], None
+    for line in body.replace("\r\n", "\n").split("\n"):
+        m = re.match(r"\s{0,3}(`{3,}|~{3,})", line)
+        if fence:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                fence = None
+            continue
+        if m:
+            fence = m.group(1)
+            continue
+        out.append(re.sub(r"`[^`\n]*`", "", line))
+    return out
+
+
+def issue_key(m, repo):
+    """(owner/name, number) of an ISSUE_REF match; a bare #N takes the PR's own repository."""
+    if m.group(1):
+        return m.group(1), int(m.group(2))
+    if m.group(3):
+        return m.group(3), int(m.group(4))
+    return repo, int(m.group(5))
+
+
+def intended_issues(body, repo):
+    """Issues a description's closing lines name: every ref directly after a closing keyword, and every ref on a line that starts with one."""
+    found = []
+    for line in without_code(body):
+        refs = [(m.start(), issue_key(m, repo)) for m in re.finditer(ISSUE_REF, line)]
+        if re.match(r"[\s>*+-]*" + CLOSE_KW, line, re.I):
+            found.extend(k for _, k in refs)
+        for kw in re.finditer(CLOSE_KW, line, re.I):
+            nxt = next((k for at, k in refs if at >= kw.end() and not line[kw.end():at].strip()), None)
+            if nxt:
+                found.append(nxt)
+    seen, out = set(), []
+    for slug, n in found:
+        if (slug.lower(), n) not in seen:
+            seen.add((slug.lower(), n))
+            out.append((slug, n))
+    return out
+
+
+def cmd_closing_check(argv):
+    a, _ = parse_args(argv, {"--repo": "repo", "--pr": "pr"})
+    need(a, "repo", "pr")
+    repo = a["repo"]
+    if not re.match(r"^[^/\s]+/[^/\s]+$", repo) or not str(a["pr"]).isdigit():
+        usage("--repo is owner/name and --pr a number")
+    owner, name = repo.split("/")
+    r = gh("api", "graphql", "-f", f"query={CLOSING_QUERY}", "-f", f"owner={owner}", "-f", f"name={name}", "-F", f"number={a['pr']}",
+           repo=repo)
+    if r.returncode != 0:
+        unknown((r.stderr or r.stdout).strip() or f"gh exited {r.returncode}")
+    try:
+        data = json.loads(r.stdout)
+    except ValueError as e:
+        unknown(f"unreadable response: {e}")
+    try:
+        if data.get("errors"):
+            unknown(f"GraphQL errors: {data['errors']}")
+        rep = data["data"]["repository"]
+        pr = rep["pullRequest"]
+        default = rep["defaultBranchRef"]["name"]
+        base = pr["baseRefName"]
+        refs = pr["closingIssuesReferences"]
+        nodes, more = refs["nodes"], refs["pageInfo"]["hasNextPage"]
+        linked = [(n["repository"]["nameWithOwner"], int(n["number"])) for n in nodes]
+        body = pr["body"] or ""
+    except (KeyError, TypeError, AttributeError, ValueError):
+        unknown("unexpected GraphQL response shape (PR, default branch or closing list missing)")
+    if more:
+        unknown("the PR closes more than 100 issues; the closing list is cut off")
+    intended = intended_issues(body, repo)
+    fmt = lambda ks: [f"{s}#{n}" for s, n in ks]
+    low = lambda ks: {(s.lower(), n) for s, n in ks}
+    out = {"ok": True, "intended": fmt(intended), "linked": fmt(linked), "base": base, "default_branch": default}
+    if base != default:  # GitHub applies closing keywords only on PRs into the default branch
+        return {**out, "status": "not_default_base", "missing": [], "extra": []}
+    missing = [k for k in intended if (k[0].lower(), k[1]) not in low(linked)]
+    extra = [k for k in linked if (k[0].lower(), k[1]) not in low(intended)]
+    return {**out, "status": "mismatch" if missing else "match", "missing": fmt(missing), "extra": fmt(extra)}
 
 
 def link_state(repo, n, kind, peer):
@@ -1442,7 +1538,7 @@ def cmd_cleanup(argv):
 
 
 COMMANDS = {"identity": cmd_identity, "context": cmd_context, "discover": cmd_discover, "expected": cmd_expected,
-            "ensure-pr": cmd_ensure_pr, "link": cmd_link, "pair-state": cmd_pair_state, "rounds": cmd_rounds,
+            "ensure-pr": cmd_ensure_pr, "closing-check": cmd_closing_check, "link": cmd_link, "pair-state": cmd_pair_state, "rounds": cmd_rounds,
             "pass": cmd_pass, "cleanup-plan": cmd_cleanup}
 
 args = sys.argv[1:]
