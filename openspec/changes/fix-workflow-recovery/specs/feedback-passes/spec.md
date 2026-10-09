@@ -1,0 +1,91 @@
+# Spec Delta
+
+## Purpose
+
+Keeps a PR feedback pass recoverable and exclusive: a pass is recorded before its first fix, owned by one session, stored under a key unique to its repository and change, and finished from evidence after an interruption, for repo-local and store-backed changes alike.
+
+## ADDED Requirements
+
+### Requirement: A feedback pass has one owner
+Writing a feedback pass record SHALL fail when a record for the same repository and change exists, with no window in which two sessions can both create it. The record SHALL hold an owner id. Removing or handing over a record SHALL require the owner id it holds. A record owned by another session SHALL never be removed or taken over automatically: Specwright SHALL show its owner and ask the user.
+
+#### Scenario: Two sessions start a pass for one change
+- **WHEN** two sessions write a pass record for the same repository and change at the same time
+- **THEN** exactly one write succeeds, the other is refused with `record_exists`, and the record holds the intent and owner id of the session that succeeded
+
+#### Scenario: Resume by the owning session
+- **WHEN** the session that wrote a record plans and completes the pass with its own owner id
+- **THEN** the plan reports the record as owned by this session, and the record is removed once every applicable step is done
+
+#### Scenario: Record left by another session
+- **WHEN** a run finds a pass record whose owner id is not its own
+- **THEN** it posts, commits and pushes nothing for that pass, shows the owner (when it was written and from which checkout), and asks the user whether that session is gone
+
+#### Scenario: User confirms the owner is gone
+- **WHEN** the user confirms that the session owning a record is gone, and the run hands the record over naming the owner id it was shown
+- **THEN** the record keeps its round and findings, holds the new owner id, and the run resumes that pass
+
+#### Scenario: Handover races another session
+- **WHEN** a handover names an owner id that no longer matches the record, because another session took the record over first
+- **THEN** the handover is refused with `not_owner`, and the record is unchanged
+
+#### Scenario: Lock left by an interrupted handover
+- **WHEN** a handover or removal finds the record's lock directory already present
+- **THEN** it exits with `record_busy` naming the lock path, the record and the lock are unchanged, and the lock is not removed automatically
+
+#### Scenario: Removal by a non-owner
+- **WHEN** a run that does not hold the record's owner id asks to remove a complete pass record
+- **THEN** the removal is refused with `not_owner`, and the record remains
+
+### Requirement: Pass records are keyed per repository and change
+Each pass record SHALL be stored under a key that keeps the repository owner, the repository name and the change name apart, compared without regard to case, so that two different repositories or changes never share a record. A record stored under the key used by 0.1.9 SHALL be moved to its new key on first use when its recorded repository and change match the lookup, and left in place otherwise.
+
+#### Scenario: Hyphenated owners and names
+- **WHEN** `acme-tools/widget` and `acme/tools-widget` each start a feedback pass for a change named `fix-login`
+- **THEN** both records exist side by side, and each repository's plan reads only its own record
+
+#### Scenario: Record from 0.1.9
+- **WHEN** a pass record written by 0.1.9 exists under the old key for this repository and change, and no record exists under the new key
+- **THEN** the record is moved to the new key, its contents unchanged, and the plan resumes it as a record with no owner id
+
+#### Scenario: Old key belongs to another repository
+- **WHEN** a record under the old key exists whose recorded repository or change differs from the lookup
+- **THEN** that file is left in place, and the lookup reports no record
+
+### Requirement: A pass intent is validated before it is written
+`pass write` SHALL refuse an intent with `invalid_intent`, writing no record, unless `branch` is a non-empty string, `round` is a positive integer, `prs` is an object whose `code` and `store` entries are absent, null or an object with `repo` as `<owner>/<name>` and `number` as a positive integer, and every finding has the fields a plan reads.
+
+#### Scenario: Well-formed intent
+- **WHEN** an intent has a branch name, round 2, a code PR entry `{"repo": "acme/app", "number": 5}` and well-formed findings
+- **THEN** the record is written, and a plan of it reads without error
+
+#### Scenario: `prs` is a string
+- **WHEN** an intent sets `prs` to the string `"acme/app#5"`
+- **THEN** `pass write` exits with `invalid_intent` naming `prs`, and no record exists
+
+#### Scenario: Round is not a positive integer
+- **WHEN** an intent sets `round` to `0`, `"2"` or `true`
+- **THEN** `pass write` exits with `invalid_intent` naming `round`, and no record exists
+
+#### Scenario: Thread finding without a usable root id
+- **WHEN** a thread finding has no `root_id`, or its `root_id` is `"abc"`
+- **THEN** `pass write` exits with `invalid_intent` naming `root_id`, and no record exists
+
+#### Scenario: Repo-local intent names a store PR
+- **WHEN** a repo-local intent sets `prs.store` to `{"repo": "acme/plans", "number": 3}`
+- **THEN** `pass write` exits with `invalid_intent` naming `prs`, and no record exists
+
+### Requirement: Repo-local changes recover an interrupted pass
+A repo-local change SHALL record its feedback pass, count its rounds and resume an interrupted pass the same way a store-backed change does, with the code repo as its only repo. A pass whose fix commit carries the round at the limit SHALL be finished under that round, not answered as after the limit.
+
+#### Scenario: Interrupted after the last allowed fix was pushed
+- **WHEN** `max_fix_rounds` is 2 in a repo-local change, pass 2's fix commit is pushed, and the run stopped before posting replies
+- **THEN** the next run re-requests review if due and posts pass 2's replies under round 2, makes no new fix, and posts no `Waiting on owner` reply for those findings
+
+#### Scenario: Repo-local pass completes
+- **WHEN** a repo-local pass has its fix pushed, every reply posted, every resolution and reaction done
+- **THEN** the plan reports `complete`, and the record is removed
+
+#### Scenario: Repo-local record names a store edit
+- **WHEN** a repo-local intent has a finding whose destination is `store`
+- **THEN** `pass write` exits with `misrouted`, and no record exists

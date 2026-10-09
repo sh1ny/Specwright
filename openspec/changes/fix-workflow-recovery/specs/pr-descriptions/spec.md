@@ -1,0 +1,60 @@
+# Spec Delta
+
+## Purpose
+
+Makes the issues a PR says it fixes the issues GitHub closes when it merges: closing references are written one per issue, and checked against GitHub's closing list after ship.
+
+## ADDED Requirements
+
+### Requirement: One closing keyword per issue
+A PR description written by Specwright SHALL give each issue the PR fully resolves its own closing keyword on its own line (`Fixes #N`). An issue the PR does not fully resolve SHALL be named with `Related: #N`. In a store-backed change, closing lines SHALL go on the PR in the repository that holds the issues; when no PR is expected there, the existing PR SHALL carry them as `Fixes <owner>/<repo>#N`.
+
+#### Scenario: PR fixing three issues
+- **WHEN** ship writes the description of a PR that fully resolves issues 21, 24 and 43
+- **THEN** the description has the three lines `Fixes #21`, `Fixes #24` and `Fixes #43`, and no line names two issues after one keyword
+
+#### Scenario: Partly resolved issue
+- **WHEN** the PR resolves issue 21 fully and issue 52 only in part
+- **THEN** the description has `Fixes #21` and `Related: #52`, and no closing keyword names 52
+
+#### Scenario: Planning-only store-backed change
+- **WHEN** a planning-only store-backed change fully resolves issue 21 of the code repository, so only the store PR exists
+- **THEN** the store PR's description has `Fixes <code owner>/<code repo>#21` on its own line
+
+### Requirement: Closing references are checked after ship
+After ship creates or finds a PR, Specwright SHALL compare the issues its description's closing lines name with the issues GitHub reports it will close. On a PR ship just created, a mismatch SHALL be fixed by rewriting the description with one keyword per issue and checked once more. On an existing PR, a mismatch SHALL be reported and the description left unchanged unless the user asks.
+
+#### Scenario: Description matches
+- **WHEN** ship creates a PR whose description has `Fixes #21` and `Fixes #24`, and GitHub reports issues 21 and 24 as closing
+- **THEN** the check reports a match, and the description is not edited
+
+#### Scenario: Several issues after one keyword on a new PR
+- **WHEN** ship creates a PR whose description has `Fixes #24, #21, #43`, and GitHub reports only issue 24 as closing
+- **THEN** the check names 21 and 43 as missing, the description is rewritten with one `Fixes` line per issue, and a second check reports a match
+
+#### Scenario: Mismatch on an existing PR
+- **WHEN** ship finds an existing PR whose description names issue 43 on a closing line and GitHub does not report 43 as closing
+- **THEN** ship reports 43 as missing, leaves the description unchanged, and asks the user whether to rewrite it
+
+#### Scenario: Still missing after the rewrite
+- **WHEN** after the rewrite GitHub still does not report an issue named on a closing line, for example because the issue number does not exist
+- **THEN** ship stops, names that issue, and does not report the PR as ready
+
+#### Scenario: Issue linked by hand only
+- **WHEN** an existing PR's closing lines name issue 21, and GitHub reports issues 21 and 30 as closing because 30 was linked in the sidebar
+- **THEN** the check reports a match with 30 listed as extra, and ship asks nothing
+
+#### Scenario: Closing list cannot be read
+- **WHEN** the GitHub lookup for the PR's closing issues fails
+- **THEN** the check exits with GitHub state unknown, and ship reports the check as not done rather than as a match
+
+### Requirement: Closing references need the default branch
+When a PR's base is not its repository's default branch, the check SHALL report that GitHub will not close the issues its closing lines name. Ship SHALL NOT rewrite the description and SHALL NOT stop for that reason.
+
+#### Scenario: PR into a branch other than the default
+- **WHEN** ship creates a PR into a branch other than the repository's default branch, and its description has `Fixes #21`
+- **THEN** the check reports that the base is not the default branch, the description is not edited, and ship reports that #21 will not be closed by this PR
+
+#### Scenario: Default branch cannot be read
+- **WHEN** the lookup of the repository's default branch fails
+- **THEN** the check exits with GitHub state unknown, and ship reports the check as not done
