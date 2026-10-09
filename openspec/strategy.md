@@ -12,7 +12,7 @@ Specwright is a spec-driven development bundle for AI coding agents, built on un
 - First-class host agents: Claude Code, Codex and OMP. Others are best-effort.
 - Runtime dependencies of shipped skills and scripts: `bash`, `git`, `gh` (2.40+), `python3` (standard library) and the OpenSpec CLI. No Node runtime of our own, no daemons, no hosted service.
 - Specwright never merges, pushes `main`, rewrites published history or acts as another GitHub account unless a documented, opt-in setting says so.
-- Content sent to another model provider (cross-model review) is limited to the change under review, and the agent says so before sending it.
+- Cross-model review sends the change and the repo files the reviewer reads to another model provider. It is on by default and documented in the settings; `review.cross_model: false` turns it off.
 - Not a package publisher (npm, crates.io, PyPI) and not a CI system.
 
 ## Success measures

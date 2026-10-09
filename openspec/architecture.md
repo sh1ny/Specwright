@@ -59,7 +59,8 @@ flowchart LR
 
 | State | Sole writer | Lifetime | Invalidation / rebuild | Authoritative copy |
 |---|---|---|---|---|
-| Change artifacts (`openspec/changes/<name>/`) | Orchestrating agent, through the schema | Until archive | Drift rule: separate `amend <artifact>` commit | Planning repo branch, then main |
+| Change artifacts (`openspec/changes/<name>/`) except `review.md` | Orchestrating agent, through the schema | Until archive | Drift rule: separate `amend <artifact>` commit | Planning repo branch, then main |
+| `review.md` | One writer per review, by path: the orchestrator for LIGHT (`SKIPPED_LIGHT`) and for a cross-model review (saves the CLI output verbatim); `specwright-reviewer` for a fresh-context review | Until archive | A new review round rewrites it | Planning repo branch, then main |
 | `tasks.md` ticks | Orchestrator (never the implementer) | Until archive | Reconcile against commits | Planning repo (store when store-backed) |
 | Task commits (`task X.Y` subject, `Code-Changes: none`) | `specwright-commit` | Permanent | Never rewritten without the user | Change branch, then main |
 | `Feedback-Round: <n>` trailers | `specwright-pr` feedback | Permanent | The round count is derived from them | Change branch in either repo |
@@ -75,9 +76,9 @@ flowchart LR
 - **OpenSpec:** only through the custom schema and the CLI (`openspec list --json`, `instructions`, `archive`, `context --json`). The OpenSpec version is pinned in the README badge and `CONTRIBUTING.md`, but not enforced at install (#37).
 - **Settings:** `specwright.yaml` keys are documented in `templates/openspec/specwright.yaml` and the README. A new key has a safe default, so a missing key keeps earlier behaviour.
 - **Git evidence formats:** commit subjects `<type>(<change>): task X.Y …`, trailers `Feedback-Round:` and `Code-Changes: none`, and archive/merge subjects. Later runs and roadmap status parse these, so changing them is a workflow change (minor version).
-- **Script I/O** (ADR 0002): `pr-snapshot.sh` and `pr-pair.sh` print one JSON document (`pr-snapshot.sh --logs` appends plain log text); `pr-reply.sh` prints one plain line per action. Exit codes signal stop conditions. Scripts use only `bash`, `git`, `gh` (built-in jq) and the Python standard library; `pr-pair.sh` runs `git` in the code repo and the store for repo identity, the expected PR set, recovery and cleanup.
+- **Script I/O** (ADR 0002): `pr-snapshot.sh` and `pr-pair.sh` print one JSON document (`pr-snapshot.sh --logs` appends plain log text); `pr-reply.sh` prints one plain line per action. Exit codes signal stop conditions. Scripts use only `bash` with a POSIX userland (`sed`, `grep`, `mktemp` and similar; Git Bash on Windows), `git`, `gh` (built-in jq) and the Python standard library; `pr-pair.sh` runs `git` in the code repo and the store for repo identity, the expected PR set, recovery and cleanup.
 - **GitHub identity** (ADR 0004): every authenticated call for a configured login goes through `as.sh <login>`, and `gh auth switch` is never run. With `github.login` empty (the shipped default), calls use the active account unfenced (#38). `pr-pair.sh` fences `gh` calls per repo, but its `git` calls on the store run with the code account's credentials (#35).
-- **Cross-model review:** a read-only CLI run that prints the complete artifact and ends with one `VERDICT:` line. Only the change under review leaves the machine.
+- **Cross-model review:** a read-only CLI run that prints the complete artifact and ends with one `VERDICT:` line. The CLI can read any file in the repo; the change and the files it reads (referenced source, ADRs) go to that provider. On by default; `review.cross_model: false` keeps reviews in-harness.
 
 ## Resource bounds and failure visibility
 
@@ -113,6 +114,7 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 | Empty `github.login` (default) is unfenced | #38 |
 | Watch cleanup can delete a newer watcher's token, leaving no watcher | #39 |
 | Unbounded metadata reads and no command deadlines in the PR scripts | #40 |
+| Roadmap init/close write to a store without the branch check or gate lock | #43 |
 
 ## In-force ADRs
 

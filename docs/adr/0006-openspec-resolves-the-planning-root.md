@@ -23,5 +23,5 @@ Referenced stores are read-only.
 **Reversal cost: medium to high.** Commit pairing and PR-pair evidence are stored formats (see ADR 0003).
 
 ## Consequences
-- Every git write in the store goes through a branch check, plus the store lock during the branch gate.
+- Git writes in the store by `specwright-branch`, `-commit`, `-finish` and `-pr` go through a branch check, plus the store lock during the branch gate. `specwright-roadmap` init and close do not yet (#43).
 - The status of a store-backed change needs proof from both repos.
