@@ -30,13 +30,13 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 | change-finish → Finish resumes from git evidence | Archive committed on the branch but archive paths dirty | evals/git-workflow/test_instructions.py | test_finish_resume_stops_on_dirty_archive_paths | green |
 | change-finish → Finish resumes from git evidence | Every repo already done | evals/git-workflow/test_instructions.py | test_finish_resume_reports_nothing_to_finish_only_when_all_done | green |
 | change-finish → Finish resumes from git evidence | Archive commit not found | evals/git-workflow/test_instructions.py | test_finish_resume_reports_no_archive_found | green |
-| pr-descriptions → One closing keyword per issue | PR fixing three issues | evals/pr-pair/test_skill_text.py | test_description_requires_one_closing_keyword_per_issue | red |
-| pr-descriptions → One closing keyword per issue | Partly resolved issue | evals/pr-pair/test_skill_text.py | test_description_keeps_related_for_partial_fixes | red |
-| pr-descriptions → One closing keyword per issue | Planning-only store-backed change | evals/pr-pair/test_skill_text.py | test_description_uses_cross_repo_form_without_a_pr_in_the_issue_repo | red |
+| pr-descriptions → One closing keyword per issue | PR fixing three issues | evals/pr-pair/test_skill_text.py | test_description_requires_one_closing_keyword_per_issue | green |
+| pr-descriptions → One closing keyword per issue | Partly resolved issue | evals/pr-pair/test_skill_text.py | test_description_keeps_related_for_partial_fixes | green |
+| pr-descriptions → One closing keyword per issue | Planning-only store-backed change | evals/pr-pair/test_skill_text.py | test_description_uses_cross_repo_form_without_a_pr_in_the_issue_repo | green |
 | pr-descriptions → Closing references are checked after ship | Description matches | evals/pr-pair/test_pr_pair.py | test_closing_check_match | green |
-| pr-descriptions → Closing references are checked after ship | Several issues after one keyword on a new PR | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_closing_check_reports_refs_after_one_keyword_as_missing; test_ship_runs_closing_check_after_ensure_pr | red |
-| pr-descriptions → Closing references are checked after ship | Mismatch on an existing PR | evals/pr-pair/test_skill_text.py | test_ship_never_rewrites_a_found_pr_description_on_mismatch | red |
-| pr-descriptions → Closing references are checked after ship | Still missing after the rewrite | evals/pr-pair/test_skill_text.py | test_ship_stops_after_a_second_mismatch | red |
+| pr-descriptions → Closing references are checked after ship | Several issues after one keyword on a new PR | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_closing_check_reports_refs_after_one_keyword_as_missing; test_ship_runs_closing_check_after_ensure_pr | green |
+| pr-descriptions → Closing references are checked after ship | Mismatch on an existing PR | evals/pr-pair/test_skill_text.py | test_ship_never_rewrites_a_found_pr_description_on_mismatch | green |
+| pr-descriptions → Closing references are checked after ship | Still missing after the rewrite | evals/pr-pair/test_skill_text.py | test_ship_stops_after_a_second_mismatch | green |
 | pr-descriptions → Closing references are checked after ship | Issue linked by hand only | evals/pr-pair/test_pr_pair.py | test_closing_check_extra_is_not_a_mismatch | green |
 | pr-descriptions → Closing references are checked after ship | Closing list cannot be read | evals/pr-pair/test_pr_pair.py | test_closing_check_lookup_failure_is_unknown | green |
 | pr-descriptions → Closing references need the default branch | PR into a branch other than the default | evals/pr-pair/test_pr_pair.py | test_closing_check_not_default_base | green |
@@ -180,7 +180,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
   Add the description and ship text tests from the test map to `test_skill_text.py`. Verify all fail (no subcommand, no text).
 - [x] 7.2 Implement `pr-pair.sh closing-check` per D9 (one GraphQL read through the repo's login; normalised refs; `status` match/mismatch/not_default_base) and its header usage line. Verify the script tests pass and flip their rows green.
-- [ ] 7.3 Update `skills/specwright-pr/references/description.md` (one keyword per issue on its own line; `Related:` otherwise; closing lines on the PR in the issue's repo; cross-repo form when no PR is expected there; the store PR uses `Related: <owner>/<repo>#N`). Update `SKILL.md` ship step 4.3:
+- [x] 7.3 Update `skills/specwright-pr/references/description.md` (one keyword per issue on its own line; `Related:` otherwise; closing lines on the PR in the issue's repo; cross-repo form when no PR is expected there; the store PR uses `Related: <owner>/<repo>#N`). Update `SKILL.md` ship step 4.3:
   - run `closing-check` after `ensure-pr`;
   - `not_default_base` → report;
   - `created` + mismatch → rewrite only reference-only closing lines, `gh pr edit --body-file`, check again, stop on a second mismatch;

@@ -29,7 +29,11 @@ The diff is already on GitHub. The description explains what the diff cannot sho
 - Verification (commands run and results; a test map summary if there is one)
 - Review focus (where a reviewer should look hardest)
 
-**References:** `Fixes #N` only when the PR fully resolves issue N; otherwise `Related: #N`. Never invent issue numbers.
+**References:** `Fixes #N` only when the PR fully resolves issue N; otherwise `Related: #N` (a partly resolved issue gets `Related`, never a closing keyword). Never invent issue numbers.
+- One keyword per issue, each on its own line: `Fixes #21`, `Fixes #24`. Never `Fixes #21, #24`: GitHub reads only the first reference after a keyword.
+- Closing lines go on the PR in the repository that holds the issue (normally the code PR). In a store-backed change the store PR uses `Related: <owner>/<repo>#N` for those issues.
+- When no PR is expected in the repository that holds the issue (a planning-only store-backed change whose issues are in the code repo), the PR that does exist carries `Fixes <owner>/<repo>#N` on its own line.
+- GitHub applies closing keywords only on a PR into the default branch. After `ensure-pr`, ship runs `pr-pair.sh closing-check` to compare these lines with what GitHub will close.
 
 **Evidence:** label test output as test output. Screenshots only for visible UI changes.
 
