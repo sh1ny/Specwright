@@ -84,7 +84,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
 
 ## 6. PR script runtime and prerequisites (#45, #46; D7, D8)
 
-- [ ] 6.1 Add three tests to `evals/pr-pair/test_pr_pair.py`:
+- [x] 6.1 Add three tests to `evals/pr-pair/test_pr_pair.py`:
   - `test_embedded_python_passes_no_newline_kwarg`: always run; scans the script's embedded Python.
   - `test_unexpected_error_is_internal_error_json`: the record's parent path is a regular file; expect a single JSON line, `internal_error`, exit 1, no `Traceback`.
   - `test_pass_write_on_python38`: finds a 3.8 interpreter via `SPECWRIGHT_PY38`, then `uv python find 3.8`, then `py -3.8`; puts `python3`/`python` shims on `PATH`; runs a valid store-backed `pass write` and checks the record parses with no CR bytes. When no 3.8 is found, it calls `skipTest` naming the missing interpreter.
