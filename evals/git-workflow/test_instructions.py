@@ -354,5 +354,71 @@ class PrScriptRuntime(unittest.TestCase):
         self.assertRegex(s8 or "", r"PR workflow not ready: <missing>", "Step 8 does not report `PR workflow not ready: <missing>`")
 
 
+FINISH = ROOT / "skills" / "specwright-finish" / "SKILL.md"
+
+
+def resume_section():
+    s = section(read(FINISH), r"Resume\b")
+    assert s, "specwright-finish SKILL.md has no ## Resume section"
+    return s
+
+
+def resume_row(s, facts):
+    """The next-step table row whose first cell is `facts`, as its second cell; '' when there is none."""
+    m = re.search(r"^\|\s*" + facts + r"\s*\|(.*)\|\s*$", s, re.M)
+    return m.group(1) if m else ""
+
+
+class ChangeFinishResume(unittest.TestCase):
+    def test_finish_resume_deletes_a_merged_branch_without_merging(self):
+        text, s = read(FINISH), resume_section()
+        self.assertLess(text.index("## Resume"), text.index("1. **Branch:**"), "Resume does not sit before the normal steps")
+        for fact in ("A", "M", "B"):
+            self.assertRegex(s, r"\*\*%s\*\*" % fact, f"Resume does not define fact {fact}")
+        self.assertRegex(s, r"git log --first-parent --format=%s <main>", "M is not read from main's first-parent history")
+        self.assertRegex(s, r"merge: <change-name>", "M does not name the exact merge subject")
+        row = resume_row(s, "M and B")
+        self.assertRegex(row, r"git branch -d", "M and B does not delete the branch with -d")
+        self.assertRegex(row, r"(?i)no (new )?merge", "M and B may merge again")
+        self.assertTrue(resume_row(s, "M, not B"), "no row for a repo that is done (M, not B)")
+
+    def test_finish_resume_pr_mode_ships_without_a_second_archive_commit(self):
+        s = resume_section()
+        self.assertRegex(s, r"(?i)never repeat|not repeat", "Resume does not forbid repeating a done step")
+        row = resume_row(s, r"`pr`, A on branch[^|]*")
+        self.assertRegex(row, r"(?i)\bship\b", "pr mode with A on the branch does not go to ship")
+        self.assertRegex(row, r"(?i)idempotent", "the ship row does not say push and PR are idempotent")
+        self.assertNotRegex(row, r"(?i)archive commit", "the pr row repeats the archive commit")
+        merged = resume_row(s, r"`pr`, [^|]*PR merged[^|]*")
+        self.assertRegex(merged, r"After the PR is merged", "a merged PR does not go to the cleanup")
+        self.assertRegex(merged, r"(?i)not ship", "a merged PR may be shipped again")
+
+    def test_finish_resume_stops_on_dirty_archive_paths(self):
+        s = resume_section()
+        block = find_block(s, r"git status --porcelain", r"<P>/changes/<change-name>/", r"archive directory", r"\bstop\b")
+        self.assertTrue(block, "Resume does not stop on uncommitted changes under the change or archive directory")
+        self.assertRegex(block, r"(?i)\blist", "the stop does not list the files")
+        self.assertRegex(block, r"(?i)\bask\b", "the stop does not ask the user")
+        self.assertNotRegex(s, r"(?i)planning-only marker.{0,80}(write|add)s? ", "Resume writes the planning-only marker")
+
+    def test_finish_resume_reports_nothing_to_finish_only_when_all_done(self):
+        text, s = read(FINISH), resume_section()
+        block = find_block(s, r"Nothing to finish")
+        self.assertTrue(block, "Resume never reports Nothing to finish")
+        self.assertRegex(block, r"(?i)only when every repo", "Nothing to finish is not limited to every repo being done")
+        rest = text.replace(s, "")
+        line = next((l for l in rest.splitlines() if "Nothing to finish" in l), "")
+        self.assertRegex(line, r"(?i)resume|every repo", "step 1 still reports Nothing to finish without checking every repo")
+        self.assertTrue(resume_row(s, r"store done[^|]*code branch with commits[^|]*"), "no row for a store done and the code merge pending")
+
+    def test_finish_resume_reports_no_archive_found(self):
+        s = resume_section()
+        block = find_block(s, r"no archive of", r"(?i)do nothing|no commit")
+        self.assertTrue(block, "Resume does not report that no archive of the change was found")
+        self.assertRegex(block, r"(?i)none of|no fact|not found", "the no-archive report is not tied to finding no fact")
+        self.assertRegex(s, r"\^\[a-z\]\+\\\(<change-name>\\\): archive change\$", "the archive subject regex is missing")
+        self.assertRegex(s, r"chore/archive-<change-name>.{0,120}\*/<change-name>", "the branch lookup lacks the recovery and glob fallbacks")
+
+
 if __name__ == "__main__":
     unittest.main()

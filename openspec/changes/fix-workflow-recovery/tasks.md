@@ -24,12 +24,12 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 | feedback-passes → Repo-local changes recover an interrupted pass | Interrupted after the last allowed fix was pushed | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_repo_local_final_pass_resumes_without_a_new_round; test_feedback_uses_pass_record_for_repo_local | red |
 | feedback-passes → Repo-local changes recover an interrupted pass | Repo-local pass completes | evals/pr-pair/test_pr_pair.py | test_repo_local_pass_completes_and_is_removed | red |
 | feedback-passes → Repo-local changes recover an interrupted pass | Repo-local record names a store edit | evals/pr-pair/test_pr_pair.py | test_repo_local_pass_write_refuses_store_destination | red |
-| change-finish → Finish resumes from git evidence | Interrupted after the archive commit, local mode | evals/git-workflow/evals.json | eval-finish-resume-after-archive-commit | red |
-| change-finish → Finish resumes from git evidence | Interrupted after the merge, before the branch deletion | evals/git-workflow/test_instructions.py | test_finish_resume_deletes_a_merged_branch_without_merging | red |
-| change-finish → Finish resumes from git evidence | Interrupted after the archive commit, pr mode | evals/git-workflow/test_instructions.py | test_finish_resume_pr_mode_ships_without_a_second_archive_commit | red |
-| change-finish → Finish resumes from git evidence | Archive committed on the branch but archive paths dirty | evals/git-workflow/test_instructions.py | test_finish_resume_stops_on_dirty_archive_paths | red |
-| change-finish → Finish resumes from git evidence | Every repo already done | evals/git-workflow/test_instructions.py | test_finish_resume_reports_nothing_to_finish_only_when_all_done | red |
-| change-finish → Finish resumes from git evidence | Archive commit not found | evals/git-workflow/test_instructions.py | test_finish_resume_reports_no_archive_found | red |
+| change-finish → Finish resumes from git evidence | Interrupted after the archive commit, local mode | evals/git-workflow/evals.json | eval-finish-resume-after-archive-commit; eval-finish-resume-from-main | green |
+| change-finish → Finish resumes from git evidence | Interrupted after the merge, before the branch deletion | evals/git-workflow/test_instructions.py | test_finish_resume_deletes_a_merged_branch_without_merging | green |
+| change-finish → Finish resumes from git evidence | Interrupted after the archive commit, pr mode | evals/git-workflow/test_instructions.py | test_finish_resume_pr_mode_ships_without_a_second_archive_commit | green |
+| change-finish → Finish resumes from git evidence | Archive committed on the branch but archive paths dirty | evals/git-workflow/test_instructions.py | test_finish_resume_stops_on_dirty_archive_paths | green |
+| change-finish → Finish resumes from git evidence | Every repo already done | evals/git-workflow/test_instructions.py | test_finish_resume_reports_nothing_to_finish_only_when_all_done | green |
+| change-finish → Finish resumes from git evidence | Archive commit not found | evals/git-workflow/test_instructions.py | test_finish_resume_reports_no_archive_found | green |
 | pr-descriptions → One closing keyword per issue | PR fixing three issues | evals/pr-pair/test_skill_text.py | test_description_requires_one_closing_keyword_per_issue | red |
 | pr-descriptions → One closing keyword per issue | Partly resolved issue | evals/pr-pair/test_skill_text.py | test_description_keeps_related_for_partial_fixes | red |
 | pr-descriptions → One closing keyword per issue | Planning-only store-backed change | evals/pr-pair/test_skill_text.py | test_description_uses_cross_repo_form_without_a_pr_in_the_issue_repo | red |
@@ -45,7 +45,7 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 | planning-stores → Local finish merges the repos that have work | Planning-only change in local mode | evals/git-workflow/evals.json | eval-store-finish-planning-only | green |
 | planning-stores → Local finish merges the repos that have work | Store merge conflicts | evals/git-workflow/evals.json | eval-store-finish-store-conflict | green |
 | planning-stores → Local finish merges the repos that have work | Code merge conflicts after the store merged | evals/git-workflow/evals.json | eval-store-finish-code-conflict | green |
-| planning-stores → Local finish merges the repos that have work | Interrupted between the store merge and the code merge | evals/git-workflow/evals.json | eval-store-finish-resume-code-merge | red |
+| planning-stores → Local finish merges the repos that have work | Interrupted between the store merge and the code merge | evals/git-workflow/evals.json | eval-store-finish-resume-code-merge; eval-store-finish-resume-code-merge-from-main | green |
 | planning-stores → Feedback rounds span the PR pair | Spec fix requested on the code PR | evals/pr-pair/test_pr_pair.py | test_pass_plan_routes_spec_fix_to_store | green |
 | planning-stores → Feedback rounds span the PR pair | Round limit across both repos | evals/pr-pair/test_pr_pair.py | test_rounds_highest_across_branches | green |
 | planning-stores → Feedback rounds span the PR pair | Finishing an interrupted final pass | evals/pr-pair/test_pr_pair.py | test_pass_plan_final_pass_push_pending | green |
@@ -63,7 +63,7 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 | planning-stores → An interrupted feedback pass is completed first | Reaction already present | evals/pr-pair/test_pr_pair.py | test_pass_plan_reaction_done_when_present | red |
 | planning-stores → An interrupted feedback pass is completed first | Code PR adopted before the pair was linked | evals/pr-pair/test_pr_pair.py | test_pass_plan_adopted_code_pr_needs_the_link | red |
 
-Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re-runs them after the record format changes (the owner, and the reaction read), and updates their fixtures where the new contract requires it, without weakening an assertion. Text checks prove a rule is in the instructions, not that a live agent follows it. The two finish evals cover the live paths that change branch state.
+Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re-runs them after the record format changes (the owner, and the reaction read), and updates their fixtures where the new contract requires it, without weakening an assertion. Text checks prove a rule is in the instructions, not that a live agent follows it. The finish evals cover the live paths that change branch state. They are regression guards, not red-first tests: every one, including the `-from-main` variants added during apply (HEAD on main, where the old step 1 said `Nothing to finish`), also passed against the 0.1.9 skill with Opus and Haiku, because the agents reasoned out the resume from the git state. The red evidence for group 6 is its five text tests.
 
 ## 1. Test fakes for the new GitHub reads
 
@@ -157,7 +157,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
 ## 6. Finish resumes from git evidence (#48; D8)
 
-- [ ] 6.1 Add the agent evals to `evals/git-workflow/evals.json`, `fixtures.py` and `grade.py`:
+- [x] 6.1 Add the agent evals to `evals/git-workflow/evals.json`, `fixtures.py` and `grade.py`:
   - `eval-finish-resume-after-archive-commit`: repo-local, `finish: local`, the change branch with task commits and an `archive change` commit, not merged. Prompt: the earlier finish was interrupted, finish `add-greeting`. Grade: exactly one archive commit, main has one `merge: add-greeting`, the branch is deleted, nothing pushed.
   - `eval-store-finish-resume-code-merge`: the store's main has `merge: add-greeting`, the store branch is deleted, the code branch has commits, and the code main has no merge. Grade: the code main gains `merge: add-greeting`, the code branch is deleted, and the store gets no new commit.
 

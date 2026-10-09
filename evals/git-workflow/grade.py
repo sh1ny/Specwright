@@ -250,6 +250,28 @@ def check(name, repo, run):
         R.append(("The merge commit carries the same trailers as the branch's archive commit",
                   bool(arch) and tr("main") == tr(arch), f"merge={tr('main')} archive={tr(arch) if arch else None}"))
 
+    elif name in ("eval-finish-resume-after-archive-commit", "eval-finish-resume-from-main"):
+        allsubs = subjects(repo, "--all")
+        archive = [s for s in allsubs if s == "feat(add-greeting): archive change"]
+        R.append(("Exactly one archive commit feat(add-greeting): archive change exists, the one the earlier attempt made",
+                  len(archive) == 1, f"archive commits={len(archive)}"))
+        merges = [s for s in (git(repo, "log", "--first-parent", "--format=%s", "main") or "").splitlines() if s == "merge: add-greeting"]
+        parents = (git(repo, "log", "-1", "--format=%P", "main") or "").split()
+        head = git(repo, "log", "-1", "--format=%s", "main")
+        R.append(("main has exactly one merge: add-greeting commit with two parents, at its HEAD",
+                  len(merges) == 1 and len(parents) == 2 and head == "merge: add-greeting", f"merges={len(merges)} parents={len(parents)} head={head}"))
+        R.append(("Branch feat/add-greeting was deleted and the repo is on main",
+                  branch == "main" and branches == ["main"], f"branch={branch} branches={branches}"))
+        remotes = git(repo, "remote") or ""
+        R.append(("Nothing was pushed: the repo has no remote and no gh call was made",
+                  not remotes and not gh_calls(repo), f"remotes={remotes!r} gh calls={len(gh_calls(repo))}"))
+        R.append(("Working tree is clean", not status, f"status={status}"))
+        if name == "eval-finish-resume-from-main":
+            R.append(("The report does not give the Nothing to finish stop line", "nothing to finish - archive is on" not in rep, f"report excerpt={rep[-240:]!r}"))
+        R.append(("No commit was amended", not amends(repo), f"amend entries={amends(repo)}"))
+        R.append(only_code_repo(repo, run, [INITIAL, PLAN_SUBJECT, "feat(add-greeting): implement tasks 1.1-2.1",
+                                            "feat(add-greeting): archive change", "merge: add-greeting"]))
+
     elif name in ("eval-roadmap-next-gap", "eval-roadmap-next-gap-dirty-main"):
         fx = json.loads((repo / ".git" / "fixture-state.json").read_text(encoding="utf-8"))
         rm = "openspec/roadmap.md"
@@ -859,6 +881,20 @@ def check_store_finish(name, repo, code, store, rep):
             R.append(("The report says the change had no code changes and names the store's merge commit",
                       bool(nocode) and (git(store, "rev-parse", "--short=7", "main") or "?") in rep,
                       f"match={nocode.group(0) if nocode else None} report excerpt={rep[-240:]!r}"))
+        R.append(no_amend)
+
+    elif name in ("eval-store-finish-resume-code-merge", "eval-store-finish-resume-code-merge-from-main"):
+        fx = json.loads((repo / "fixture-state.json").read_text(encoding="utf-8"))
+        R.append(("The store gets no new commit: its history and main are exactly as the fixture left them, with one archive commit",
+                  git(store, "rev-parse", "main") == fx["store_main"] and count_all(store) == fx["store_commits"]
+                  and len([s for s in subjects(store, "--all") if s == f"feat({cn}): archive change"]) == 1 and is_merge_of(store, cn),
+                  f"store main={git(store, 'rev-parse', 'main')} commits={count_all(store)} (want {fx['store_commits']})"))
+        R.append(("The code repo's main HEAD is a merge commit with two parents and subject merge: add-greeting",
+                  is_merge_of(code, cn), f"code main={merge_head(code)}"))
+        R.append(("The code branch feat/add-greeting was deleted and the code repo is on main with only main left",
+                  on(code) == "main" and bs(code) == ["main"], f"code={on(code)} {bs(code)}"))
+        R.append(("Both working trees are clean", not status_of(code) and not status_of(store), f"code={status_of(code)} store={status_of(store)}"))
+        R.append(("The report does not give the Nothing to finish stop line", "nothing to finish - archive is on" not in rep, f"report excerpt={rep[-240:]!r}"))
         R.append(no_amend)
 
     elif name == "eval-store-finish-store-conflict":
