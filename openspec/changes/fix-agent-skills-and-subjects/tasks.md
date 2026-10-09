@@ -22,7 +22,7 @@ Text checks (`test_instructions.py`) assert where a rule sits in the delivered s
 | project-planning → ADRs stay proposed until the review gate passes | Review asks to change a decision | evals/git-workflow/test_instructions.py | test_roadmap_writes_adrs_proposed | green |
 | project-planning → ADRs stay proposed until the review gate passes | Close supersedes an accepted ADR | evals/git-workflow/test_instructions.py | test_roadmap_close_reviews_superseding_adr | green |
 | project-planning → Baseline review rounds follow the schema's escalation rule | Two consecutive revise verdicts | evals/git-workflow/test_instructions.py | test_roadmap_review_escalates_after_two_consecutive_revise | green |
-| project-planning → Baseline review rounds follow the schema's escalation rule | Edit after a passing verdict | evals/git-workflow/test_instructions.py | test_baseline_edit_after_pass_reruns_review | red |
+| project-planning → Baseline review rounds follow the schema's escalation rule | Edit after a passing verdict | evals/git-workflow/test_instructions.py | test_baseline_edit_after_pass_reruns_review | green |
 | project-planning → Gap-closing roadmap edit is committed on the new change's branch | Criterion fails with no change left | evals/git-workflow/evals.json | eval-roadmap-next-gap | red |
 | project-planning → Gap-closing roadmap edit is committed on the new change's branch | Branch gate stops | evals/git-workflow/evals.json | eval-roadmap-next-gap-dirty-main | red |
 | planning-stores → Roadmap branches in a store go through the gate lock | Store is free | evals/git-workflow/test_instructions.py | test_roadmap_store_branch_under_gate_lock | green |
@@ -68,7 +68,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
   - close step 5 writes the superseding ADR as proposed, reviews it like init step 5, and accepts it only after the gate passes.
 
   Verify the four roadmap tests pass and flip their rows green.
-- [ ] 4.3 Add D5's rule to `skills/specwright-pr/SKILL.md` feedback: on `docs/project-baseline` or `docs/close-*`, a fix that edits the strategy, architecture or an ADR re-runs the roadmap baseline review before the fix is reported done. Verify `test_baseline_edit_after_pass_reruns_review` and `python -m unittest discover evals/pr-pair` pass, then flip the row green.
+- [x] 4.3 Add D5's rule to `skills/specwright-pr/SKILL.md` feedback: on `docs/project-baseline` or `docs/close-*`, a fix that edits the strategy, architecture or an ADR re-runs the roadmap baseline review before the fix is reported done. Verify `test_baseline_edit_after_pass_reruns_review` and `python -m unittest discover evals/pr-pair` pass, then flip the row green.
 - [ ] 4.4 Update `openspec/architecture.md`: the Design review row in Resource bounds (D5's rule), and the "Gap:" clause of the Architecture file and ADRs row (#44 now fixed). Leave the Known gaps table and accepted ADR files unchanged. Verify with `git diff -- docs/adr` (empty) and a read of the two rows.
 
 ## 5. Gap-closing roadmap edit (#50; D6)
