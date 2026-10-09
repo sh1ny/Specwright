@@ -74,8 +74,8 @@ flowchart LR
 | Planning-only marker (`specwright-change.yaml`, `code_changes: none`, in the archive directory) | `specwright-finish` writes it at archive; `specwright-pr` feedback deletes it when a code fix follows | Permanent once on the store's main | Proof for roadmap status that a store-backed change has no code side | Store branch, then the store's main |
 | `Feedback-Round: <n>` trailers | `specwright-pr` feedback | Permanent | The round count is derived from them | Change branch in either repo |
 | PR markers: reply markers (`specwright:handled <id>`, with a trailing `resolve` when the thread is to be resolved; `specwright:waiting`), pair-link comments (`specwright:link`), `specwright:pr-item` in after-limit issue bodies | `pr-reply.sh`; `pr-pair.sh link`; `specwright-pr` after the limit | Life of the PR | An item edited after the reply counts as unhandled again. Gap: an edit made while the fix was in progress is hidden by the later reply (#33) | GitHub |
-| Feedback pass record (store-backed changes only) | The one session running feedback for the change, through `pr-pair.sh pass write/done`. Gap: that exclusivity is assumed, not enforced (#32) | One feedback pass | Deleted at `pass done`; a leftover record blocks the next pass until resumed | `~/.cache/specwright/feedback/` (or `SPECWRIGHT_STATE_DIR`) |
-| Watch ownership token | The newest `pr-snapshot.sh --wait` on the PR | One watch | Released on exit; an older watcher that sees another token exits 4. Gap: cleanup can delete a newer watcher's token, leaving no watcher (#39) | `~/.cache/specwright/watch/<owner>-<repo>-<pr>` (or under `SPECWRIGHT_STATE_DIR`) |
+| Feedback pass record (store-backed changes only) | The one session running feedback for the change, through `pr-pair.sh pass write/done`. Gap: that exclusivity is assumed, not enforced (#32). Gap: its hyphenated filename can alias distinct repositories or changes (#32). | One feedback pass | Deleted at `pass done`; a leftover record blocks the next pass until resumed | `~/.cache/specwright/feedback/` (or `SPECWRIGHT_STATE_DIR`) |
+| Watch ownership token | The newest `pr-snapshot.sh --wait` on the PR | One watch | Released on exit; an older watcher that sees another token exits 4. Gap: cleanup can delete a newer watcher's token, leaving no watcher (#39). Gap: its hyphenated filename can alias distinct repositories, so a watcher for another PR can take ownership (#39). | `~/.cache/specwright/watch/<owner>-<repo>-<pr>` (or under `SPECWRIGHT_STATE_DIR`) |
 | Store gate lock | `specwright-branch` | The gate only | Never auto-removed; the user confirms removal | `<store git-common-dir>/specwright-gate.lock` |
 | Strategy and roadmap (`strategy.md`, `roadmap.md`) | `specwright-roadmap` init/close, and **next** when it adds a gap-closing change | Project lifetime | The roadmap is updated at each milestone close; status is derived, never stored. Gap: **next** leaves its roadmap edit uncommitted on main, so the branch gate stops (#50) | Main of the planning repo |
 | Baseline review (`architecture-review.md`) | One writer per round, by path: the orchestrator saves a cross-model CLI's output verbatim; `specwright-reviewer` writes it on the fresh-context path; the orchestrator also records `USER_OVERRIDE` after escalation | Project lifetime | A new review round rewrites it | Main of the planning repo |
@@ -100,6 +100,7 @@ flowchart LR
 | PR snapshot bodies | Thread comments clipped at 2500 characters, PR comments and reviews at 1200 | Clipping does not change `complete`; the full body must be fetched before an item is judged, but feedback does not require it (#47) | A finding past the cut can be dropped as non-actionable (#47) | Nobody until a reviewer repeats the finding |
 | Feedback rounds | `pr.max_fix_rounds` (default 2) | `pr.after_limit`: ask, file issues or stop | Store-backed: the pass record resumes an interrupted pass. Repo-local: no record; a pass interrupted after its last fix was pushed ends in "waiting on owner" (#34). A recovered partial fix is counted as an extra round (#29) | The user at the limit; the agent on resume |
 | Watch polling | `pr.poll_interval` (default 5m); reviewer timeout per head (default 20m) | Advisory reviewer stops blocking; required reviewer → ask | Poll error → retry next interval. Gaps: pair readiness does not check that a snapshot matches the current PR head (#31); a cleanup race can delete the newer watcher's token, and that watcher then exits 4 and stops silently (#39) | The agent's watch loop, then the user; nobody in the #39 case |
+| Reviewer report cutoff | Push time of the head from repository activity; when push activity is missing, Mira and other timestamp-based reviewers use the head's commit time | — | An earlier-head report can mark the current head `reported` in a fresh snapshot (#31) | Nobody, until the reviewer's evidence is inspected |
 | Fully paginated metadata reads (`pr-pair.sh` discovery, linking, recovery; after-limit issue reuse) | None: every page is read and held in memory; issue reuse scans all issues once per finding (F × I) | — | Large histories slow every call and grow memory (#40) | Nobody until a call is slow or fails |
 | Network commands (`gh`, `git` in the PR scripts) | No Specwright deadline. The watch timeout counts sleep intervals, not elapsed time, and cannot interrupt a poll that hangs | — | A hung command blocks timeout reporting and ownership checks (#40) | Nobody until the user notices |
 | Install / update | One project at a time | — | Interrupted update can leave deleted skills; a store's shared schema is replaced for every project (#36) | The user, on the next failing run |
@@ -114,7 +115,7 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 
 | Gap | Issue |
 |---|---|
-| Pair readiness accepts a snapshot of another PR or an old head | #31 |
+| Pair readiness accepts a snapshot of another PR or an old head; missing push activity also lets previous-head reports satisfy current-head reviewer readiness | #31 |
 | Feedback pass record has no owner; two sessions can both write it | #32 |
 | A reviewer edit during a fix is hidden by the later reply | #33 |
 | Repo-local feedback cannot recover a pass interrupted after the last fix was pushed | #34 |
@@ -127,6 +128,7 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 | OpenSpec pin is not enforced | #37 |
 | Empty `github.login` (default) is unfenced; credential-bearing remote URLs bypass `as.sh`, so a successful push can use another account without reporting the mismatch | #38 |
 | Watch cleanup can delete a newer watcher's token, leaving no watcher | #39 |
+| Hyphenated cache filenames alias distinct repository/change identities, blocking unrelated feedback or stopping another PR's watcher | #32, #39 |
 | Unbounded metadata reads and no command deadlines in the PR scripts | #40 |
 | Roadmap init/close write to a store without the branch check or gate lock | #43 |
 | Roadmap writes baseline ADRs as `accepted` before the review gate | #44 |
