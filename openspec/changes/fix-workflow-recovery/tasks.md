@@ -113,7 +113,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
   - on `not_owner` or `record_busy`, stop and report; a lock is never removed without the user.
 
   Add `test_feedback_asks_before_adopting_a_foreign_record` to `test_skill_text.py` (red first), then verify it passes and flip the row green.
-- [ ] 3.4 Update `openspec/architecture.md`:
+- [x] 3.4 Update `openspec/architecture.md`:
   - the Feedback pass record row (owner, exclusive create, collision-free key; drop both #32 gap clauses);
   - Known gaps: remove the #32 rows, and edit the shared #32/#39 row to leave only the watch-key part (#39).
 

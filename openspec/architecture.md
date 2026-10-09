@@ -74,7 +74,7 @@ flowchart LR
 | Planning-only marker (`specwright-change.yaml`, `code_changes: none`, in the archive directory) | `specwright-finish` writes it at archive; `specwright-pr` feedback deletes it when a code fix follows | Permanent once on the store's main | Proof for roadmap status that a store-backed change has no code side | Store branch, then the store's main |
 | `Feedback-Round: <n>` trailers | `specwright-pr` feedback | Permanent | The round count is derived from them | Change branch in either repo |
 | PR markers: reply markers (`specwright:handled <id>`, with a trailing `resolve` when the thread is to be resolved; `specwright:waiting`), pair-link comments (`specwright:link`), `specwright:pr-item` in after-limit issue bodies | `pr-reply.sh`; `pr-pair.sh link`; `specwright-pr` after the limit | Life of the PR | An item edited after the reply counts as unhandled again. Gap: an edit made while the fix was in progress is hidden by the later reply (#33) | GitHub |
-| Feedback pass record (store-backed changes only) | The one session running feedback for the change, through `pr-pair.sh pass write/done`. Gap: that exclusivity is assumed, not enforced (#32). Gap: its hyphenated filename can alias distinct repositories or changes (#32). | One feedback pass | Deleted at `pass done`; a leftover record blocks the next pass until resumed | `~/.cache/specwright/feedback/` (or `SPECWRIGHT_STATE_DIR`) |
+| Feedback pass record (store-backed changes only) | The one session running feedback for the change, through `pr-pair.sh pass write/plan/done/adopt`. Created exclusively (a second write is refused), holds an owner id that `done` and `adopt` require, and is keyed by a hash of repository and change so distinct identities never share a file. A record owned by another session is shown to the user, never taken over automatically. | One feedback pass | Deleted at `pass done`; a leftover record blocks the next pass until resumed | `~/.cache/specwright/feedback/` (or `SPECWRIGHT_STATE_DIR`) |
 | Watch ownership token | The newest `pr-snapshot.sh --wait` on the PR | One watch | Released on exit; an older watcher that sees another token exits 4. Gap: cleanup can delete a newer watcher's token, leaving no watcher (#39). Gap: its hyphenated filename can alias distinct repositories, so a watcher for another PR can take ownership (#39). | `~/.cache/specwright/watch/<owner>-<repo>-<pr>` (or under `SPECWRIGHT_STATE_DIR`) |
 | Store gate lock | `specwright-branch`, and `specwright-roadmap` when it branches in a store-backed project | Its own gate only; each removes only the lock it took | Never auto-removed; the user confirms removal | `<store git-common-dir>/specwright-gate.lock` |
 | Strategy and roadmap (`strategy.md`, `roadmap.md`) | `specwright-roadmap` init/close, and **next** when it adds a gap-closing change | Project lifetime | The roadmap is updated at each milestone close; status is derived, never stored. **next** adds a gap-closing change only after the branch gate has created its branch, as a roadmap-only commit there that merges with the change | Main of the planning repo |
@@ -118,7 +118,6 @@ This table is frozen at the reviewed baseline. The live list is the open sh1ny/s
 | Gap | Issue |
 |---|---|
 | Pair readiness accepts a snapshot of another PR or an old head; missing push activity also lets previous-head reports satisfy current-head reviewer readiness | #31 |
-| Feedback pass record has no owner; two sessions can both write it | #32 |
 | A reviewer edit during a fix is hidden by the later reply | #33 |
 | Repo-local feedback cannot recover a pass interrupted after the last fix was pushed | #34 |
 | `pr-pair.sh` git calls on the store use the code account | #35 |
@@ -128,7 +127,7 @@ This table is frozen at the reviewed baseline. The live list is the open sh1ny/s
 | OpenSpec pin is not enforced | #37 |
 | Empty `github.login` (default) is unfenced; credential-bearing remote URLs bypass `as.sh`, so a successful push can use another account without reporting the mismatch | #38 |
 | Watch cleanup can delete a newer watcher's token, leaving no watcher | #39 |
-| Hyphenated cache filenames alias distinct repository/change identities, blocking unrelated feedback or stopping another PR's watcher | #32, #39 |
+| Hyphenated watch-token filenames alias distinct repository/PR identities, so a watcher for another PR can take ownership | #39 |
 | Unbounded metadata reads and no command deadlines in the PR scripts | #40 |
 | Roadmap init/close write to a store without the branch check or gate lock | #43 |
 | Roadmap writes baseline ADRs as `accepted` before the review gate | #44 |
