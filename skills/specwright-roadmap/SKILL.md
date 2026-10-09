@@ -29,6 +29,14 @@ Status is derived, never stored. A milestone is done when all its changes are do
 
 **Committing project files** (init and close): start from a clean main (in pr mode, `git pull --ff-only origin <main>` first) and `git checkout -b <branch>` before writing anything, commit the files you wrote by name with a `docs(<branch-name>): ...` subject, then finish per `finish` in `openspec/specwright.yaml`: `local` → merge into main with `--no-ff` and subject `merge: <branch-name>`, delete the branch, never push; `pr` → `specwright-pr` **ship**. There is no change to archive, so `specwright-finish` does not apply.
 
+Store-backed (see the Planning repo section of `specwright-commit`): the store's gate lock, the same `specwright-gate.lock` that `specwright-branch` takes for a change, guards the branch, so a roadmap branch and a change branch never pass their gates together. Run this gate before any branch or write in either repo; which repo holds each project file does not change. Every command that uses the lock starts with `cd "<store toplevel>" && L="$(git rev-parse --path-format=absolute --git-common-dir)/specwright-gate.lock" &&` (shell variables do not survive between calls).
+1. **Lock**, in one call: `... && mkdir "$L" && printf 'time: %s\nchange: %s\ncode: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<branch>" "<code toplevel>" > "$L/owner"`. If the lock is held (`mkdir` errors because it exists): stop before any branch or write in either repo, show `owner` (when, for which change or branch, from which checkout) and say another session may be in its gate for this store. Never remove a lock another session took: only the user can confirm it is stale.
+2. **Check** the store: it must be clean and on its main (`planning_store.main_branch`, else `main`, else `master`). On a branch other than its main, the store is busy with that branch: stop. Dirty: stop and show `git -C "<store toplevel>" status --short`. `<branch>` already exists in the store: stop. Each of these stops releases the lock first (step 4).
+3. **Branch**: `git checkout -b <branch>` in the store, and from the clean code main in the code repo when files are written there too.
+4. **Release** only the lock you took, right after the branch exists, in one call that sets `L` again: `... && rm -r "$L"`.
+
+Then, before each step that writes project files in the store, run `test "$(git -C "<store toplevel>" branch --show-current)" = <branch>`, and commit store files in one call: `cd "<store toplevel>" && test "$(git branch --show-current)" = <branch> && git add -- <files> && git commit -F <msgfile> -- <files>`. When the check fails (the store is on another branch), stop with no further write or commit in either repo, and name both branches: `<branch>` expected, and the store's current branch found.
+
 ## init
 
 Input: the user's project idea (any size), plus the repo if code exists. Work on branch `docs/project-baseline` (see Committing project files).
