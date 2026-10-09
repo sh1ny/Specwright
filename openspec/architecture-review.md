@@ -63,3 +63,5 @@ Reviewer re-check:
 - **Required change 2:** accepted. The graph, identity contract, ADR index and #38 gap entry include the required wording and silent account-mismatch risk.
 - **Required change 3:** accepted. M2 and the supplied #38 comment cover credential-free HTTPS, credential-bearing fetch and push URLs, multiple push URLs, and verified-token-or-refusal evidence rather than slug parsing alone. The configured gh credential was unavailable, so the supplied comment was used.
 - **Required change 4:** accepted. All six ADRs are proposed, and the architecture contains the exact round-4 acceptance paragraph.
+
+Author, after the re-check: the gate passed, so in the same commit that recorded this re-check (1f2b0ad) ADRs 0001-0006 were marked `Status: accepted` and the architecture's pending-acceptance paragraph (required change 4) was replaced with the acceptance statement. Required change 4 and the re-check above describe the state during review, which this record keeps as it was.
