@@ -96,7 +96,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
 ## 7. Versioning rule, 0.1.9 and integration
 
 - [x] 7.1 Add the pre-1.0 versioning rule to CONTRIBUTING Releases: minor for a feature, configuration key or workflow change; patch for a fix; 1.0 is the maintainer's call. Set `VERSION`, the README badge and `metadata.version` in all six `skills/*/SKILL.md` to 0.1.9. Verify with `grep -rn "0\.1\.8" VERSION README.md skills/*/SKILL.md` (no hits) and `grep -c "0\.1\.9"` on each.
-- [ ] 7.2 Run the full checks: `python -m unittest discover evals/git-workflow -p "test_*.py"`, `python -m unittest discover evals/pr-pair`, `openspec validate fix-agent-skills-and-subjects --strict` and `openspec schema validate specwright`. Verify every test map row is green, `git diff main -- docs/adr` is empty and the Known gaps table is unchanged. Record any skipped test with its reason.
+- [x] 7.2 Run the full checks: `python -m unittest discover evals/git-workflow -p "test_*.py"`, `python -m unittest discover evals/pr-pair`, `openspec validate fix-agent-skills-and-subjects --strict` and `openspec schema validate specwright`. Verify every test map row is green, `git diff main -- docs/adr` is empty and the Known gaps table is unchanged. Record any skipped test with its reason.
 
 ## Workflow follow-up
 
