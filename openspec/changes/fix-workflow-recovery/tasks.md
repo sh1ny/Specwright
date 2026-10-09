@@ -6,16 +6,16 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 
 | Requirement | Scenario | Test file | Test name | State |
 |---|---|---|---|---|
-| feedback-passes → A feedback pass has one owner | Two sessions start a pass for one change | evals/pr-pair/test_pr_pair.py | test_pass_write_is_exclusive_under_concurrency | red |
-| feedback-passes → A feedback pass has one owner | Resume by the owning session | evals/pr-pair/test_pr_pair.py | test_pass_owner_plans_and_completes | red |
+| feedback-passes → A feedback pass has one owner | Two sessions start a pass for one change | evals/pr-pair/test_pr_pair.py | test_pass_write_is_exclusive_under_concurrency | green |
+| feedback-passes → A feedback pass has one owner | Resume by the owning session | evals/pr-pair/test_pr_pair.py | test_pass_owner_plans_and_completes | green |
 | feedback-passes → A feedback pass has one owner | Record left by another session | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_pass_plan_reports_foreign_owner; test_feedback_asks_before_adopting_a_foreign_record | red |
-| feedback-passes → A feedback pass has one owner | User confirms owner is gone | evals/pr-pair/test_pr_pair.py | test_pass_adopt_hands_over_the_record | red |
-| feedback-passes → A feedback pass has one owner | Handover races another session | evals/pr-pair/test_pr_pair.py | test_pass_adopt_refuses_a_stale_from | red |
-| feedback-passes → A feedback pass has one owner | Lock left by an interrupted handover | evals/pr-pair/test_pr_pair.py | test_pass_adopt_and_done_refuse_a_held_lock | red |
-| feedback-passes → A feedback pass has one owner | Removal by a non-owner | evals/pr-pair/test_pr_pair.py | test_pass_done_refuses_a_non_owner | red |
-| feedback-passes → Pass records are keyed per repository and change | Hyphenated owners and names | evals/pr-pair/test_pr_pair.py | test_record_keys_do_not_alias_hyphenated_identities | red |
-| feedback-passes → Pass records are keyed per repository and change | Record from 0.1.9 | evals/pr-pair/test_pr_pair.py | test_legacy_record_is_moved_to_the_new_key | red |
-| feedback-passes → Pass records are keyed per repository and change | Old key belongs to another repository | evals/pr-pair/test_pr_pair.py | test_legacy_record_of_another_identity_is_left_alone | red |
+| feedback-passes → A feedback pass has one owner | User confirms owner is gone | evals/pr-pair/test_pr_pair.py | test_pass_adopt_hands_over_the_record | green |
+| feedback-passes → A feedback pass has one owner | Handover races another session | evals/pr-pair/test_pr_pair.py | test_pass_adopt_refuses_a_stale_from | green |
+| feedback-passes → A feedback pass has one owner | Lock left by an interrupted handover | evals/pr-pair/test_pr_pair.py | test_pass_adopt_and_done_refuse_a_held_lock | green |
+| feedback-passes → A feedback pass has one owner | Removal by a non-owner | evals/pr-pair/test_pr_pair.py | test_pass_done_refuses_a_non_owner | green |
+| feedback-passes → Pass records are keyed per repository and change | Hyphenated owners and names | evals/pr-pair/test_pr_pair.py | test_record_keys_do_not_alias_hyphenated_identities | green |
+| feedback-passes → Pass records are keyed per repository and change | Record from 0.1.9 | evals/pr-pair/test_pr_pair.py | test_legacy_record_is_moved_to_the_new_key | green |
+| feedback-passes → Pass records are keyed per repository and change | Old key belongs to another repository | evals/pr-pair/test_pr_pair.py | test_legacy_record_of_another_identity_is_left_alone | green |
 | feedback-passes → A pass intent is validated before it is written | Well-formed intent | evals/pr-pair/test_pr_pair.py | test_pass_write_accepts_a_well_formed_intent | green |
 | feedback-passes → A pass intent is validated before it is written | `prs` is a string | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_malformed_prs | green |
 | feedback-passes → A pass intent is validated before it is written | Round is not a positive integer | evals/pr-pair/test_pr_pair.py | test_pass_write_refuses_a_bad_round | green |
@@ -98,7 +98,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
   - `test_pass_owner_plans_and_completes`, `test_pass_plan_reports_foreign_owner`, `test_pass_adopt_hands_over_the_record`, `test_pass_adopt_refuses_a_stale_from`, `test_pass_adopt_and_done_refuse_a_held_lock`, `test_pass_done_refuses_a_non_owner`.
 
   Verify they fail (no `owner`, no `adopt`, aliasing key).
-- [ ] 3.2 Implement D1 and D2 in `pr-pair.sh`:
+- [x] 3.2 Implement D1 and D2 in `pr-pair.sh`:
   - the hashed key and the guarded legacy move;
   - exclusive create (`os.link`, with the `O_EXCL` fallback) and `version: 2` with `owner`;
   - `--owner` on `plan` (`owner`, `owned`) and `done`;

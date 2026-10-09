@@ -9,6 +9,7 @@ prints one JSON line; exit 0 = answered, 1 = stop (error object), 2 = usage,
 
 Run: python -m unittest discover evals/pr-pair
 """
+import hashlib
 import json
 import re
 import os
@@ -16,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -185,6 +187,23 @@ def thread(tid="T1", rev=REV0, root_id=11, awaiting=False, resolved=False, resol
     return {"id": tid, "root_id": root_id, "resolved": resolved, "rev": rev, "waiting_owner": waiting_owner,
             "awaiting_reviewer": awaiting, "resolve_pending": resolve_pending, "path": "x", "line": 1,
             "comments": comments or [{"id": "C11", "author": "chatgpt-codex-connector", "at": T0, "edited": None}]}
+
+
+def _safe(t):
+    return re.sub(r"[^A-Za-z0-9._-]", "_", t)
+
+
+def record_key(repo, change):
+    """The record's file name: readable owner.name.change, then 32 hex of sha256(lower(owner), lower(name), change)."""
+    owner, _, name = repo.partition("/")
+    h = hashlib.sha256(f"{owner.lower()}\n{name.lower()}\n{change}".encode("utf-8")).hexdigest()[:32]
+    return f"{_safe(owner)}.{_safe(name)}.{_safe(change)}-{h}.json".lower()
+
+
+def legacy_key(repo, change):
+    """The 0.1.9 file name."""
+    owner, _, name = repo.partition("/")
+    return f"{_safe(owner)}-{_safe(name)}-{_safe(change)}.json"
 
 
 # =======================================================================================================
@@ -761,13 +780,18 @@ class PassBase(Base):
 
     def write_record(self, findings, rnd=2, intent=None, expect=0):
         f = self.write_json("intent.json", intent or self.intent(findings, rnd))
-        return self.pp("pass", "write", *self.common(), "--intent", f, expect=expect)
+        out = self.pp("pass", "write", *self.common(), "--intent", f, expect=expect)
+        if out.get("ok"):
+            self.owner = out["owner"]  # the id `pass write` returns; plan and done carry it
+        return out
 
     def record_path(self):
-        return self.state_dir / "feedback" / f"acme-code-{CHANGE}.json"
+        return self.state_dir / "feedback" / record_key(CODE, CHANGE)
 
     def plan(self, code=None, store=None, sub="plan", expect=0):
         args = ["pass", sub, *self.common()]
+        if getattr(self, "owner", None):
+            args += ["--owner", self.owner]
         for name, s in (("code", code), ("store", store)):
             args += ["--snapshot", f"{name}={self.write_json(f'{name}-snap.json', s if s is not None else snap())}"]
         return self.pp(*args, expect=expect)
@@ -1249,6 +1273,158 @@ class PassPlan(PassBase):
         bad = self.finding(edits=[{"file": "greet.py", "contains": ["x"]}])  # destination store, not under openspec/
         self.assertEqual(self.write_record([bad], expect=1)["error"], "misrouted")
         self.assertFalse(self.record_path().exists())
+
+
+class PassOwnership(PassBase):
+    """One owner per feedback pass, and a record key that never aliases two repositories."""
+
+    def fresh_pass(self):
+        """A pass whose every step is done, so `pass done` may remove it."""
+        self.settings("github:\n  login: KintsugiBot\npr:\n  max_fix_rounds: 2\n")
+        self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}], react=None)])
+        self.fix_code()
+        self.push_all()
+        return snap(threads=[])
+
+    def raw(self):
+        return self.record_path().read_bytes()
+
+    def adopt(self, new, frm, expect=0):
+        return self.pp("pass", "adopt", *self.common(), "--owner", new, "--from", frm, expect=expect)
+
+    def cmd_for(self, sub, repo, *extra, expect=0):
+        args = ["pass", sub, "--code", self.code, "--store", self.store, "--code-repo", repo, "--change", "fix-login", *extra]
+        return self.pp(*args, expect=expect)
+
+    def test_record_keys_do_not_alias_hyphenated_identities(self):
+        s = self.write_json("s.json", snap())
+        for repo, rnd in (("acme-tools/widget", 2), ("acme/tools-widget", 3)):
+            f = self.write_json("intent.json", self.intent([self.finding()], rnd))
+            self.cmd_for("write", repo, "--intent", f)
+        names = sorted(p.name for p in (self.state_dir / "feedback").iterdir())
+        self.assertEqual(names, sorted([record_key("acme-tools/widget", "fix-login"), record_key("acme/tools-widget", "fix-login")]))
+        for repo, rnd in (("acme-tools/widget", 2), ("acme/tools-widget", 3)):
+            p = self.cmd_for("plan", repo, "--snapshot", f"code={s}", "--snapshot", f"store={s}")
+            self.assertEqual((p["record"], p["round"]), (True, rnd), repo)
+
+    def test_legacy_record_is_moved_to_the_new_key(self):
+        self.write_record([self.finding()])
+        self.owner = None
+        rec = json.loads(self.raw().decode("utf-8"))
+        rec.pop("owner")
+        rec["version"] = 1
+        legacy = self.state_dir / "feedback" / legacy_key(CODE, CHANGE)
+        legacy.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        before = legacy.read_bytes()
+        self.record_path().unlink()
+        p = self.plan()
+        self.assertTrue(p["record"])
+        self.assertIsNone(p["owned"])
+        self.assertFalse(legacy.exists())
+        self.assertEqual(self.raw(), before)
+
+    def test_legacy_record_of_another_identity_is_left_alone(self):
+        self.write_record([self.finding()])
+        self.owner = None
+        rec = json.loads(self.raw().decode("utf-8"))
+        rec.update(code_repo="acme-code/add", change="greeting")  # 0.1.9 gave both identities `acme-code-add-greeting.json`
+        self.record_path().unlink()
+        legacy = self.state_dir / "feedback" / legacy_key("acme-code/add", "greeting")
+        self.assertEqual(legacy.name, legacy_key(CODE, CHANGE))
+        legacy.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        before = legacy.read_bytes()
+        p = self.plan()
+        self.assertFalse(p["record"])
+        self.assertEqual(legacy.read_bytes(), before)
+        self.assertFalse(self.record_path().exists())
+
+    def test_pass_write_is_exclusive_under_concurrency(self):
+        f = self.write_json("intent.json", self.intent([self.finding()]))
+        cmd = ["bash", str(SCRIPT), "pass", "write", *map(str, self.common()), "--intent", str(f)]
+        res = []
+        gate = threading.Barrier(2)
+
+        def go():
+            gate.wait()
+            r = subprocess.run(cmd, capture_output=True, text=True, env=self.env(), cwd=self.tmp)
+            res.append((r.returncode, json.loads(r.stdout.strip().splitlines()[0])))
+
+        ts = [threading.Thread(target=go) for _ in range(2)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+        self.assertEqual(sorted(rc for rc, _ in res), [0, 1], res)
+        win = next(o for rc, o in res if rc == 0)
+        lose = next(o for rc, o in res if rc == 1)
+        self.assertEqual(lose["error"], "record_exists")
+        self.assertEqual(json.loads(self.raw().decode("utf-8"))["owner"]["id"], win["owner"])
+        self.assertEqual([p.name for p in (self.state_dir / "feedback").iterdir()], [record_key(CODE, CHANGE)])
+
+    def test_pass_owner_plans_and_completes(self):
+        w = self.write_record([self.finding()])
+        self.assertRegex(w["owner"], r"^[0-9a-f]{32}$")
+        rec = json.loads(self.raw().decode("utf-8"))
+        self.assertEqual(rec["version"], 2)
+        self.assertEqual(rec["owner"]["id"], w["owner"])
+        self.assertEqual(set(rec["owner"]), {"id", "at", "checkout", "host"})
+        p = self.plan()
+        self.assertIs(p["owned"], True)
+        self.assertEqual(p["owner"]["id"], w["owner"])
+        self.record_path().unlink()
+        s = self.fresh_pass()
+        self.assertIs(self.plan(code=s)["owned"], True)
+        self.assertTrue(self.plan(code=s, sub="done")["deleted"])
+        self.assertFalse(self.record_path().exists())
+
+    def test_pass_plan_reports_foreign_owner(self):
+        w = self.write_record([self.finding()])
+        self.assertIs(self.plan()["owned"], True)
+        self.owner = "f" * 32
+        p = self.plan()
+        self.assertIs(p["owned"], False)
+        self.assertEqual(p["owner"]["id"], w["owner"])
+        self.assertTrue(p["owner"]["at"] and p["owner"]["checkout"] and p["owner"]["host"])
+        self.assertTrue(p["record"])  # reported, never refused
+
+    def test_pass_adopt_hands_over_the_record(self):
+        w = self.write_record([self.finding()])
+        before = json.loads(self.raw().decode("utf-8"))
+        self.assertTrue(self.adopt("b" * 32, w["owner"])["ok"])
+        after = json.loads(self.raw().decode("utf-8"))
+        self.assertEqual(after["owner"]["id"], "b" * 32)
+        before.pop("owner")
+        after.pop("owner")
+        self.assertEqual(after, before)
+        self.owner = "b" * 32
+        self.assertIs(self.plan()["owned"], True)
+        self.assertEqual([p.name for p in (self.state_dir / "feedback").iterdir()], [record_key(CODE, CHANGE)])
+
+    def test_pass_adopt_refuses_a_stale_from(self):
+        self.write_record([self.finding()])
+        before = self.raw()
+        self.assertEqual(self.adopt("b" * 32, "0" * 32, expect=1)["error"], "not_owner")
+        self.assertEqual(self.raw(), before)
+
+    def test_pass_adopt_and_done_refuse_a_held_lock(self):
+        w = self.write_record([self.finding()])
+        before = self.raw()
+        lock = Path(str(self.record_path()) + ".lock")
+        lock.mkdir()
+        r = self.adopt("b" * 32, w["owner"], expect=1)
+        self.assertEqual(r["error"], "record_busy")
+        self.assertIn(lock.name, r["message"])
+        d = self.plan(sub="done", expect=1)
+        self.assertEqual(d["error"], "record_busy")
+        self.assertIn(lock.name, d["message"])
+        self.assertEqual(self.raw(), before)
+        self.assertTrue(lock.is_dir())
+
+    def test_pass_done_refuses_a_non_owner(self):
+        s = self.fresh_pass()
+        self.owner = "e" * 32
+        self.assertEqual(self.plan(code=s, sub="done", expect=1)["error"], "not_owner")
+        self.assertTrue(self.record_path().exists())
 
 
 # =======================================================================================================

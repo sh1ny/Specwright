@@ -20,8 +20,11 @@
 #   rounds --code d --store d --branch b
 #                                     highest Feedback-Round across both branches (+ legacy subject count, unpushed)
 #   pass write --code d --store d --code-repo o/n --change c --intent file [--store-prefix openspec]
-#   pass plan|done --code d --store d --code-repo o/n --change c --snapshot code=f --snapshot store=f
-#                                     the intent record of a feedback pass; the evidence-based resume plan; delete
+#   pass plan --code d --store d --code-repo o/n --change c --snapshot code=f --snapshot store=f [--owner id]
+#   pass done --code d --store d --code-repo o/n --change c --snapshot code=f --snapshot store=f --owner id
+#   pass adopt --code d --store d --code-repo o/n --change c --owner new-id --from shown-id|none
+#                                     the intent record of a feedback pass (write returns the owner id); the evidence-based
+#                                     resume plan (owned: true|false|null); delete, by its owner; hand over, naming the owner shown
 #   cleanup-plan --code d --store d --branch b
 #                                     post-merge commands per repo whose expected PR is MERGED
 # Exit: 0 answered, 1 stop (the JSON has "error" and "message"; an unexpected failure is
@@ -45,10 +48,15 @@ if [ -n "$PR_PAIR_BASH" ] && command -v cygpath >/dev/null 2>&1; then PR_PAIR_BA
 export PR_PAIR_BASH
 
 exec "$py" -I -X utf8 - "$@" <<'PYSRC'
+import contextlib
+import datetime
+import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -828,11 +836,88 @@ def cmd_rounds(argv):
 
 
 # ---- the feedback pass record ----------------------------------------------------------------------------------
+def record_dir():
+    return Path(os.environ.get("SPECWRIGHT_STATE_DIR") or str(Path.home() / ".cache" / "specwright")) / "feedback"
+
+
+def _safe(s):
+    return re.sub(r"[^A-Za-z0-9._-]", "_", s)
+
+
 def record_path(code_repo, change):
-    base = os.environ.get("SPECWRIGHT_STATE_DIR") or str(Path.home() / ".cache" / "specwright")
+    """<owner>.<name>.<change>-<32 hex of sha256(lower(owner), lower(name), change)>.json: the hash keeps hyphenated
+    identities apart (0.1.9 joined the parts with '-', so acme-tools/widget and acme/tools-widget shared a file)."""
     owner, _, name = code_repo.partition("/")
-    safe = lambda s: re.sub(r"[^A-Za-z0-9._-]", "_", s)
-    return Path(base) / "feedback" / f"{safe(owner)}-{safe(name)}-{safe(change)}.json"
+    h = hashlib.sha256(f"{owner.lower()}\n{name.lower()}\n{change}".encode("utf-8")).hexdigest()[:32]
+    return record_dir() / f"{_safe(owner)}.{_safe(name)}.{_safe(change)}-{h}.json".lower()
+
+
+def legacy_record_path(code_repo, change):
+    owner, _, name = code_repo.partition("/")
+    return record_dir() / f"{_safe(owner)}-{_safe(name)}-{_safe(change)}.json"
+
+
+def publish(src, dst):
+    """Create dst from src's content, failing with FileExistsError if dst exists: a hard link, so dst is complete the moment it
+    appears; where links are unsupported, an O_EXCL create and write (a crash mid-write leaves a record_unreadable file)."""
+    try:
+        os.link(src, dst)
+        return
+    except FileExistsError:
+        raise
+    except OSError:
+        pass
+    data = Path(src).read_bytes()
+    fd = os.open(dst, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0))
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+
+
+def locate_record(code_repo, change):
+    """(path, ignored legacy path or None). A 0.1.9-key record of this repository and change is moved to the new key on first
+    use; one of another identity stays where it is, and one beside an existing new-key record is left and reported."""
+    path, old = record_path(code_repo, change), legacy_record_path(code_repo, change)
+    if not old.exists():
+        return path, None
+    try:
+        rec = load_record(old)
+    except Stop:
+        return path, None
+    if (not isinstance(rec, dict) or str(rec.get("code_repo") or "").lower() != code_repo.lower() or rec.get("change") != change):
+        return path, None
+    if path.exists():
+        return path, norm(old)
+    try:
+        publish(old, path)
+    except FileExistsError:
+        return path, norm(old)
+    old.unlink()
+    return path, None
+
+
+def new_owner(oid, checkout):
+    return {"id": oid, "at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "checkout": norm(os.path.abspath(checkout)),
+            "host": socket.gethostname()}
+
+
+@contextlib.contextmanager
+def record_lock(path):
+    """The `<record>.lock` directory, held only by the call that created it; a lock already there is never removed."""
+    lock = Path(str(path) + ".lock")
+    try:
+        os.mkdir(lock)
+    except FileExistsError:
+        raise Stop("record_busy", f"{lock} exists: another call, or an interrupted one, holds the record; it is not removed automatically",
+                   path=norm(path), lock=norm(lock))
+    try:
+        yield
+    finally:
+        os.rmdir(lock)
+
+
+def temp_beside(path):
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-", suffix=".json")
+    return os.fdopen(fd, "w", encoding="utf-8", newline="\n"), tmp
 
 
 def load_record(p):
@@ -917,7 +1002,7 @@ def pass_write(argv):
         if key not in intent:
             raise Stop("invalid_intent", f"intent lacks '{key}'", code=2)
     check_intent_header(intent)
-    path = record_path(a["code_repo"], a["change"])
+    path, _ = locate_record(a["code_repo"], a["change"])
     if path.exists():
         raise Stop("record_exists", f"a feedback pass record exists at {path}; resume that pass before starting another", path=str(path))
     seen = set()
@@ -955,13 +1040,20 @@ def pass_write(argv):
             raise Stop("branch_missing", f"{k} has no branch {intent['branch']}")
         heads[k] = r.stdout.strip()
     marker = find_marker(a["store"], intent["branch"], a["change"], prefix, (contexts(a["code"], a["store"])["store"] or {}).get("main")) if any(edits_for(f, "code") for f in intent["findings"]) else None
-    rec = {**intent, "change": a["change"], "code_repo": a["code_repo"], "heads": heads, "marker": marker, "version": 1}
+    owner = new_owner(secrets.token_hex(16), a["code"])
+    rec = {**intent, "version": 2, "owner": owner, "change": a["change"], "code_repo": a["code_repo"], "heads": heads, "marker": marker}
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(rec, indent=2))
-    os.replace(tmp, path)
-    return {"ok": True, "path": norm(path), "round": rec["round"], "heads": heads, "marker": marker}
+    f, tmp = temp_beside(path)  # a uniquely named file: two writers never share one
+    try:
+        with f:
+            f.write(json.dumps(rec, indent=2))
+        try:
+            publish(tmp, path)  # exclusive: fails if any record exists, and the record is complete when it appears
+        except FileExistsError:
+            raise Stop("record_exists", f"a feedback pass record exists at {path}; resume that pass before starting another", path=str(path))
+    finally:
+        os.unlink(tmp)
+    return {"ok": True, "path": norm(path), "round": rec["round"], "heads": heads, "marker": marker, "owner": owner["id"]}
 
 
 def listify(v):
@@ -1023,12 +1115,14 @@ def request_state(repo, num, branch, tip, reqs):
 
 
 def pass_plan(argv):
-    a = pass_args(argv)
-    path = record_path(a["code_repo"], a["change"])
+    a = pass_args(argv, {"--owner": "owner"})
+    path, ignored = locate_record(a["code_repo"], a["change"])
     rec = load_record(path)
     if rec is None:
         return {"ok": True, "record": False, "new_pass_allowed": True, "status": "none", "rows": [], "stops": [],
                 "delete_record": False, "needs_user": False}
+    held = rec.get("owner")
+    owned = None if not held else a.get("owner") == held.get("id")
     snaps = read_snapshots(a)
     findings, n, branch, prs = rec["findings"], rec["round"], rec["branch"], rec.get("prs") or {}
     for src in sorted({f["source"] for f in findings}):
@@ -1187,23 +1281,65 @@ def pass_plan(argv):
     status = "stop" if stops else ("complete" if complete else "resume")
     return {"ok": True, "record": True, "round": n, "branch": branch, "new_pass_allowed": False, "status": status, "stops": stops,
             "rows": rows, "delete_record": complete, "needs_user": bool(stops) or any(r["state"] == "ask" for r in rows),
-            "share_by_hand": [r["repo"] for r in rows if r["step"] == "push" and r.get("share_by_hand")], "path": norm(path)}
+            "share_by_hand": [r["repo"] for r in rows if r["step"] == "push" and r.get("share_by_hand")], "path": norm(path),
+            "owner": held, "owned": owned, **({"legacy_record_ignored": ignored} if ignored else {})}
+
+
+def owner_id(rec):
+    return (rec.get("owner") or {}).get("id")
 
 
 def pass_done(argv):
-    p = pass_plan(argv)
-    if not p.get("record"):
+    a = pass_args(argv, {"--owner": "owner"})
+    need(a, "owner")
+    path, _ = locate_record(a["code_repo"], a["change"])
+    if not path.exists():
         return {"ok": True, "deleted": False, "record": False}
-    if not p["delete_record"]:
-        raise Stop("not_complete", "the pass still has steps to do; run pass plan", status=p["status"])
-    record_path(pass_args(argv)["code_repo"], pass_args(argv)["change"]).unlink()
+    with record_lock(path):
+        rec = load_record(path)
+        if rec is None:
+            return {"ok": True, "deleted": False, "record": False}
+        if owner_id(rec) != a["owner"]:
+            raise Stop("not_owner", f"the record at {norm(path)} is owned by {owner_id(rec) or 'no session'}, not {a['owner']}; "
+                       "show its owner and ask the user", owner=rec.get("owner"))
+        p = pass_plan(argv)
+        if not p["delete_record"]:
+            raise Stop("not_complete", "the pass still has steps to do; run pass plan", status=p["status"])
+        path.unlink()
     return {"ok": True, "deleted": True}
 
 
+def pass_adopt(argv):
+    a = pass_args(argv, {"--owner": "owner", "--from": "frm"})
+    need(a, "owner", "frm")
+    path, _ = locate_record(a["code_repo"], a["change"])
+    if not path.exists():
+        raise Stop("no_record", f"no feedback pass record at {norm(path)}")
+    with record_lock(path):
+        rec = load_record(path)
+        if rec is None:
+            raise Stop("no_record", f"no feedback pass record at {norm(path)}")
+        cur = owner_id(rec)
+        if cur != (None if a["frm"] == "none" else a["frm"]):
+            raise Stop("not_owner", f"the record at {norm(path)} is owned by {cur or 'no session'}, not {a['frm']}; nothing changed",
+                       owner=rec.get("owner"))
+        rec = {**rec, "version": 2, "owner": new_owner(a["owner"], a["code"])}
+        f, tmp = temp_beside(path)
+        try:
+            with f:
+                f.write(json.dumps(rec, indent=2))
+            os.replace(tmp, path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+    return {"ok": True, "path": norm(path), "owner": a["owner"], "previous": cur}
+
+
 def cmd_pass(argv):
-    if not argv or argv[0] not in ("write", "plan", "done"):
-        usage("pass write|plan|done ...")
-    return {"write": pass_write, "plan": pass_plan, "done": pass_done}[argv[0]](argv[1:])
+    if not argv or argv[0] not in ("write", "plan", "done", "adopt"):
+        usage("pass write|plan|done|adopt ...")
+    return {"write": pass_write, "plan": pass_plan, "done": pass_done, "adopt": pass_adopt}[argv[0]](argv[1:])
 
 
 def cmd_cleanup(argv):
