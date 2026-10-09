@@ -1,6 +1,6 @@
 # 0006. OpenSpec resolves the planning root
 
-- Status: accepted
+- Status: proposed
 - Date: 2026-10-09
 - Supersedes: —
 

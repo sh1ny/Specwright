@@ -78,7 +78,7 @@ flowchart LR
 | Store gate lock | `specwright-branch` | The gate only | Never auto-removed; the user confirms removal | `<store git-common-dir>/specwright-gate.lock` |
 | Strategy and roadmap (`strategy.md`, `roadmap.md`) | `specwright-roadmap` init/close, and **next** when it adds a gap-closing change | Project lifetime | The roadmap is updated at each milestone close; status is derived, never stored | Main of the planning repo |
 | Baseline review (`architecture-review.md`) | One writer per round, by path: the orchestrator saves a cross-model CLI's output verbatim; `specwright-reviewer` writes it on the fresh-context path; the orchestrator also records `USER_OVERRIDE` after escalation | Project lifetime | A new review round rewrites it | Main of the planning repo |
-| Architecture file and ADRs (`architecture.md`, `docs/adr/`) | One writer at a time, by path: `specwright-roadmap` init/close, or the apply task of a change whose reviewed design records an ADR (it also updates the index) | Project lifetime | An ADR is editable until its review gate passes and it reaches main; after that it is never edited, and a new ADR supersedes it and the index is updated. Gap: roadmap marks baseline ADRs `accepted` before its review runs (#44) | Main of the repo holding them (`project.architecture`, `project.adr_dir`) |
+| Architecture file and ADRs (`architecture.md`, `docs/adr/`) | One writer at a time, by path: `specwright-roadmap` init/close, or the apply task of a change whose reviewed design records an ADR (it also updates the index) | Project lifetime | An ADR is `Status: proposed` and editable until its review gate passes; it is then marked `accepted` and never edited again: a new ADR supersedes it and the index is updated. Gap: roadmap writes baseline ADRs as `accepted` before its review runs (#44) | Main of the repo holding them (`project.architecture`, `project.adr_dir`) |
 | Settings | The user (install prompt merges; `specwright-roadmap` init may set the `project:` paths) | Project lifetime | Install keeps local values | `openspec/specwright.yaml`, `openspec/config.yaml` |
 | Installed version | Install prompt, last step | Until next install | Rewritten on install | `openspec/.specwright/VERSION` |
 
@@ -127,8 +127,11 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 | Unbounded metadata reads and no command deadlines in the PR scripts | #40 |
 | Roadmap init/close write to a store without the branch check or gate lock | #43 |
 | Roadmap writes baseline ADRs as `accepted` before the review gate | #44 |
+| README and `specwright-pr` do not state the Python 3.8+ dependency the scripts enforce | #45 |
 
 ## In-force ADRs
+
+The baseline ADRs below are `proposed` until the baseline review of their final text passes; they are marked `accepted` in the same PR before it merges.
 
 | ADR | Decision | Supersedes |
 |---|---|---|

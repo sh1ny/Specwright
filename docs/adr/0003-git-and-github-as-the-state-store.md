@@ -1,6 +1,6 @@
 # 0003. Git and GitHub as the state store
 
-- Status: accepted
+- Status: proposed
 - Date: 2026-10-09
 - Supersedes: —
 

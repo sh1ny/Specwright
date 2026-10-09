@@ -1,6 +1,6 @@
 # 0002. Agent instructions with thin deterministic scripts
 
-- Status: accepted
+- Status: proposed
 - Date: 2026-10-09
 - Supersedes: —
 

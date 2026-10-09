@@ -1,6 +1,6 @@
 # 0001. Build on unmodified OpenSpec
 
-- Status: accepted
+- Status: proposed
 - Date: 2026-10-09
 - Supersedes: —
 
