@@ -67,7 +67,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
 ## 1. Test fakes for the new GitHub reads
 
-- [ ] 1.1 Extend `evals/fakes/gh.py`:
+- [x] 1.1 Extend `evals/fakes/gh.py`:
   - `GET repos/<o>/<n>/pulls/comments/<id>/reactions` (paginated);
   - `gh api graphql` for the queries this change sends: a node's `reactions(content:)` with `user.login`, paged; a PR's `body`, `baseRefName`, `closingIssuesReferences(first: 100)` with `pageInfo`, and the repository's `defaultBranchRef`;
   - state helpers to add reactions, closing references and a default branch;

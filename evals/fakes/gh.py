@@ -15,6 +15,30 @@ backs `api repos/<o>/<n>/activity?ref=...` (the push-time lookup).
 Covers: auth token (and its --help, which names --user), api (user, pulls list/get, activity,
 issue comments list/create/patch), pr create/view/comment/edit, repo view. Anything else exits 2.
 Like real gh, `api --paginate` prints each page's JSON one after another.
+
+Reactions and closing references (state keys; add them with the helpers add_review_comment_reaction,
+add_node_reaction, set_closing_refs, set_default_branch, which take and mutate the state dict):
+  repos[slug]["review_comment_reactions"] = {"<comment id>": [{"user": {"login": l}, "content": "+1" | "-1"}]}
+  st["nodes"] = {"<node id>": {"reactions": [{"login": l, "content": "THUMBS_UP" | "THUMBS_DOWN"}]}}
+  pull["closing_refs"] = [{"number": n, "repo": "owner/name"}]; pull["closing_refs_has_next"] = bool
+  st["graphql_page_size"] = N  (optional; caps the reactions page size below the query's `first`)
+
+Accepted calls (anything else under `api graphql` exits 2):
+  REST  `api [--paginate] repos/<o>/<n>/pulls/comments/<id>/reactions[?content=%2B1|-1&per_page=N]`
+        -> JSON array of {user:{login}, content}; pages of 30 (per_page up to 100), like the other REST lists.
+  GQL a `api graphql -f query='...' -f id=<node id> [-f cursor=<endCursor>]` where the query text contains
+        `node(id: $id)` and `reactions(` with `content: THUMBS_UP` or `content: THUMBS_DOWN` and `after: $cursor`:
+        { node(id: $id) { ... on Reactable { reactions(first: 100, content: THUMBS_UP, after: $cursor)
+          { nodes { user { login } } pageInfo { hasNextPage endCursor } } } } }
+        -> {"data":{"node":{"reactions":{"nodes":[{"user":{"login":l}}],"pageInfo":{...}}}}}; node null if unknown.
+  GQL b `api graphql -f query='...' -f owner=<o> -f name=<n> -F number=<pr>`; the query text contains
+        `repository(` and `pullRequest(number`:
+        { repository(owner: $owner, name: $name) { defaultBranchRef { name }
+          pullRequest(number: $number) { body baseRefName closingIssuesReferences(first: 100)
+            { nodes { number repository { nameWithOwner } } pageInfo { hasNextPage } } } } }
+        -> {"data":{"repository":{"defaultBranchRef":{"name":b},"pullRequest":{...}}}}
+Fields not named in the query are still returned; the failure-injection `fail` patterns match the whole argv,
+so e.g. "graphql" or "/reactions" apply.
 """
 import json
 import os
@@ -213,6 +237,64 @@ def emit_pages(items, query, o, expr):
         query["page"] += 1
 
 
+def add_review_comment_reaction(st, slug, comment_id, login, content):
+    """content is the REST form: "+1" or "-1"."""
+    rx = st.setdefault("repos", {}).setdefault(slug, {}).setdefault("review_comment_reactions", {})
+    rx.setdefault(str(comment_id), []).append({"user": {"login": login}, "content": content})
+
+
+def add_node_reaction(st, node_id, login, content):
+    """content is the GraphQL form: "THUMBS_UP" or "THUMBS_DOWN"."""
+    st.setdefault("nodes", {}).setdefault(str(node_id), {}).setdefault("reactions", []).append(
+        {"login": login, "content": content})
+
+
+def set_closing_refs(st, slug, number, refs, has_next=False):
+    """refs: [(number, "owner/name"), ...] for PR `number` of `slug`."""
+    for p in st["repos"][slug]["pulls"]:
+        if p["number"] == number:
+            p["closing_refs"] = [{"number": n, "repo": r} for n, r in refs]
+            p["closing_refs_has_next"] = has_next
+            return
+    raise KeyError(number)
+
+
+def set_default_branch(st, slug, name):
+    st.setdefault("repos", {}).setdefault(slug, {})["default_branch"] = name
+
+
+def cmd_graphql(st, fields):
+    q = fields.get("query", "")
+    if "node(id" in q and "reactions(" in q:
+        m = re.search(r"content:\s*(THUMBS_UP|THUMBS_DOWN)", q)
+        content = m.group(1) if m else fields.get("content")
+        first = re.search(r"first:\s*(\d+)", q)
+        size = max(1, min(int(first.group(1)) if first else 30, 100, int(st.get("graphql_page_size", 100))))
+        node = st.get("nodes", {}).get(fields.get("id", ""))
+        if node is None:
+            return {"data": {"node": None}}
+        items = [r for r in node.get("reactions", []) if not content or r["content"] == content]
+        start = int(fields.get("cursor") or 0)
+        end = start + size
+        return {"data": {"node": {"reactions": {
+            "nodes": [{"user": {"login": r["login"]}} for r in items[start:end]],
+            "pageInfo": {"hasNextPage": end < len(items), "endCursor": str(end) if end < len(items) else None}}}}}
+    if "repository(" in q and "pullRequest(number" in q:
+        slug = f"{fields.get('owner')}/{fields.get('name')}"
+        repo = st.get("repos", {}).get(slug)
+        if repo is None:
+            raise Fail(f"GraphQL: Could not resolve to a Repository with the name '{slug}'. (repository)")
+        p = find_pull(slug, repo, fields.get("number", ""))
+        refs = p.get("closing_refs", [])
+        return {"data": {"repository": {"defaultBranchRef": {"name": repo.get("default_branch", "main")},
+                "pullRequest": {"body": p.get("body") or "", "baseRefName": p["base"]["ref"],
+                                "closingIssuesReferences": {
+                                    "nodes": [{"number": r["number"], "repository": {"nameWithOwner": r.get("repo", slug)}}
+                                              for r in refs[:100]],
+                                    "pageInfo": {"hasNextPage": bool(p.get("closing_refs_has_next"))}}}}}}
+    raise Fail("fake gh: unsupported graphql query", 2)
+
+
 def cmd_api(st, args):
     o, pos = parse(args, {"-X": "method", "--method": "method", "-f": "field", "--raw-field": "field",
                           "-F": "field", "--field": "field", "--input": "input", "--jq": "jq", "-q": "jq",
@@ -232,6 +314,8 @@ def cmd_api(st, args):
     expr = one(o, "jq")
     if path == "user":
         return emit({"login": whoami(st)}, expr)
+    if path == "graphql":
+        return emit(cmd_graphql(st, fields), expr)
     m = re.fullmatch(r"repos/([^/]+/[^/]+)/(.*)", path)
     if not m:
         raise Fail(f"fake gh: unsupported api endpoint {path}", 2)
@@ -253,6 +337,11 @@ def cmd_api(st, args):
     m = re.fullmatch(r"pulls/(\d+)", rest)
     if m and method == "GET":
         return emit(find_pull(slug, repo, m.group(1)), expr)
+    m = re.fullmatch(r"pulls/comments/(\d+)/reactions", rest)
+    if m and method == "GET":
+        items = [r for r in repo.get("review_comment_reactions", {}).get(m.group(1), [])
+                 if not query.get("content") or r["content"] == query["content"].replace(" ", "+")]
+        return emit_pages(items, query, o, expr)
     m = re.fullmatch(r"issues/(\d+)/comments", rest)
     if m:
         num = m.group(1)

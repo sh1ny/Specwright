@@ -9,12 +9,17 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import importlib.util
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 GH = HERE.parent / "fakes" / "gh.py"
 sys.path.insert(0, str(HERE.parent / "git-workflow"))
 import fixtures  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("fake_gh", GH)
+fake_gh = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fake_gh)
 
 
 class FakeGhCase(unittest.TestCase):
@@ -165,6 +170,105 @@ class LogAndFailures(FakeGhCase):
         r = self.gh("release", "list", check=False)
         self.assertEqual(r.returncode, 2)
         self.assertIn("unsupported", r.stderr)
+
+
+class ReactionsAndGraphql(FakeGhCase):
+    GQL_REACTIONS = ("query($id: ID!, $cursor: String) { node(id: $id) { ... on Reactable { "
+                     "reactions(first: 100, content: %s, after: $cursor) { nodes { user { login } } "
+                     "pageInfo { hasNextPage endCursor } } } } }")
+    GQL_PR = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
+              "defaultBranchRef { name } pullRequest(number: $number) { body baseRefName "
+              "closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } "
+              "pageInfo { hasNextPage } } } } }")
+
+    def seeded(self):
+        st = self.st()
+        st["repos"] = {"o/n": {"pulls": [self.pull(7, "b7")]}}
+        return st
+
+    def paginated(self, out):
+        dec, i, pages = json.JSONDecoder(), 0, []
+        while i < len(out):
+            obj, j = dec.raw_decode(out, i)
+            pages.append(obj)
+            i = j
+            while i < len(out) and out[i].isspace():
+                i += 1
+        return pages
+
+    def test_rest_review_comment_reactions_filter_and_paginate(self):
+        st = self.seeded()
+        for i in range(35):
+            fake_gh.add_review_comment_reaction(st, "o/n", 55, f"u{i}", "+1")
+        fake_gh.add_review_comment_reaction(st, "o/n", 55, "down", "-1")
+        fake_gh.add_review_comment_reaction(st, "o/n", 56, "other", "+1")
+        self.seed(st)
+        first = json.loads(self.gh("api", "repos/o/n/pulls/comments/55/reactions").stdout)
+        self.assertEqual(len(first), 30)
+        self.assertEqual(first[0], {"user": {"login": "u0"}, "content": "+1"})
+        pages = self.paginated(self.gh("api", "--paginate", "repos/o/n/pulls/comments/55/reactions").stdout)
+        self.assertEqual([len(p) for p in pages], [30, 6])
+        down = json.loads(self.gh("api", "repos/o/n/pulls/comments/55/reactions?content=-1").stdout)
+        self.assertEqual([r["user"]["login"] for r in down], ["down"])
+        self.assertEqual(self.gh("api", "repos/o/n/pulls/comments/99/reactions").stdout.strip(), "[]")
+
+    def test_graphql_node_reactions_paged(self):
+        st = self.seeded()
+        st["graphql_page_size"] = 2
+        for login in ("a", "b", "c"):
+            fake_gh.add_node_reaction(st, "NODE1", login, "THUMBS_UP")
+        fake_gh.add_node_reaction(st, "NODE1", "d", "THUMBS_DOWN")
+        self.seed(st)
+        r1 = json.loads(self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_UP", "-f", "id=NODE1").stdout)
+        rx = r1["data"]["node"]["reactions"]
+        self.assertEqual([n["user"]["login"] for n in rx["nodes"]], ["a", "b"])
+        self.assertTrue(rx["pageInfo"]["hasNextPage"])
+        r2 = json.loads(self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_UP", "-f", "id=NODE1",
+                                "-f", "cursor=" + rx["pageInfo"]["endCursor"]).stdout)
+        rx2 = r2["data"]["node"]["reactions"]
+        self.assertEqual([n["user"]["login"] for n in rx2["nodes"]], ["c"])
+        self.assertEqual(rx2["pageInfo"], {"hasNextPage": False, "endCursor": None})
+        down = json.loads(self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_DOWN", "-f", "id=NODE1").stdout)
+        self.assertEqual([n["user"]["login"] for n in down["data"]["node"]["reactions"]["nodes"]], ["d"])
+        none = json.loads(self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_UP", "-f", "id=NOPE").stdout)
+        self.assertIsNone(none["data"]["node"])
+
+    def test_graphql_pr_closing_refs_and_default_branch(self):
+        st = self.seeded()
+        st["repos"]["o/n"]["pulls"][0]["body"] = "Fixes #3"
+        fake_gh.set_default_branch(st, "o/n", "trunk")
+        fake_gh.set_closing_refs(st, "o/n", 7, [(3, "o/n"), (4, "x/y")], has_next=True)
+        self.seed(st)
+        args = ("api", "graphql", "-f", "query=" + self.GQL_PR, "-f", "owner=o", "-f", "name=n", "-F", "number=7")
+        repo = json.loads(self.gh(*args).stdout)["data"]["repository"]
+        self.assertEqual(repo["defaultBranchRef"], {"name": "trunk"})
+        pr = repo["pullRequest"]
+        self.assertEqual((pr["body"], pr["baseRefName"]), ("Fixes #3", "main"))
+        self.assertEqual(pr["closingIssuesReferences"], {
+            "nodes": [{"number": 3, "repository": {"nameWithOwner": "o/n"}},
+                      {"number": 4, "repository": {"nameWithOwner": "x/y"}}],
+            "pageInfo": {"hasNextPage": True}})
+        fake_gh.set_closing_refs(st, "o/n", 7, [], has_next=False)
+        self.seed(st)
+        pr = json.loads(self.gh(*args).stdout)["data"]["repository"]["pullRequest"]
+        self.assertEqual(pr["closingIssuesReferences"], {"nodes": [], "pageInfo": {"hasNextPage": False}})
+
+    def test_graphql_unknown_query_exits_2(self):
+        r = self.gh("api", "graphql", "-f", "query={ viewer { login } }", check=False)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("unsupported", r.stderr)
+
+    def test_failure_injection_on_new_endpoints(self):
+        st = self.seeded()
+        fake_gh.add_review_comment_reaction(st, "o/n", 55, "u", "+1")
+        st["fail"] = [{"match": r"reactions$|pulls/comments/55/reactions", "exit": 3, "stderr": "rest boom"},
+                      {"match": r"graphql", "exit": 5, "stderr": "gql boom"}]
+        self.seed(st)
+        r = self.gh("api", "repos/o/n/pulls/comments/55/reactions", check=False)
+        self.assertEqual((r.returncode, r.stderr.strip()), (3, "rest boom"))
+        for q in (self.GQL_REACTIONS % "THUMBS_UP", self.GQL_PR):
+            r = self.gh("api", "graphql", "-f", "query=" + q, "-f", "id=N", check=False)
+            self.assertEqual((r.returncode, r.stderr.strip()), (5, "gql boom"))
 
 
 @unittest.skipUnless(shutil.which("sh"), "needs sh")
