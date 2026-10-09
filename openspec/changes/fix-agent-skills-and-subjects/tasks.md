@@ -18,10 +18,10 @@ Text checks (`test_instructions.py`) assert where a rule sits in the delivered s
 | task-commits → Task subjects fit 72 characters | Store-backed task pair | evals/git-workflow/test_instructions.py; evals/git-workflow/evals.json | test_commit_skill_reuses_fitted_message_for_store_pair; eval-store-apply | green |
 | task-commits → Task text is never run as shell input | Shell-like task text | evals/git-workflow/test_fit_subject.py | test_shell_like_text_stays_literal | green |
 | task-commits → Unfittable subject stops the commit | Prefix plus first word too long | evals/git-workflow/test_fit_subject.py; evals/git-workflow/test_instructions.py | test_unfittable_subject_exits_1_and_keeps_file; test_commit_skill_stops_on_unfittable_subject | green |
-| project-planning → ADRs stay proposed until the review gate passes | Baseline passes review | evals/git-workflow/test_instructions.py | test_roadmap_accepts_adrs_only_after_gate | red |
-| project-planning → ADRs stay proposed until the review gate passes | Review asks to change a decision | evals/git-workflow/test_instructions.py | test_roadmap_writes_adrs_proposed | red |
-| project-planning → ADRs stay proposed until the review gate passes | Close supersedes an accepted ADR | evals/git-workflow/test_instructions.py | test_roadmap_close_reviews_superseding_adr | red |
-| project-planning → Baseline review rounds follow the schema's escalation rule | Two consecutive revise verdicts | evals/git-workflow/test_instructions.py | test_roadmap_review_escalates_after_two_consecutive_revise | red |
+| project-planning → ADRs stay proposed until the review gate passes | Baseline passes review | evals/git-workflow/test_instructions.py | test_roadmap_accepts_adrs_only_after_gate | green |
+| project-planning → ADRs stay proposed until the review gate passes | Review asks to change a decision | evals/git-workflow/test_instructions.py | test_roadmap_writes_adrs_proposed | green |
+| project-planning → ADRs stay proposed until the review gate passes | Close supersedes an accepted ADR | evals/git-workflow/test_instructions.py | test_roadmap_close_reviews_superseding_adr | green |
+| project-planning → Baseline review rounds follow the schema's escalation rule | Two consecutive revise verdicts | evals/git-workflow/test_instructions.py | test_roadmap_review_escalates_after_two_consecutive_revise | green |
 | project-planning → Baseline review rounds follow the schema's escalation rule | Edit after a passing verdict | evals/git-workflow/test_instructions.py | test_baseline_edit_after_pass_reruns_review | red |
 | project-planning → Gap-closing roadmap edit is committed on the new change's branch | Criterion fails with no change left | evals/git-workflow/evals.json | eval-roadmap-next-gap | red |
 | project-planning → Gap-closing roadmap edit is committed on the new change's branch | Branch gate stops | evals/git-workflow/evals.json | eval-roadmap-next-gap-dirty-main | red |
@@ -61,7 +61,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
 ## 4. ADR status and baseline review rounds (#44, #49; D4, D5)
 
 - [x] 4.1 Add the five project-planning text tests (ADR and review rows) to `test_instructions.py`. Verify they fail against the current roadmap and PR skills.
-- [ ] 4.2 Update `skills/specwright-roadmap/SKILL.md` per D4 and D5:
+- [x] 4.2 Update `skills/specwright-roadmap/SKILL.md` per D4 and D5:
   - init step 4 writes ADRs `Status: proposed`;
   - init step 5 drops "at most two rounds" and uses the schema rule;
   - on gate pass: accept with the date and add the in-force index rows, without voiding the verdict, then write the roadmap;
