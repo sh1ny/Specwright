@@ -1,6 +1,6 @@
 # 0004. Process-scoped GitHub identity
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-09
 - Supersedes: —
 

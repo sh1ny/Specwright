@@ -87,7 +87,7 @@ flowchart LR
 - **OpenSpec:** only through the custom schema and the CLI (`list`, `show`, `new change`, `instructions`, `templates`, `schema validate`, `validate`, `archive`, `context --json`). The OpenSpec version is pinned in the README badge and `CONTRIBUTING.md`, but not enforced at install (#37).
 - **Settings:** `specwright.yaml` keys are documented in `templates/openspec/specwright.yaml` and the README. A new key has a safe default, so a missing key keeps earlier behaviour.
 - **Git evidence formats:** commit subjects `<type>(<change>): task X.Y …`, trailers `Feedback-Round:` and `Code-Changes: none`, the legacy `address review feedback` subject (counted as a round on a branch without trailers), archive/merge subjects, and the planning-only marker. Later runs and roadmap status parse these, so changing them is a workflow change (minor version).
-- **Script I/O** (ADR 0002): `pr-snapshot.sh` and `pr-pair.sh` print one JSON document (`pr-snapshot.sh --logs` appends plain log text); `pr-reply.sh` prints one plain line per action. Exit codes signal stop conditions. Scripts use only `bash` with a POSIX userland (`sed`, `grep`, `mktemp` and similar; Git Bash on Windows), `git`, `gh` 2.40+ (built-in jq) and the Python 3.8+ standard library; `pr-pair.sh` runs `git` in the code repo and the store for repo identity, the expected PR set, recovery and cleanup.
+- **Script I/O** (ADR 0002): `pr-snapshot.sh` and `pr-pair.sh` print one JSON document (`pr-snapshot.sh --logs` appends plain log text); `pr-reply.sh` prints one plain line per action. Exit codes signal stop conditions. Scripts use only `bash` with a POSIX userland (`sed`, `grep`, `mktemp` and similar; Git Bash on Windows), `git`, `gh` 2.40+ (built-in jq) and the Python standard library (`pr-pair.sh` accepts 3.8+, but `pass write` needs 3.10+ and fails with a traceback, not JSON, on older versions: #46); `pr-pair.sh` runs `git` in the code repo and the store for repo identity, the expected PR set, recovery and cleanup.
 - **GitHub identity** (ADR 0004): every `gh` call for a configured login goes through `as.sh <login>` (or, for `pr-pair.sh`'s reads of the store under `planning_store.login`, its internal fence that resolves and verifies the token the same way), and `gh auth switch` is never run. With `github.login` empty (the shipped default), calls use the active account unfenced (#38). `specwright-finish`'s post-merge check runs a plain `gh pr view` even when a login is set (#38). `pr-pair.sh` fences `gh` calls per repo, but its `git` calls on the store run with the code account's credentials (#35). `git fetch` and `git pull` on main (branch gate, roadmap status, finish and pr cleanup) run with the ambient git credentials, unfenced (#38).
 - **Cross-model review:** a read-only CLI run that prints the complete review artifact, which contains exactly one `VERDICT:` line (followed by the template's Required Changes, `CHANGES_APPLIED:` and Rebuttals sections). The CLI can read any file in the repo; the change and the files it reads (referenced source, ADRs) go to that provider. On by default; `review.cross_model: false` keeps reviews in-harness.
 
@@ -95,7 +95,8 @@ flowchart LR
 
 | Flow / store | Bound | At the bound | On failure | Who finds out |
 |---|---|---|---|---|
-| PR snapshot | 100 per list (threads, comments per thread, comments, reviews, checks); bodies clipped at 1200 characters | `complete: false`, `truncated: [...]`; watch hands over to the user, and feedback does too unless only `checks` is cut off | `gh` error → non-zero exit | The user, through the hand-over |
+| PR snapshot | 100 per list (threads, comments per thread, comments, reviews, checks) | List overflow sets `complete: false` and `truncated: [...]`; watch hands over to the user, and feedback does too unless only `checks` is cut off | `gh` error → non-zero exit | The user, through the hand-over |
+| PR snapshot bodies | Thread comments clipped at 2500 characters, PR comments and reviews at 1200 | Clipping does not change `complete`; the full body must be fetched before an item is judged, but feedback does not require it (#47) | A finding past the cut can be dropped as non-actionable (#47) | Nobody until a reviewer repeats the finding |
 | Feedback rounds | `pr.max_fix_rounds` (default 2) | `pr.after_limit`: ask, file issues or stop | Store-backed: the pass record resumes an interrupted pass. Repo-local: no record; a pass interrupted after its last fix was pushed ends in "waiting on owner" (#34). A recovered partial fix is counted as an extra round (#29) | The user at the limit; the agent on resume |
 | Watch polling | `pr.poll_interval` (default 5m); reviewer timeout per head (default 20m) | Advisory reviewer stops blocking; required reviewer → ask | Poll error → retry next interval. Gaps: pair readiness does not check that a snapshot matches the current PR head (#31); a cleanup race can delete the newer watcher's token, and that watcher then exits 4 and stops silently (#39) | The agent's watch loop, then the user; nobody in the #39 case |
 | Fully paginated metadata reads (`pr-pair.sh` discovery, linking, recovery; after-limit issue reuse) | None: every page is read and held in memory; issue reuse scans all issues once per finding (F × I) | — | Large histories slow every call and grow memory (#40) | Nobody until a call is slow or fails |
@@ -104,6 +105,7 @@ flowchart LR
 | Design review | Roadmap baseline: at most two rounds; change design review: escalate after 2 consecutive REVISE rounds; one verdict line | REVISE escalates to the user (USER_OVERRIDE) | CLI missing → `specwright-reviewer`; neither → stop | The user |
 | Store gate | One holder (atomic `mkdir`) | Second gate stops and names the owner | Interrupted gate leaves the lock → the user confirms removal | The user |
 | Task commits | One per task | — | A ticked task without a commit is a gap → Reconcile asks | The agent, then the user |
+| Local finish | Archive commit, then merges (store-backed: store, then code) | — | No resume path: re-entry after the archive commit repeats it; after the store merge it reports `Nothing to finish` and leaves the code branch unmerged (#48) | The user, finding the code unmerged |
 
 ## Known gaps
 
@@ -128,10 +130,13 @@ Defects where the code does not yet meet this baseline, found in the baseline re
 | Roadmap init/close write to a store without the branch check or gate lock | #43 |
 | Roadmap writes baseline ADRs as `accepted` before the review gate | #44 |
 | README and `specwright-pr` do not state the Python 3.8+ dependency the scripts enforce | #45 |
+| `pass write` needs Python 3.10+ although the gate accepts 3.8+; unexpected errors escape the JSON contract | #46 |
+| Clipped snapshot bodies can be judged without the full text | #47 |
+| Local finish cannot resume after an interrupted archive commit or store merge | #48 |
 
 ## In-force ADRs
 
-The baseline ADRs below are `proposed` until the baseline review of their final text passes; they are marked `accepted` in the same PR before it merges.
+The baseline ADRs were accepted once the baseline review of their final text passed (round 3, `openspec/architecture-review.md`).
 
 | ADR | Decision | Supersedes |
 |---|---|---|

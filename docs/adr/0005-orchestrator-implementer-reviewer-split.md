@@ -1,6 +1,6 @@
 # 0005. Orchestrator, implementer and reviewer roles
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-09
 - Supersedes: —
 
