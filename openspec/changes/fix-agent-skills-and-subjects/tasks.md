@@ -69,7 +69,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
 
   Verify the four roadmap tests pass and flip their rows green.
 - [x] 4.3 Add D5's rule to `skills/specwright-pr/SKILL.md` feedback: on `docs/project-baseline` or `docs/close-*`, a fix that edits the strategy, architecture or an ADR re-runs the roadmap baseline review before the fix is reported done. Verify `test_baseline_edit_after_pass_reruns_review` and `python -m unittest discover evals/pr-pair` pass, then flip the row green.
-- [ ] 4.4 Update `openspec/architecture.md`: the Design review row in Resource bounds (D5's rule), and the "Gap:" clause of the Architecture file and ADRs row (#44 now fixed). Leave the Known gaps table and accepted ADR files unchanged. Verify with `git diff -- docs/adr` (empty) and a read of the two rows.
+- [x] 4.4 Update `openspec/architecture.md`: the Design review row in Resource bounds (D5's rule), and the "Gap:" clause of the Architecture file and ADRs row (#44 now fixed). Leave the Known gaps table and accepted ADR files unchanged. Verify with `git diff -- docs/adr` (empty) and a read of the two rows.
 
 ## 5. Gap-closing roadmap edit (#50; D6)
 
