@@ -23,8 +23,8 @@ Text checks (`test_instructions.py`) assert where a rule sits in the delivered s
 | project-planning → ADRs stay proposed until the review gate passes | Close supersedes an accepted ADR | evals/git-workflow/test_instructions.py | test_roadmap_close_reviews_superseding_adr | green |
 | project-planning → Baseline review rounds follow the schema's escalation rule | Two consecutive revise verdicts | evals/git-workflow/test_instructions.py | test_roadmap_review_escalates_after_two_consecutive_revise | green |
 | project-planning → Baseline review rounds follow the schema's escalation rule | Edit after a passing verdict | evals/git-workflow/test_instructions.py | test_baseline_edit_after_pass_reruns_review | green |
-| project-planning → Gap-closing roadmap edit is committed on the new change's branch | Criterion fails with no change left | evals/git-workflow/evals.json | eval-roadmap-next-gap | red |
-| project-planning → Gap-closing roadmap edit is committed on the new change's branch | Branch gate stops | evals/git-workflow/evals.json | eval-roadmap-next-gap-dirty-main | red |
+| project-planning → Gap-closing roadmap edit is committed on the new change's branch | Criterion fails with no change left | evals/git-workflow/evals.json | eval-roadmap-next-gap | green |
+| project-planning → Gap-closing roadmap edit is committed on the new change's branch | Branch gate stops | evals/git-workflow/evals.json | eval-roadmap-next-gap-dirty-main | green |
 | planning-stores → Roadmap branches in a store go through the gate lock | Store is free | evals/git-workflow/test_instructions.py | test_roadmap_store_branch_under_gate_lock | green |
 | planning-stores → Roadmap branches in a store go through the gate lock | Another session holds the lock | evals/git-workflow/evals.json | eval-store-roadmap-close-locked | green |
 | planning-stores → Roadmap store writes check the branch | Store stays on the roadmap branch | evals/git-workflow/test_instructions.py | test_roadmap_store_commits_check_branch_in_same_call | green |
@@ -79,7 +79,7 @@ Text checks prove the rule is in the instructions, not that a live agent follows
   - the change directory exists.
 
   Grade (dirty main): the roadmap file is unchanged and no roadmap commit exists on any branch. Verify a run against the current skill fails the clean-main case.
-- [ ] 5.2 Update roadmap **next** steps 3 and 4 per D6: propose without editing; after `specwright-branch` creates the branch, add the entry and commit only the roadmap file as `docs(<change-name>): add <change-name> to the roadmap` (store-backed: with D3's branch check), then continue propose. Verify both evals pass and flip both rows green.
+- [x] 5.2 Update roadmap **next** steps 3 and 4 per D6: propose without editing; after `specwright-branch` creates the branch, add the entry and commit only the roadmap file as `docs(<change-name>): add <change-name> to the roadmap` (store-backed: with D3's branch check), then continue propose. Verify both evals pass and flip both rows green.
 - [ ] 5.3 Update `openspec/architecture.md`'s Strategy and roadmap ownership row: replace the #50 "Gap:" clause with the new behavior. Note in the commit body that D6 commits after the branch gate, not before it as the roadmap entry phrased it. Verify by reading the row; `git diff -- docs/adr` stays empty.
 
 ## 6. PR script runtime and prerequisites (#45, #46; D7, D8)
