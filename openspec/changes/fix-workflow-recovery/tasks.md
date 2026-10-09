@@ -191,7 +191,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
 ## 8. Release 0.1.10 and integration
 
-- [ ] 8.1 Set `VERSION`, the README badge and `metadata.version` in all six `skills/*/SKILL.md` to 0.1.10. Verify with `grep -rn "0\.1\.9" VERSION README.md skills/*/SKILL.md` (no hits) and `grep -c "0\.1\.10"` on each.
+- [x] 8.1 Set `VERSION`, the README badge and `metadata.version` in all six `skills/*/SKILL.md` to 0.1.10. Verify with `grep -rn "0\.1\.9" VERSION README.md skills/*/SKILL.md` (no hits) and `grep -c "0\.1\.10"` on each.
 - [ ] 8.2 Run the full checks:
   - `python -m unittest discover evals/pr-pair` (including the Python 3.8 test via `uv python find 3.8`);
   - `python -m unittest discover evals/git-workflow -p "test_*.py"`;
