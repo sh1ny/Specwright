@@ -237,6 +237,8 @@ class PlanningStores(unittest.TestCase):
         self.assertRegex(branch, r"(?s)(?i)(fails|errors).{0,200}(switch|checkout).{0,80}store.{0,120}(delete|branch -D)",
                          "a failed code branch does not roll the store branch back")
         self.assertRegex(branch, r"(?i)releas", "the rollback does not release the lock")
+        self.assertRegex(branch, r"(?s)(?i)store's `git checkout -b` errors.{0,120}releas",
+                         "an error creating the store branch does not release the lock")
 
     def test_roadmap_store_commits_check_branch_in_same_call(self):
         s = store_part(committing_project_files())

@@ -115,6 +115,11 @@ class FitSubject(unittest.TestCase):
         self.assertLessEqual(len(short), LIMIT)
         self.assertGreater(len(short.encode("utf-8")), LIMIT)
         long = prefix + " ".join(["café"] * 12)  # 88 characters
+        # The only cut that fits is one multibyte word: 69 characters, 109 bytes. Byte counting would exit 1.
+        one_word = prefix + "é" * 40
+        self.assertLessEqual(len(one_word), LIMIT)
+        self.assertGreater(len(one_word.encode("utf-8")), LIMIT)
+        one_word_long = one_word + " and more words past the limit"
         for loc in ("C", "C.UTF-8", "en_US.UTF-8"):
             with self.subTest(locale=loc):
                 env = {**os.environ, "LC_ALL": loc}
@@ -127,6 +132,10 @@ class FitSubject(unittest.TestCase):
                 r = subprocess.run(["bash", str(SCRIPT), str(msg)], capture_output=True, cwd=self.tmp, env=env)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 self.assert_fitted(long, msg.read_bytes().decode("utf-8").split("\n", 1)[0])
+                msg = self.message(one_word_long + "\n")
+                r = subprocess.run(["bash", str(SCRIPT), str(msg)], capture_output=True, cwd=self.tmp, env=env)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(msg.read_bytes().decode("utf-8").split("\n", 1)[0], one_word)
 
 
 if __name__ == "__main__":
