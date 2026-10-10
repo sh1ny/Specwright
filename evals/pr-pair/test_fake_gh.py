@@ -9,12 +9,17 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import importlib.util
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 GH = HERE.parent / "fakes" / "gh.py"
 sys.path.insert(0, str(HERE.parent / "git-workflow"))
 import fixtures  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("fake_gh", GH)
+fake_gh = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fake_gh)
 
 
 class FakeGhCase(unittest.TestCase):
@@ -165,6 +170,208 @@ class LogAndFailures(FakeGhCase):
         r = self.gh("release", "list", check=False)
         self.assertEqual(r.returncode, 2)
         self.assertIn("unsupported", r.stderr)
+
+
+class ReactionsAndGraphql(FakeGhCase):
+    GQL_REACTIONS = ("query($id: ID!, $cursor: String) { node(id: $id) { ... on Reactable { "
+                     "reactions(first: 100, content: %s, after: $cursor) { nodes { user { login } } "
+                     "pageInfo { hasNextPage endCursor } } } } }")
+    GQL_PR = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
+              "defaultBranchRef { name } pullRequest(number: $number) { body baseRefName "
+              "closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } "
+              "pageInfo { hasNextPage } } } } }")
+
+    def seeded(self):
+        st = self.st()
+        st["repos"] = {"o/n": {"pulls": [self.pull(7, "b7")]}}
+        return st
+
+    def paginated(self, out):
+        dec, i, pages = json.JSONDecoder(), 0, []
+        while i < len(out):
+            obj, j = dec.raw_decode(out, i)
+            pages.append(obj)
+            i = j
+            while i < len(out) and out[i].isspace():
+                i += 1
+        return pages
+
+    def test_rest_review_comment_reactions_filter_and_paginate(self):
+        st = self.seeded()
+        for i in range(35):
+            fake_gh.add_review_comment_reaction(st, "o/n", 55, f"u{i}", "+1")
+        fake_gh.add_review_comment_reaction(st, "o/n", 55, "down", "-1")
+        fake_gh.add_review_comment_reaction(st, "o/n", 56, "other", "+1")
+        self.seed(st)
+        first = json.loads(self.gh("api", "repos/o/n/pulls/comments/55/reactions").stdout)
+        self.assertEqual(len(first), 30)
+        self.assertEqual(first[0], {"user": {"login": "u0"}, "content": "+1"})
+        pages = self.paginated(self.gh("api", "--paginate", "repos/o/n/pulls/comments/55/reactions").stdout)
+        self.assertEqual([len(p) for p in pages], [30, 6])
+        down = json.loads(self.gh("api", "repos/o/n/pulls/comments/55/reactions?content=-1").stdout)
+        self.assertEqual([r["user"]["login"] for r in down], ["down"])
+        self.assertEqual(self.gh("api", "repos/o/n/pulls/comments/99/reactions").stdout.strip(), "[]")
+
+    def test_graphql_node_reactions_paged(self):
+        st = self.seeded()
+        st["graphql_page_size"] = 2
+        for login in ("a", "b", "c"):
+            fake_gh.add_node_reaction(st, "o/n", "NODE1", login, "THUMBS_UP")
+        fake_gh.add_node_reaction(st, "o/n", "NODE1", "d", "THUMBS_DOWN")
+        self.seed(st)
+        r1 = json.loads(self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_UP", "-f", "id=NODE1").stdout)
+        rx = r1["data"]["node"]["reactions"]
+        self.assertEqual([n["user"]["login"] for n in rx["nodes"]], ["a", "b"])
+        self.assertTrue(rx["pageInfo"]["hasNextPage"])
+        r2 = json.loads(self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_UP", "-f", "id=NODE1",
+                                "-f", "cursor=" + rx["pageInfo"]["endCursor"]).stdout)
+        rx2 = r2["data"]["node"]["reactions"]
+        self.assertEqual([n["user"]["login"] for n in rx2["nodes"]], ["c"])
+        self.assertEqual(rx2["pageInfo"], {"hasNextPage": False, "endCursor": None})
+        down = json.loads(self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_DOWN", "-f", "id=NODE1").stdout)
+        self.assertEqual([n["user"]["login"] for n in down["data"]["node"]["reactions"]["nodes"]], ["d"])
+        none = json.loads(self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_UP", "-f", "id=NOPE").stdout)
+        self.assertIsNone(none["data"]["node"])
+
+    def node_query(self, node="NODE1", env=None, check=True):
+        return self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_UP", "-f", "id=" + node, env=env, check=check)
+
+    def test_graphql_node_reactions_check_credentials(self):
+        st = self.seeded()
+        st["tokens"] = {"KintsugiBot": "tok-k"}
+        fake_gh.add_node_reaction(st, "o/n", "NODE1", "a", "THUMBS_UP")
+        self.seed(st)
+        other = self.gh("api", "user", env={"GH_TOKEN": "bogus"}, check=False)  # the failure every credentialed read gives
+        self.assertEqual(other.returncode, 1)
+        for node in ("NODE1", "NOPE"):  # credentials are checked before the node is looked up
+            r = self.node_query(node, env={"GH_TOKEN": "bogus"}, check=False)
+            self.assertEqual((r.returncode, r.stdout), (other.returncode, ""), f"a bad token read node {node}: {r.stdout}")
+            self.assertEqual(r.stderr, other.stderr, "a bad token fails differently from the other reads")
+        self.assertEqual(json.loads(self.node_query(env={"GH_TOKEN": "tok-k"}).stdout)["data"]["node"]["reactions"]["nodes"],
+                         [{"user": {"login": "a"}}])
+
+    def test_graphql_node_reactions_apply_the_reader_check(self):
+        st = self.seeded()
+        st["repos"]["o/n"]["readers"] = ["sh1ny"]  # the default user is KintsugiBot
+        fake_gh.add_node_reaction(st, "o/n", "NODE1", "a", "THUMBS_UP")
+        self.seed(st)
+        r = self.node_query(check=False)
+        self.assertEqual(r.returncode, 1, f"GraphQL answered a login that cannot read the node's repository: {r.stdout}")
+        self.assertIn("Could not resolve", r.stderr)
+        self.assertEqual(self.node_query("NOPE", check=False).stdout.strip().count("reactions"), 0)
+        st["user"] = "sh1ny"
+        self.seed(st)
+        self.assertEqual(json.loads(self.node_query().stdout)["data"]["node"]["reactions"]["nodes"], [{"user": {"login": "a"}}])
+
+    def test_graphql_pr_closing_refs_and_default_branch(self):
+        st = self.seeded()
+        st["repos"]["o/n"]["pulls"][0]["body"] = "Fixes #3"
+        fake_gh.set_default_branch(st, "o/n", "trunk")
+        fake_gh.set_closing_refs(st, "o/n", 7, [(3, "o/n"), (4, "x/y")], has_next=True)
+        self.seed(st)
+        args = ("api", "graphql", "-f", "query=" + self.GQL_PR, "-f", "owner=o", "-f", "name=n", "-F", "number=7")
+        repo = json.loads(self.gh(*args).stdout)["data"]["repository"]
+        self.assertEqual(repo["defaultBranchRef"], {"name": "trunk"})
+        pr = repo["pullRequest"]
+        self.assertEqual((pr["body"], pr["baseRefName"]), ("Fixes #3", "main"))
+        self.assertEqual(pr["closingIssuesReferences"], {
+            "nodes": [{"number": 3, "repository": {"nameWithOwner": "o/n"}},
+                      {"number": 4, "repository": {"nameWithOwner": "x/y"}}],
+            "pageInfo": {"hasNextPage": True}})
+        fake_gh.set_closing_refs(st, "o/n", 7, [], has_next=False)
+        self.seed(st)
+        pr = json.loads(self.gh(*args).stdout)["data"]["repository"]["pullRequest"]
+        self.assertEqual(pr["closingIssuesReferences"], {"nodes": [], "pageInfo": {"hasNextPage": False}})
+
+    def test_graphql_repository_applies_the_reader_check(self):
+        st = self.seeded()
+        st["repos"]["o/n"]["readers"] = ["sh1ny"]  # the default user is KintsugiBot
+        self.seed(st)
+        args = ("api", "graphql", "-f", "query=" + self.GQL_PR, "-f", "owner=o", "-f", "name=n", "-F", "number=7")
+        rest = self.gh("api", "repos/o/n/pulls", check=False)
+        self.assertEqual(rest.returncode, 1, "the REST path rejects a login that cannot read the repository")
+        r = self.gh(*args, check=False)
+        self.assertEqual(r.returncode, 1, f"GraphQL answered a login that cannot read the repository: {r.stdout}")
+        self.assertIn("Could not resolve to a Repository", r.stderr)
+        st["user"] = "sh1ny"
+        self.seed(st)
+        self.assertEqual(self.gh(*args).returncode, 0)
+
+    def test_graphql_reports_has_next_page_when_more_than_100_refs_are_seeded(self):
+        st = self.seeded()
+        fake_gh.set_closing_refs(st, "o/n", 7, [(n, "o/n") for n in range(1, 102)], has_next=False)  # no explicit flag
+        self.seed(st)
+        args = ("api", "graphql", "-f", "query=" + self.GQL_PR, "-f", "owner=o", "-f", "name=n", "-F", "number=7")
+        refs = json.loads(self.gh(*args).stdout)["data"]["repository"]["pullRequest"]["closingIssuesReferences"]
+        self.assertEqual(len(refs["nodes"]), 100)
+        self.assertTrue(refs["pageInfo"]["hasNextPage"])
+        fake_gh.set_closing_refs(st, "o/n", 7, [(n, "o/n") for n in range(1, 101)], has_next=False)
+        self.seed(st)
+        refs = json.loads(self.gh(*args).stdout)["data"]["repository"]["pullRequest"]["closingIssuesReferences"]
+        self.assertEqual((len(refs["nodes"]), refs["pageInfo"]["hasNextPage"]), (100, False))
+
+    GQL_CLOSED_PR = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
+                     "defaultBranchRef { name } pullRequest(number: $number) { state url body baseRefName mergedAt } } }")
+    GQL_ISSUE = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
+                 "issue(number: $number) { state timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) "
+                 "{ nodes { ... on ClosedEvent { createdAt } } } } } }")
+
+    def gql(self, query, owner, name, number, check=True):
+        return self.gh("api", "graphql", "-f", "query=" + query, "-f", f"owner={owner}", "-f", f"name={name}",
+                       "-F", f"number={number}", check=check)
+
+    def test_graphql_pr_state_and_url(self):
+        st = self.seeded()
+        st["repos"]["o/n"]["pulls"] += [self.pull(8, "b8", state="closed"), self.pull(9, "b9", state="closed", merged="2026-10-08T10:00:00Z")]
+        self.seed(st)
+        got = {n: json.loads(self.gql(self.GQL_CLOSED_PR, "o", "n", n).stdout)["data"]["repository"]["pullRequest"] for n in (7, 8, 9)}
+        self.assertEqual([got[n]["state"] for n in (7, 8, 9)], ["OPEN", "CLOSED", "MERGED"])
+        self.assertEqual(got[9]["url"], "https://github.com/o/n/pull/9")
+        self.assertEqual(got[9]["baseRefName"], "main")
+        self.assertEqual((got[7]["mergedAt"], got[9]["mergedAt"]), (None, "2026-10-08T10:00:00Z"))
+
+    def test_graphql_issue_state_and_close_history(self):
+        st = self.seeded()
+        fake_gh.set_issue(st, "o/n", 1, "OPEN")
+        fake_gh.set_issue(st, "o/n", 2, "CLOSED", ["CLOSED"])
+        fake_gh.set_issue(st, "o/n", 3, "OPEN", [("CLOSED", "2026-10-01T00:00:00Z"), "REOPENED", ("CLOSED", "2026-10-05T00:00:00Z"),
+                                                 "REOPENED"])
+        self.seed(st)
+        got = {n: json.loads(self.gql(self.GQL_ISSUE, "o", "n", n).stdout)["data"]["repository"]["issue"] for n in (1, 2, 3)}
+        self.assertEqual(got[1], {"state": "OPEN", "timelineItems": {"nodes": []}})
+        self.assertEqual(got[2], {"state": "CLOSED", "timelineItems": {"nodes": [{"createdAt": fake_gh.CLOSE_AT}]}})
+        self.assertEqual(got[3], {"state": "OPEN", "timelineItems": {"nodes": [{"createdAt": "2026-10-05T00:00:00Z"}]}},
+                         "only the last ClosedEvent is returned")
+
+    def test_graphql_unknown_issue_and_reader_check(self):
+        st = self.seeded()
+        fake_gh.set_issue(st, "o/n", 1, "OPEN")
+        st["repos"]["o/n"]["readers"] = ["sh1ny"]
+        self.seed(st)
+        r = self.gql(self.GQL_ISSUE, "o", "n", 1, check=False)
+        self.assertEqual(r.returncode, 1, "an issue read applies the same reader check")
+        st["repos"]["o/n"].pop("readers")
+        self.seed(st)
+        r = self.gql(self.GQL_ISSUE, "o", "n", 99, check=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Could not resolve to an Issue", r.stderr)
+
+    def test_graphql_unknown_query_exits_2(self):
+        r = self.gh("api", "graphql", "-f", "query={ viewer { login } }", check=False)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("unsupported", r.stderr)
+
+    def test_failure_injection_on_new_endpoints(self):
+        st = self.seeded()
+        fake_gh.add_review_comment_reaction(st, "o/n", 55, "u", "+1")
+        st["fail"] = [{"match": r"reactions$|pulls/comments/55/reactions", "exit": 3, "stderr": "rest boom"},
+                      {"match": r"graphql", "exit": 5, "stderr": "gql boom"}]
+        self.seed(st)
+        r = self.gh("api", "repos/o/n/pulls/comments/55/reactions", check=False)
+        self.assertEqual((r.returncode, r.stderr.strip()), (3, "rest boom"))
+        for q in (self.GQL_REACTIONS % "THUMBS_UP", self.GQL_PR):
+            r = self.gh("api", "graphql", "-f", "query=" + q, "-f", "id=N", check=False)
+            self.assertEqual((r.returncode, r.stderr.strip()), (5, "gql boom"))
 
 
 @unittest.skipUnless(shutil.which("sh"), "needs sh")

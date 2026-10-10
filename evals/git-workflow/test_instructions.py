@@ -354,5 +354,152 @@ class PrScriptRuntime(unittest.TestCase):
         self.assertRegex(s8 or "", r"PR workflow not ready: <missing>", "Step 8 does not report `PR workflow not ready: <missing>`")
 
 
+FINISH = ROOT / "skills" / "specwright-finish" / "SKILL.md"
+
+
+def resume_section():
+    s = section(read(FINISH), r"Resume\b")
+    assert s, "specwright-finish SKILL.md has no ## Resume section"
+    return s
+
+
+def resume_row(s, facts):
+    """The next-step table row whose first cell is `facts`, as its second cell; '' when there is none."""
+    m = re.search(r"^\|\s*" + facts + r"\s*\|(.*)\|\s*$", s, re.M)
+    return m.group(1) if m else ""
+
+
+class ChangeFinishResume(unittest.TestCase):
+    def test_finish_resume_deletes_a_merged_branch_without_merging(self):
+        text, s = read(FINISH), resume_section()
+        self.assertLess(text.index("## Resume"), text.index("1. **Branch:**"), "Resume does not sit before the normal steps")
+        for fact in ("A", "M", "B"):
+            self.assertRegex(s, r"\*\*%s\*\*" % fact, f"Resume does not define fact {fact}")
+        self.assertRegex(s, r"git log --first-parent --format=%s <main>", "M is not read from main's first-parent history")
+        self.assertRegex(s, r"merge: <change-name>", "M does not name the exact merge subject")
+        row = resume_row(s, "M and B")
+        self.assertRegex(row, r"git branch -d", "M and B does not delete the branch with -d")
+        self.assertRegex(row, r"(?i)no (new )?merge", "M and B may merge again")
+        self.assertTrue(resume_row(s, "M, not B"), "no row for a repo that is done (M, not B)")
+
+    def test_resume_checks_out_main_before_deleting(self):
+        s = resume_section()
+        rows = (("M and B", resume_row(s, "M and B")),
+                ("store done; code branch without commits", resume_row(s, r"store done[^|]*code branch without commits[^|]*")))
+        for name, row in rows:
+            self.assertTrue(row, f"no Resume row for {name}")
+            self.assertRegex(row, r"git checkout <main> && git branch -d <branch>",
+                             f"the {name} row deletes the branch without checking out <main> first (it may be the checked-out branch)")
+
+    def test_resume_merge_requires_branch_tip_on_main(self):
+        s = resume_section()
+        m = re.search(r"\*\*M\*\*[^\n]*", s)
+        self.assertTrue(m, "Resume does not define fact M")
+        fact = m.group(0)
+        self.assertIn("git merge-base --is-ancestor <branch> <main>", fact,
+                      "M does not require the branch tip to be on main, so an archive-recovery branch made after the merge counts as merged")
+        self.assertRegex(fact, r"(?i)\bB\b|exists", "the tip check is not limited to a branch that exists")
+
+    def test_finish_resume_pr_mode_ships_without_a_second_archive_commit(self):
+        s = resume_section()
+        self.assertRegex(s, r"(?i)never repeat|not repeat", "Resume does not forbid repeating a done step")
+        row = resume_row(s, r"`pr`, A on branch[^|]*")
+        self.assertRegex(row, r"(?i)\bship\b", "pr mode with A on the branch does not go to ship")
+        self.assertRegex(row, r"(?i)idempotent", "the ship row does not say push and PR are idempotent")
+        self.assertNotRegex(row, r"(?i)archive commit", "the pr row repeats the archive commit")
+        merged = resume_row(s, r"`pr`, [^|]*PR merged[^|]*")
+        self.assertRegex(merged, r"After the PR is merged", "a merged PR does not go to the cleanup")
+        self.assertRegex(merged, r"(?i)not ship", "a merged PR may be shipped again")
+
+    def test_resume_pr_mode_keeps_an_open_code_pr(self):
+        s = resume_section()
+        local = resume_row(s, r"store done[^|]*code branch with commits[^|]*")
+        self.assertRegex(s, r"(?m)^\|\s*store done[^|]*code branch with commits[^|]*`local`", "the code-merge row is not restricted to local mode")
+        self.assertRegex(local, r"(?i)code merge", "the local row no longer merges the code branch")
+        open_pr = resume_row(s, r"`pr`, store done[^|]*code branch with commits[^|]*(?:no PR|open PR)[^|]*")
+        self.assertTrue(open_pr, "no pr-mode row for a store done, code branch with commits, no PR or an open PR")
+        self.assertRegex(open_pr, r"## pr", "the open-PR row does not go to `## pr` ship")
+        self.assertRegex(open_pr, r"(?i)\bship\b", "the open-PR row does not ship")
+        self.assertRegex(open_pr, r"(?i)merge nothing|no merge|not merge", "the open-PR row may merge the code branch")
+        self.assertRegex(open_pr, r"(?i)delete nothing|no delet|not delete", "the open-PR row may delete the code branch")
+        closed = resume_row(s, r"`pr`, store done[^|]*code branch with commits[^|]*closed[^|]*")
+        self.assertTrue(closed, "no pr-mode row for a code PR closed unmerged")
+        self.assertRegex(closed, r"(?i)\breport\b.*\bask\b", "the closed-PR row does not report and ask")
+        self.assertRegex(closed, r"(?i)merge nothing|no merge|not merge", "the closed-PR row may merge")
+        self.assertRegex(closed, r"(?i)delete nothing|no delet|not delete", "the closed-PR row may delete the branch")
+
+    def test_finish_resume_stops_on_dirty_archive_paths(self):
+        s = resume_section()
+        block = find_block(s, r"git status --porcelain", r"<P>/changes/<change-name>/", r"archive directory", r"\bstop\b")
+        self.assertTrue(block, "Resume does not stop on uncommitted changes under the change or archive directory")
+        self.assertRegex(block, r"(?i)\blist", "the stop does not list the files")
+        self.assertRegex(block, r"(?i)\bask\b", "the stop does not ask the user")
+        self.assertNotRegex(s, r"(?i)planning-only marker.{0,80}(write|add)s? ", "Resume writes the planning-only marker")
+
+    def test_finish_resume_reports_nothing_to_finish_only_when_all_done(self):
+        text, s = read(FINISH), resume_section()
+        block = find_block(s, r"Nothing to finish")
+        self.assertTrue(block, "Resume never reports Nothing to finish")
+        self.assertRegex(block, r"(?i)only when every repo", "Nothing to finish is not limited to every repo being done")
+        rest = text.replace(s, "")
+        line = next((l for l in rest.splitlines() if "Nothing to finish" in l), "")
+        self.assertRegex(line, r"(?i)resume|every repo", "step 1 still reports Nothing to finish without checking every repo")
+        self.assertTrue(resume_row(s, r"store done[^|]*code branch with commits[^|]*"), "no row for a store done and the code merge pending")
+
+    def test_resume_runs_the_planning_only_test_before_the_archive_commit(self):
+        text, s = read(FINISH), resume_section()
+        self.assertRegex(s, r"(?i)top to bottom", "Resume does not say the rows are checked top to bottom")
+        self.assertRegex(s, r"(?i)first match wins", "Resume does not say the first matching row wins")
+        row = resume_row(s, r"archive paths uncommitted, no A")
+        self.assertTrue(row, "no Resume row for archive paths uncommitted and no A")
+        self.assertRegex(row, r"steps 1-3 in order", "the no-A row does not run steps 1-3 in order")
+        self.assertRegex(row, r"(?is)planning-only test.*archive commit", "the no-A row does not run the planning-only test before the archive commit")
+        self.assertLess(s.index("archive paths uncommitted, no A"), s.index("| A on branch, not M"), "the no-A row is not the first row")
+        self.assertNotIn("step 3, as today", s, "the no-A row still skips the planning-only test")
+        self.assertNotRegex(text, r"A resume writes no planning-only marker", "the old no-marker sentence contradicts the no-A row")
+        self.assertRegex(s, r"(?i)once A exists, a resume never writes the marker", "a resume that finds A may write the marker")
+
+    def test_resume_planning_only_finished_is_done(self):
+        s = resume_section()
+        done = resume_row(s, r"code repo with no A, M or B[^|]*`code_changes: none`[^|]*")
+        self.assertTrue(done, "no Resume row for a code repo with no A, M or B beside a finished store whose archive is marked planning-only")
+        self.assertRegex(done, r"(?i)\bdone\b", "the planning-only row does not finish the code repo")
+        ask = resume_row(s, r"code repo with no A, M or B[^|]*no such marker[^|]*")
+        self.assertTrue(ask, "no Resume row for a code repo with no A, M or B and no planning-only marker")
+        self.assertRegex(ask, r"(?i)\breport\b.*\bask\b", "without the marker the row does not report and ask")
+        self.assertLess(s.index("`code_changes: none`"), s.index("no such marker"), "the marker row is not checked before the ask row")
+        self.assertIn("git show --name-only --format= <A>", s, "the marker path is not read from the store's A")
+        self.assertRegex(s, r"git show <main>:<", "the marker is not read from <main>")
+        self.assertIn(r"^code_changes:\s*none\s*$", s, "the marker test is not the one find_marker uses")
+
+    def test_resume_store_only_recovery_leaves_the_code_repo(self):
+        text, s = read(FINISH), resume_section()
+        row = resume_row(s, r"code repo, [^|]*`Archive-Scope: store-only`[^|]*")
+        self.assertTrue(row, "no Resume row for a store archive marked Archive-Scope: store-only")
+        self.assertRegex(row, r"(?i)\breport\b", "the store-only row does not report the code branch's state")
+        self.assertRegex(row, r"(?i)touch nothing", "the store-only row may touch the code repo")
+        self.assertRegex(row, r"(?i)\bdone\b", "the store-only row does not count as done")
+        bullet = find_block(s, r"Archive-Scope: store-only", r"Nothing to finish", r"touches? nothing|no code merge")
+        self.assertTrue(bullet, "Resume never says a store-only archive counts as done for Nothing to finish")
+        self.assertLess(s.index("`Archive-Scope: store-only`"), s.index("| M and B"), "the store-only row is not above M and B")
+        self.assertIn("git log -1 --format=%B <A>", s, "Resume does not read the marker from the newest store A's body")
+        steps = text[text.index("1. **Branch:**"):text.index("\n## local\n")]
+        step1 = steps[:steps.index("2. **Planning-only test**")]
+        step3 = steps[steps.index("3. **Archive commit**"):steps.index("4. **Finish**")]
+        self.assertIn("Archive-Scope: store-only", step1, "step 1's store-backed recovery does not mention the marker line")
+        self.assertRegex(step3, r"Archive-Scope: store-only", "step 3 never writes the marker line")
+        self.assertRegex(step3, r"(?is)store-backed.*chore/archive-<change-name>.*Archive-Scope: store-only|"
+                                r"Archive-Scope: store-only.*store-backed.*chore/archive-<change-name>",
+                         "step 3 does not tie the marker line to a store-backed change on the recovery branch")
+
+    def test_finish_resume_reports_no_archive_found(self):
+        s = resume_section()
+        block = find_block(s, r"no archive of", r"(?i)do nothing|no commit")
+        self.assertTrue(block, "Resume does not report that no archive of the change was found")
+        self.assertRegex(block, r"(?i)none of|no fact|not found", "the no-archive report is not tied to finding no fact")
+        self.assertRegex(s, r"\^\[a-z\]\+\\\(<change-name>\\\): archive change\$", "the archive subject regex is missing")
+        self.assertRegex(s, r"chore/archive-<change-name>.{0,120}\*/<change-name>", "the branch lookup lacks the recovery and glob fallbacks")
+
+
 if __name__ == "__main__":
     unittest.main()

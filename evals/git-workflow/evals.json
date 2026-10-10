@@ -745,6 +745,79 @@
         "main is unchanged and the README edit is still uncommitted",
         "No commit was amended"
       ]
+    },
+    {
+      "id": 43,
+      "name": "eval-finish-resume-after-archive-commit",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "An earlier attempt to finish add-greeting was interrupted. Finish add-greeting.",
+      "expected_output": "Repo-local, finish: local. The archive is already committed on feat/add-greeting and the branch is not merged: makes no second archive commit, merges the branch into main with --no-ff as merge: add-greeting, deletes the branch with -d and pushes nothing.",
+      "assertions": [
+        "Exactly one archive commit feat(add-greeting): archive change exists, the one the earlier attempt made",
+        "main has exactly one merge: add-greeting commit with two parents, at its HEAD",
+        "Branch feat/add-greeting was deleted and the repo is on main",
+        "Nothing was pushed: the repo has no remote and no gh call was made",
+        "Working tree is clean",
+        "No commit was amended",
+        "Only the code repo changed"
+      ]
+    },
+    {
+      "id": 44,
+      "name": "eval-store-finish-resume-code-merge",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "An earlier attempt to finish add-greeting was interrupted. Finish add-greeting.",
+      "expected_output": "Store-backed, finish: local. The store's main already has merge: add-greeting and its branch is deleted; the code branch has commits and code main has no merge: does not report Nothing to finish, makes no store commit or merge, merges the code branch into code main as merge: add-greeting and deletes it.",
+      "assertions": [
+        "The store gets no new commit: its history and main are exactly as the fixture left them, with one archive commit",
+        "The code repo's main HEAD is a merge commit with two parents and subject merge: add-greeting",
+        "The code branch feat/add-greeting was deleted and the code repo is on main with only main left",
+        "The code repo's main tree equals the code branch's tip tree, so the merge kept the code",
+        "Both working trees are clean",
+        "The report does not say Nothing to finish",
+        "No commit was amended in either repo"
+      ]
+    },
+    {
+      "id": 45,
+      "name": "eval-finish-resume-from-main",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "An earlier attempt to finish add-greeting was interrupted. Finish add-greeting.",
+      "expected_output": "Repo-local, finish: local, HEAD on main (the old step 1 would report Nothing to finish). The archive is already committed on feat/add-greeting and the branch is not merged: makes no second archive commit, merges the branch into main with --no-ff as merge: add-greeting, deletes the branch with -d and pushes nothing.",
+      "assertions": [
+        "Exactly one archive commit feat(add-greeting): archive change exists, the one the earlier attempt made",
+        "main has exactly one merge: add-greeting commit with two parents, at its HEAD",
+        "Branch feat/add-greeting was deleted and the repo is on main",
+        "Nothing was pushed: the repo has no remote and no gh call was made",
+        "Working tree is clean",
+        "The report does not say Nothing to finish",
+        "No commit was amended",
+        "Only the code repo changed"
+      ]
+    },
+    {
+      "id": 46,
+      "name": "eval-store-finish-resume-code-merge-from-main",
+      "skills": [
+        "specwright-finish"
+      ],
+      "prompt": "An earlier attempt to finish add-greeting was interrupted. Finish add-greeting.",
+      "expected_output": "Store-backed, finish: local, the code repo's HEAD on main. The store's main already has merge: add-greeting and its branch is deleted; the code branch has commits and code main has no merge: does not report Nothing to finish, makes no store commit or merge, merges the code branch into code main as merge: add-greeting and deletes it.",
+      "assertions": [
+        "The store gets no new commit: its history and main are exactly as the fixture left them, with one archive commit",
+        "The code repo's main HEAD is a merge commit with two parents and subject merge: add-greeting",
+        "The code branch feat/add-greeting was deleted and the code repo is on main with only main left",
+        "The code repo's main tree equals the code branch's tip tree, so the merge kept the code",
+        "Both working trees are clean",
+        "The report does not say Nothing to finish",
+        "No commit was amended in either repo"
+      ]
     }
   ]
 }

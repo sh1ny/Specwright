@@ -96,6 +96,209 @@ class SkillText(unittest.TestCase):
         self.assertLess(positions(sub("pass\\s+plan"), fb)[0], positions(sub("pass\\s+done"), fb)[0],
                         "`pass done` comes before `pass plan`")
         self.assertLess(positions(sub("rounds"), fb)[0], w, "`rounds` should be read before the pass record is written")
+        # the `resume` bullet of step 2 runs the rows the plan reads from GitHub: reactions (#25) and the pair link (#30)
+        resume = next((l for l in fb.splitlines() if l.lstrip().startswith("- `resume`")), "")
+        self.assertTrue(resume, "feedback step 2 has no `resume` bullet")
+        self.assertRegex(resume, r"`todo` `?react`? rows?[^.;]*pr-reply\.sh[^.;]*react",
+                         "`resume` does not run `todo` react rows with `pr-reply.sh react`")
+        self.assertRegex(resume, r"ship step 5[^.;]*`link` row", "`resume` does not run ship step 5 for a `todo` link row")
+        for token in ("code.url", "store.url", "--peer-url"):
+            self.assertIn(token, resume, f"`resume` does not pass the link row's {token}")
+        self.assertLess(resume.index("react"), resume.rindex("plan again"), "`resume` does not plan again after the react and link rows")
+        self.assertNotRegex(TEXT, r"(?<!gh run )\brerun\b", "SKILL.md still mentions the removed `rerun` reaction state")  # `gh run rerun` is unrelated
+
+    def test_feedback_uses_pass_record_for_repo_local(self):
+        # a repo-local change (no store) uses the same pass record and rounds, with `--store` left out
+        repos = self.section("the repos and prs of a change")
+        local = next((l for l in repos.splitlines() if l.lstrip("- ").startswith("**Repo-local changes**")), "")
+        self.assertTrue(local, "the repos section has no repo-local bullet")
+        tail = local.rpartition(";")[2]  # the list of subcommands for store-backed changes only
+        for sub_name in ("expected", "pair-state", "cleanup-plan"):
+            self.assertIn(f"`{sub_name}`", tail, f"the store-backed-only list does not name `{sub_name}`: {local!r}")
+        for sub_name in ("pass", "rounds"):
+            self.assertNotIn(f"`{sub_name}`", tail, f"`{sub_name}` is still listed as store-backed only: {local!r}")
+        fb = self.section("feedback")
+        steps = {int(m.group(1)): fb[m.start():(nxt.start() if (nxt := re.compile(r"^\d+\. ", re.M).search(fb, m.end())) else len(fb))]
+                 for m in re.finditer(r"^(\d+)\. ", fb, re.M)}
+        for n in (2, 3, 6, 10):
+            self.assertIn(n, steps, f"feedback has no step {n}")
+            self.assertRegex(steps[n], r"[Rr]epo-local[^\n]{0,120}without\s+`--store`",
+                             f"feedback step {n} does not run its pass/rounds call for repo-local changes without `--store`")
+        for n in (2, 6):
+            self.assertNotIn("(store-backed)", steps[n], f"feedback step {n} is still store-backed only")
+        self.assertFalse(steps[10].startswith("10. Store-backed"), "feedback step 10 is still store-backed only")
+        self.assertNotIn("repo-local the trailers in `git log", steps[3], "step 3 still reads repo-local rounds from git log by hand")
+
+    def test_feedback_asks_before_adopting_a_foreign_record(self):
+        fb = self.section("feedback")
+        plan, adopt, done = (positions(sub("pass\\s+" + v), fb) for v in ("plan", "adopt", "done"))
+        self.assertTrue(adopt, "the feedback section never runs `pr-pair.sh pass adopt`")
+        w = positions(sub("pass\\s+write"), fb)[0]
+        for name, at in (("plan", plan[0]), ("done", done[0]), ("adopt", adopt[0])):
+            self.assertIn("--owner", fb[at:fb.index("`", at)], f"`pass {name}` is not given `--owner`")
+        self.assertLess(plan[0], adopt[0], "`pass adopt` comes before `pass plan`")
+        before = fb[plan[0]:adopt[0]]
+        self.assertRegex(before, r"\bowned\b", "the text before `pass adopt` never reads `owned`")
+        self.assertRegex(before, r"\bask", "the text before `pass adopt` never asks the user")
+        self.assertRegex(before, r"\bgone\b", "the text before `pass adopt` never asks whether the owner is gone")
+        none = re.search(r"`record: false`|`record` is `false`", before)
+        gate = re.search(r"If `owned` is", before)
+        self.assertTrue(none, "step 2 never says what to do with a plan that has `record: false` (a first pass has no `owned` field)")
+        self.assertLess(none.start(), gate.start(), "`record: false` is handled after the `owned` gate, so a first pass has no instruction to proceed")
+        self.assertRegex(before[none.start():gate.start()], r"\bnone\b", "the `record: false` case does not name `status: none`")
+        self.assertRegex(before[none.start():gate.start()], r"carry on|proceed|start", "the `record: false` case does not say to proceed")
+        self.assertIn("--from", fb[adopt[0]:fb.index("`", adopt[0])], "`pass adopt` is not given `--from`")
+        self.assertRegex(fb, r"\bnot_owner\b")
+        self.assertRegex(fb, r"\brecord_busy\b")
+        self.assertRegex(fb, r"never remove a lock", "the lock rule is missing")
+        self.assertRegex(fb[w:w + 700], r"owner", "the text after `pass write` never says to keep the owner id it returns")
+
+
+DESCRIPTION = SKILL.parent / "references" / "description.md"
+
+
+class ClosingReferences(unittest.TestCase):
+    """description.md and the ship section carry the closing-reference rules (#61)."""
+
+    desc = DESCRIPTION.read_text(encoding="utf-8")
+
+    def test_description_requires_one_closing_keyword_per_issue(self):
+        self.assertRegex(self.desc, r"(?i)one (closing )?keyword per issue")
+        self.assertRegex(self.desc, r"(?i)own line")
+        self.assertRegex(self.desc, r"Fixes #N")
+
+    def test_description_keeps_related_for_partial_fixes(self):
+        self.assertRegex(self.desc, r"Related: #N")
+        self.assertRegex(self.desc, r"(?i)(only in part|partly|not fully)")
+
+    def test_description_uses_cross_repo_form_without_a_pr_in_the_issue_repo(self):
+        self.assertRegex(self.desc, r"Fixes <owner>/<repo>#N")
+        self.assertRegex(self.desc, r"Related: <owner>/<repo>#N")
+        self.assertRegex(self.desc, r"(?i)no PR is expected")
+        self.assertRegex(self.desc, r"(?i)repository that holds the issue")
+
+    def ship_43(self):
+        ship = SECTIONS["ship"][1]
+        m = re.search(r"^   3\. .*$", ship, re.M)
+        self.assertTrue(m, "ship step 4.3 not found")
+        end = re.search(r"^5\. ", ship[m.end():], re.M)
+        return ship[m.start():m.end() + (end.start() if end else len(ship))]
+
+    def test_ship_runs_closing_check_after_ensure_pr(self):
+        step = self.ship_43()
+        checks, ensures = positions(sub("closing-check"), step), positions(sub("ensure-pr"), step)
+        self.assertTrue(checks, "ship step 4.3 never runs `pr-pair.sh closing-check`")
+        self.assertTrue(ensures)
+        self.assertLess(ensures[0], checks[0], "`closing-check` runs before `ensure-pr`")
+        self.assertRegex(step, r"\bnot_default_base\b")
+        self.assertRegex(step, r"(?i)not done", "an unreadable check (exit 3) is not reported as not done")
+
+    def test_ship_never_rewrites_a_found_pr_description_on_mismatch(self):
+        step = self.ship_43()
+        tail = step[step.find("closing-check"):]
+        self.assertNotEqual(step.find("closing-check"), -1)
+        self.assertRegex(tail, r"(?is)mismatch`? on a `found` PR[^.;]*(report|ask)")
+        self.assertRegex(tail, r"(?i)never (edit|rewrite)[^.]*unprompted")
+        self.assertRegex(tail, r"(?is)mismatch`? on a `created` PR[^.;]*rewrite")
+        self.assertRegex(tail, r"(?i)nothing but a keyword and references")
+
+    def test_ship_stops_after_a_second_mismatch(self):
+        step = self.ship_43()
+        tail = step[step.find("closing-check"):]
+        self.assertNotEqual(step.find("closing-check"), -1)
+        self.assertRegex(tail, r"gh pr edit[^.]*--body-file")
+        self.assertRegex(tail, r"(?is)second mismatch[^.]*stop|stop[^.]*second mismatch")
+        self.assertRegex(tail, r"(?i)names? the `?missing`? issues")
+
+
+FINISH = SKILL.parents[1] / "specwright-finish" / "SKILL.md"
+
+
+class CleanupClosingReferences(unittest.TestCase):
+    """Cleanup after merge closes the issues a merged PR's closing lines named and GitHub left open (#61 part 3)."""
+
+    def cleanup(self):
+        self.assertIn("cleanup after merge", SECTIONS, f"SKILL.md has no '## Cleanup after merge' section; found {sorted(SECTIONS)}")
+        return SECTIONS["cleanup after merge"][1]
+
+    def closing_bullet(self):
+        text = self.cleanup()
+        at = text.find("closed-check")
+        self.assertNotEqual(at, -1, "Cleanup after merge never runs `pr-pair.sh closed-check`")
+        start = text.rfind("\n- ", 0, at) + 1
+        end = text.find("\n- ", at)
+        return text[start:end if end != -1 else len(text)]
+
+    def test_cleanup_closes_open_intended_issues(self):
+        text = self.cleanup()
+        self.assertTrue(positions(sub("closed-check"), text), "Cleanup after merge never runs `pr-pair.sh closed-check`")
+        b = self.closing_bullet()
+        self.assertRegex(b, r"--repos", "`closed-check` is not given the change's repositories as `--repos`")
+        self.assertRegex(b, r"(?i)each merged PR", "the check does not run for each merged PR")
+        close = re.search(r"gh issue close <n> --repo <owner>/<name> --comment", b)
+        self.assertTrue(close, "an `open` issue is not closed with `gh issue close <n> --repo ... --comment`")
+        self.assertRegex(b, r"<pr_url>", "the closing comment does not name the PR")
+        self.assertRegex(b[close.start() - 12:close.start()], r"\[as\]", "the close does not run under the repository's identity")
+        self.assertRegex(b, r"(?i)each `open` issue", "only `open` issues are closed")
+        self.assertRegex(b, r"(?i)Related", "the text never says a `Related:` issue is not closed")
+        fin = FINISH.read_text(encoding="utf-8")
+        merged = fin[fin.index("- **After the PR is merged**"):]
+        merged = merged[:merged.index("\n\n")]
+        self.assertRegex(merged, r"specwright-pr\W+\*\*Cleanup after merge\*\*", "finish does not point to `specwright-pr` Cleanup after merge")
+        self.assertRegex(merged, r"closed-check|closing|issues", "finish's After the PR is merged never mentions the issue backstop")
+        self.assertNotIn("Store-backed: follow `specwright-pr` **Cleanup after merge** instead", merged,
+                         "finish still sends only store-backed changes to Cleanup after merge")
+
+    def test_cleanup_asks_before_closing(self):
+        b = self.closing_bullet()
+        ask = re.search(r"(?i)list(?:s)? them all with their PRs", b)
+        self.assertTrue(ask, "the bullet never lists every `open` issue with its PR before closing")
+        self.assertRegex(b, r"(?i)when any merged PR of the change has `open` issues", "the question is not tied to the merged PRs' `open` issues")
+        self.assertRegex(b, r"(?i)one question for the change", "the user is not asked one question for the whole change")
+        self.assertRegex(b, r"(?i)(ask|asks) nothing", "the text never says nothing is asked when there are no `open` issues")
+        close = b.find("gh issue close")
+        self.assertTrue(0 <= ask.start() < close, "the question must come before `gh issue close`")
+        self.assertRegex(b, r"(?i)each `open` issue (the user )?confirmed|only (the )?confirmed", "only confirmed issues are closed")
+        self.assertRegex(b, r"(?is)declined[^.]*left open|left open[^.]*declined", "declined issues are not reported as left open")
+
+    def test_cleanup_reports_issues_outside_the_change(self):
+        b = self.closing_bullet()
+        m = re.search(r"`outside`[^.;]*", b)
+        self.assertTrue(m, "the closing bullet never handles `outside` issues")
+        self.assertRegex(b, r"(?is)`outside`.{0,200}never close|never close.{0,200}`outside`", "`outside` issues may be closed")
+        self.assertRegex(b, r"(?i)outside[^.]{0,120}(report|list)|(report|list)[^.]{0,120}outside")
+
+    def test_cleanup_reports_backstop_not_done(self):
+        b = self.closing_bullet()
+        m = re.search(r"(?i)exit 3[^.;]*", b)
+        self.assertTrue(m, "the closing bullet never handles exit 3")
+        self.assertRegex(m.group(0), r"(?i)not done")
+        self.assertRegex(m.group(0), r"(?i)continue|branch cleanup")
+        self.assertRegex(b, r"(?i)close nothing|closes nothing|nothing is closed")
+
+    def test_cleanup_closes_nothing_off_the_default_branch(self):
+        b = self.closing_bullet()
+        m = re.search(r"`not_default_base`[^.]*\.", b)
+        self.assertTrue(m, "the closing bullet never handles `not_default_base`")
+        self.assertRegex(m.group(0), r"(?i)close nothing")
+        self.assertRegex(m.group(0), r"default branch")
+        self.assertRegex(b, r"`not_merged`[^.]*nothing")
+
+    def test_cleanup_never_recloses_reopened(self):
+        b = self.closing_bullet()
+        m = re.search(r"`reopened`[^.]*\.", b)
+        self.assertTrue(m, "the closing bullet never handles `reopened`")
+        self.assertRegex(b, r"(?is)`reopened`.{0,200}never close|never close.{0,200}`reopened`", "a `reopened` issue may be closed again")
+        self.assertRegex(b, r"(?i)reopened by a person|a person reopened|person reopened")
+
+    def test_cleanup_reports_a_failed_close_and_continues(self):
+        b = self.closing_bullet()
+        m = re.search(r"(?i)a failed close[^;]*(;[^.]*)?\.", b)
+        self.assertTrue(m, "the closing bullet never handles a failed close")
+        self.assertRegex(m.group(0), r"(?i)closed")
+        self.assertRegex(m.group(0), r"(?i)still open")
+        self.assertRegex(m.group(0), r"(?i)continue")
+        self.assertRegex(m.group(0), r"(?i)later cleanup")
 
 
 if __name__ == "__main__":

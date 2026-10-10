@@ -40,7 +40,7 @@ def init(repo):
 def base(repo):
     init(repo)
     shutil.copytree(ROOT / "schemas" / "specwright", repo / "openspec" / "schemas" / "specwright")
-    shutil.copy(ROOT / "openspec" / "config.yaml", repo / "openspec" / "config.yaml")
+    shutil.copy(ROOT / "templates" / "openspec" / "config.yaml", repo / "openspec" / "config.yaml")
     write(repo, "openspec/specwright.yaml", "finish: local\n")
     write(repo, "openspec/specs/.gitkeep", "")
     project(repo)
@@ -103,7 +103,7 @@ def code_repo(code, store_id="team-plans", pointer=True, settings="finish: local
 def store_content(root):
     """What a planning root holds: the schema, trigger config and specs (not yet committed)."""
     shutil.copytree(ROOT / "schemas" / "specwright", root / "openspec" / "schemas" / "specwright")
-    shutil.copy(ROOT / "openspec" / "config.yaml", root / "openspec" / "config.yaml")
+    shutil.copy(ROOT / "templates" / "openspec" / "config.yaml", root / "openspec" / "config.yaml")
     write(root, "openspec/specs/.gitkeep", "")
 
 
@@ -640,6 +640,18 @@ def build_store(name, dest):
         finish_ready(dest)
         diverge_main(code, "greet.py", '"""Greeting helpers."""\n\n\ndef greet(name):\n    return "Dear " + name + ","\n', CONFLICT_CODE)
         archive_change(dest, "add-greeting")
+    elif name in ("eval-store-finish-resume-code-merge", "eval-store-finish-resume-code-merge-from-main"):
+        finish_ready(dest)  # the interrupted finish merged and deleted the store branch; the code merge never ran
+        archive_change(dest, "add-greeting")
+        git(store, "add", "-A")
+        git(store, "commit", "-q", "-m", "feat(add-greeting): archive change")
+        merge_into_main(store)
+        out = lambda *a: subprocess.run(["git", *a], cwd=store, check=True, capture_output=True, text=True).stdout.strip()
+        code_tree = subprocess.run(["git", "rev-parse", "feat/add-greeting^{tree}"], cwd=code, check=True, capture_output=True, text=True).stdout.strip()
+        write(dest, "fixture-state.json", json.dumps({"store_main": out("rev-parse", "main"), "store_commits": int(out("rev-list", "--count", "--all")),
+                                                      "code_tree": code_tree}, indent=2))  # code_tree: what a recovered code main must hold
+        if name.endswith("-from-main"):
+            git(code, "checkout", "-q", "main")  # the code repo was left on main; its branch still has the commits
     elif name == "eval-store-archive-on-main":
         finish_ready(dest)  # both branches merged into main, then the archive ran with the store on main
         for r in (code, store):
@@ -755,6 +767,12 @@ def build(name, repo):
         write(repo, "scratch-notes.txt", "personal notes - not part of the change\n")
     elif name == "eval-finish-local":
         finished(repo, repo)
+    elif name in ("eval-finish-resume-after-archive-commit", "eval-finish-resume-from-main"):
+        finished(repo, repo)  # the interrupted finish committed the archive on the branch; the merge never ran
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "feat(add-greeting): archive change")
+        if name.endswith("from-main"):
+            git(repo, "checkout", "-q", "main")  # HEAD on main, the branch unmerged
     else:
         raise SystemExit(f"unknown eval {name}")
 

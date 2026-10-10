@@ -2,7 +2,7 @@
 name: specwright-finish
 description: "MANDATORY after the OpenSpec archive workflow completes: /opsx:archive, /opsx:bulk-archive, openspec-archive-change, `openspec archive`, or the user asks to archive/finish a change. Commits the archive move, then merges locally (finish: local) or pushes to the PR (finish: pr). Also handles 'the PR was merged' cleanup."
 metadata:
-  version: 0.1.9
+  version: 0.1.10
 user-invocable: false
 allowed-tools: Bash(git *) Bash(openspec *)
 ---
@@ -13,17 +13,52 @@ Start only after the vanilla archive workflow reports success (for bulk archive:
 
 Commit type: the branch prefix, except `bugfix` → `fix`. Archive paths, in the planning repo: `<P>/changes/<change-name>/` (now removed), `<P>/changes/archive/<archived-name>/`, and for each delta `specs/<capability-path>/spec.md` inside the archived change, the main spec `<P>/specs/<capability-path>/spec.md` it updated or created - by file, never the whole `<P>/specs/` directory. Other files are the user's: never stage them.
 
+## Resume
+
+Applies when the change directory is gone and finish runs again: the user asks to finish it, or the archive workflow reports the change already archived. Resolve the **Planning repo** first. On any branch, a repo where A (below) is found resumes here instead of running steps 1-3. Never repeat a done step.
+
+For each repo of the change (repo-local: one; store-backed: the store, then the code repo), find `<branch>` from `<main>`: `<prefix>/<change-name>` by the prefix rule of `specwright-branch` step 6, else a local `chore/archive-<change-name>`, else the one local branch matching `*/<change-name>`; several candidates → list them and ask. Then read three facts:
+- **A** - an archive commit: a subject matching `^[a-z]+\(<change-name>\): archive change$` in `git log --format=%s <main>..<branch>`, or on `<main>`.
+- **M** - the exact subject `merge: <change-name>` in `git log --first-parent --format=%s <main>`, and, when B, the branch tip is on `<main>` (`git merge-base --is-ancestor <branch> <main>`): an archive-recovery branch made after the change merged holds a new archive commit, so the earlier merge does not count for it.
+- **B** - `<branch>` exists.
+
+None of A, M, B in any repo → report that no archive of `<change-name>` was found, and do nothing. `git status --porcelain` showing changes under `<P>/changes/<change-name>/` or the archive directory (with A found) → stop, list the files and ask the user; merge nothing. Otherwise continue at the first step not done, per repo. Rows are checked top to bottom, and the first match wins:
+
+| Facts | Next |
+|---|---|
+| archive paths uncommitted, no A | steps 1-3 in order (branch check and recovery branch, planning-only test, archive commit) |
+| A on branch, not M, B, `local` | merge (`## local`) |
+| code repo, the newest store A's body has the line `Archive-Scope: store-only` | out of scope: report the code branch and its PR state, touch nothing; the repo counts as done |
+| M and B | `git checkout <main> && git branch -d <branch>`, no merge |
+| M, not B | repo done |
+| code repo with no A, M or B; store done; the store's archive is marked `code_changes: none` | repo done (a planning-only change) |
+| code repo with no A, M or B; store done; no such marker | report and ask; touch nothing |
+| store done; code branch with commits, code not M, `local` | code merge (`## local` store-backed step 2) |
+| store done; code branch without commits | `git checkout <main> && git branch -d <branch>`, no merge |
+| `pr`, A on branch, PR not merged | `## pr` ship; push and PR are idempotent |
+| `pr`, the branch's PR merged | **After the PR is merged** cleanup, not ship |
+| `pr`, store done; code branch with commits, code not M, no PR or an open PR | `## pr` ship for the code branch; push and PR are idempotent. Merge nothing, delete nothing |
+| `pr`, store done; code branch with commits, its PR closed unmerged | report the closed PR and ask. Merge nothing, delete nothing |
+
+Report `Nothing to finish - archive is on <main>` only when every repo is done.
+
+- **Planning-only test:** it runs only before an archive commit. A resume that finds archive paths uncommitted and no A runs steps 1-3 in order, the test included; once A exists, a resume never writes the marker.
+- **Store-only recovery:** step 3 writes the body line `Archive-Scope: store-only` when the change is store-backed and the store is on `chore/archive-<change-name>`. Read it from the newest store A: `git log -1 --format=%B <A>`, matching that exact line. When it is there, the code repo is out of scope: no code merge, ship or branch deletion; report the code branch's state and leave it to its own PR or finish. This counts as done for `Nothing to finish`.
+- **Planning-only, already finished:** a local finish of a planning-only change deletes the empty code branch and merges nothing, so the code repo shows no A, M or B. The marker's path comes from the store's A: `git show --name-only --format= <A>` lists `<P>/changes/archive/<archived-name>/specwright-change.yaml` when one was written. With the store done, the code repo is done when `git show <main>:<that path>` (in the store) has a line matching `^code_changes:\s*none\s*$`; otherwise report and ask.
+
+## Steps
+
 1. **Branch:** `git branch --show-current`. If the branch's change name differs from the archived change, confirm with the user. On main:
-   - No archive changes left uncommitted (the archive already reached main) → report `Nothing to finish - archive is on <main>` and stop.
+   - No archive changes left uncommitted (the archive already reached main) → **Resume**; report `Nothing to finish - archive is on <main>` only when it finds every repo done.
    - Otherwise (the PR merged before archive ran; normally `specwright-pr` **watch** archives on the PR branch first) → offer `git checkout -b chore/archive-<change-name>`; the uncommitted archive carries over. Continue from step 2 on that branch, or stop if the user declines. Never commit on main.
-   - Store-backed: check each repo. The archive lives in the store, so the recovery branch is created there only (`cd "<store toplevel>" && git checkout -b chore/archive-<change-name>`), never a code branch or code PR for it; the code repo stays as it is. It carries only the archive: the planning-only test below still decides the marker, and step 4 then finishes only the store branch - the code repo's branch and PR go their own way.
+   - Store-backed: check each repo. The archive lives in the store, so the recovery branch is created there only (`cd "<store toplevel>" && git checkout -b chore/archive-<change-name>`), never a code branch or code PR for it; the code repo stays as it is. Step 3 then marks the archive commit with the body line `Archive-Scope: store-only`, so a later resume leaves the code repo alone. It carries only the archive: the planning-only test below still decides the marker, and step 4 then finishes only the store branch - the code repo's branch and PR go their own way.
 2. **Planning-only test** (store-backed only), before the archive commit, with `<prefix>/<change-name>` as the code branch (on a recovery branch, the code repo's local branch ending in `/<change-name>`, if any). The change has code work when any of these holds, and is planning-only otherwise:
    - `git -C "<code toplevel>" log --oneline <main>..<prefix>/<change-name>` lists a commit (an absent branch lists none);
    - `git -C "<code toplevel>" log --first-parent --format=%s <main>` has the exact subject `merge: <change-name>` - this change's own merge, so the code was already merged, as on a recovery branch. A subject that merely contains `(<change-name>): ` is not proof: another change or branch can carry that scope;
    - `pr` mode only: a code PR from that branch into the code main branch exists in any state (a PR into another base, such as `integration`, is not this change's code PR). Parse `<owner>/<repo>` from the code checkout's `git remote get-url origin`, then from the code checkout with `GH_REPO` unset: `[as] gh api --paginate "repos/<owner>/<repo>/pulls?state=all&head=<owner>:<prefix>/<change-name>&per_page=100" --jq '.[] | select(.head.repo.full_name == "<owner>/<repo>" and .base.ref == "<main>") | .number'` (`[as]` as in `specwright-pr`). A non-zero exit means unknown: stop, write no marker and say why. `local` mode skips this lookup.
 
    Planning-only → write `<P>/changes/archive/<archived-name>/specwright-change.yaml` containing `code_changes: none` and add it to the archive paths. Otherwise never write it, on the change branch or a `chore/archive-<change-name>` branch alike.
-3. **Archive commit**, one call in the planning repo (store-backed: start it with `cd "<store toplevel>" && test "$(git branch --show-current)" = <branch> &&`): `git add -- <archive paths> && git commit -F <msgfile> -- <archive paths>` with `<type>(<change-name>): archive change`. Then `git status --porcelain`: nothing may be left under `<P>/changes/<change-name>/` or the archive directory, and none of the listed spec files (else stop and list it); other leftovers, including other files under `<P>/`, are the user's - list them and continue. Bulk archive of several changes on one branch → one archive commit naming them all.
+3. **Archive commit**, one call in the planning repo (store-backed: start it with `cd "<store toplevel>" && test "$(git branch --show-current)" = <branch> &&`): `git add -- <archive paths> && git commit -F <msgfile> -- <archive paths>` with `<type>(<change-name>): archive change`. Store-backed with the store on `chore/archive-<change-name>`: add the body line `Archive-Scope: store-only` after a blank line (it is written on a first run and on a resume alike). Then `git status --porcelain`: nothing may be left under `<P>/changes/<change-name>/` or the archive directory, and none of the listed spec files (else stop and list it); other leftovers, including other files under `<P>/`, are the user's - list them and continue. Bulk archive of several changes on one branch → one archive commit naming them all.
 4. **Finish** per `finish` in `openspec/specwright.yaml` (default `local`). Main branch: `main_branch` setting, else `main`, else `master`, else ask.
 
 ## local
@@ -38,7 +73,7 @@ Commit type: the branch prefix, except `bugfix` → `fix`. Archive paths, in the
 ## pr
 - Run `specwright-pr` **ship**: it pushes the archive commit (pinning the GitHub identity and running `pr.validate`) and opens the PR if there is none, leaving an existing PR's description alone.
 - If `specwright-pr` **watch** started this archive, hand back to it: it waits for CI and reviews on the archive head before reporting ready. Otherwise report the PR URL and `Ready to merge on GitHub once checks and reviews are green.`, and offer **watch**. Never merge the PR.
-- **After the PR is merged** (the user says so, or `gh pr view <branch> --json state,headRefOid` shows MERGED): `git checkout <main> && git pull --ff-only && git branch -d <branch>`. If `-d` refuses because GitHub squashed or rebased, use `-D` only when the PR is MERGED and its `headRefOid` equals the local branch tip; otherwise ask. Store-backed: follow `specwright-pr` **Cleanup after merge** instead, which cleans both repos.
+- **After the PR is merged** (the user says so, or `gh pr view <branch> --json state,headRefOid` shows MERGED): `git checkout <main> && git pull --ff-only && git branch -d <branch>`. If `-d` refuses because GitHub squashed or rebased, use `-D` only when the PR is MERGED and its `headRefOid` equals the local branch tip; otherwise ask. Then follow `specwright-pr` **Cleanup after merge** for the issues the merged PR's closing lines name: its `closed-check` lists any that GitHub left open and closes the ones the user confirms. Store-backed: that section also cleans both repos, so follow it instead of the commands above.
 
 If the roadmap (`project.roadmap`) exists, offer `specwright-roadmap` **next** (or **close** if this was the milestone's last change) once the change is on main: after the local merge, or after the PR is merged.
 

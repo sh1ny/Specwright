@@ -9,6 +9,8 @@ prints one JSON line; exit 0 = answered, 1 = stop (error object), 2 = usage,
 
 Run: python -m unittest discover evals/pr-pair
 """
+import hashlib
+import importlib.util
 import json
 import re
 import os
@@ -16,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -24,6 +27,10 @@ ROOT = HERE.parents[1]
 SCRIPT = ROOT / "skills" / "specwright-pr" / "scripts" / "pr-pair.sh"
 sys.path.insert(0, str(ROOT / "evals" / "git-workflow"))
 import fixtures  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("fake_gh", ROOT / "evals" / "fakes" / "gh.py")
+fake_gh = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fake_gh)  # its state helpers (add_review_comment_reaction, add_node_reaction)
 
 CODE, STORE = "acme/code", "acme/plans"
 BRANCH, CHANGE = "feat/add-greeting", "add-greeting"
@@ -185,6 +192,23 @@ def thread(tid="T1", rev=REV0, root_id=11, awaiting=False, resolved=False, resol
     return {"id": tid, "root_id": root_id, "resolved": resolved, "rev": rev, "waiting_owner": waiting_owner,
             "awaiting_reviewer": awaiting, "resolve_pending": resolve_pending, "path": "x", "line": 1,
             "comments": comments or [{"id": "C11", "author": "chatgpt-codex-connector", "at": T0, "edited": None}]}
+
+
+def _safe(t):
+    return re.sub(r"[^A-Za-z0-9._-]", "_", t)
+
+
+def record_key(repo, change):
+    """The record's file name: readable owner.name.change (first 120 characters), then 32 hex of sha256(lower(owner), lower(name), change)."""
+    owner, _, name = repo.partition("/")
+    h = hashlib.sha256(f"{owner.lower()}\n{name.lower()}\n{change}".encode("utf-8")).hexdigest()[:32]
+    return f"{_safe(owner)}.{_safe(name)}.{_safe(change)}"[:120].lower() + f"-{h}.json"
+
+
+def legacy_key(repo, change):
+    """The 0.1.9 file name."""
+    owner, _, name = repo.partition("/")
+    return f"{_safe(owner)}-{_safe(name)}-{_safe(change)}.json"
 
 
 # =======================================================================================================
@@ -682,6 +706,13 @@ class Rounds(Base):
         r = self.rounds()
         self.assertEqual((r["rounds"], r["code"]["subject_count"], r["limit_reached"]), (2, 2, True))
 
+    def test_rounds_ignores_subject_count_when_trailers_exist(self):
+        # a round-1 partial recovery: two commits carry the round-1 trailer, so the subject count of 2 is not the round
+        self.commit(self.code, {"a.py": "1\n"}, "fix(add-greeting): address review feedback\n\nFeedback-Round: 1")
+        self.commit(self.code, {"a.py": "2\n"}, "fix(add-greeting): address review feedback\n\nFeedback-Round: 1")
+        r = self.rounds()
+        self.assertEqual((r["rounds"], r["limit_reached"]), (1, False))
+
     def test_rounds_unpushed_top_round_commits(self):
         for d, slug in ((self.code, CODE), (self.store, STORE)):
             self.attach_bare(d, slug)
@@ -754,13 +785,18 @@ class PassBase(Base):
 
     def write_record(self, findings, rnd=2, intent=None, expect=0):
         f = self.write_json("intent.json", intent or self.intent(findings, rnd))
-        return self.pp("pass", "write", *self.common(), "--intent", f, expect=expect)
+        out = self.pp("pass", "write", *self.common(), "--intent", f, expect=expect)
+        if out.get("ok"):
+            self.owner = out["owner"]  # the id `pass write` returns; plan and done carry it
+        return out
 
     def record_path(self):
-        return self.state_dir / "feedback" / f"acme-code-{CHANGE}.json"
+        return self.state_dir / "feedback" / record_key(CODE, CHANGE)
 
     def plan(self, code=None, store=None, sub="plan", expect=0):
         args = ["pass", sub, *self.common()]
+        if getattr(self, "owner", None):
+            args += ["--owner", self.owner]
         for name, s in (("code", code), ("store", store)):
             args += ["--snapshot", f"{name}={self.write_json(f'{name}-snap.json', s if s is not None else snap())}"]
         return self.pp(*args, expect=expect)
@@ -980,6 +1016,21 @@ class PassPlan(PassBase):
         self.assertIn("head_unreachable", [s["reason"] for s in p["stops"]])
         self.assertNotEqual(self.row(p, "fix_commit", "code")["state"], "done")
 
+    def test_identical_legacy_copy_is_removed(self):
+        self.settings("github:\n  login: KintsugiBot\npr:\n  max_fix_rounds: 2\n")
+        self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}], react=None)])
+        legacy = self.state_dir / "feedback" / legacy_key(CODE, CHANGE)
+        shutil.copyfile(self.record_path(), legacy)  # the leftover of an interrupted move
+        self.fix_code()
+        self.push_all()
+        p = self.plan(code=snap(threads=[]))
+        self.assertNotIn("legacy_record_ignored", p)
+        self.assertFalse(legacy.exists(), "a legacy file identical to the record is a leftover and is removed")
+        self.assertTrue(self.plan(code=snap(threads=[]), sub="done")["deleted"])
+        later = self.plan(code=snap(threads=[]))
+        self.assertFalse(later["record"])
+        self.assertNotIn("legacy_record_ignored", later)
+
     def test_pass_plan_unrecorded_change_stops(self):
         self.write_record([self.finding()])
         self.write(f"store/{SPEC_ARCHIVED}", f"{NEW_TEXT} by name.\n")
@@ -1030,7 +1081,8 @@ class PassPlan(PassBase):
         self.plan(store=snap(threads=[]), sub="done", expect=1)
         self.assertTrue(self.record_path().exists())
         # once ship opened the code PR, the pass re-requests review on it and then completes
-        self.add_pull(CODE, 7)
+        self.add_pull(STORE, 3, body=f"Code PR: https://github.com/{CODE}/pull/7")  # ship linked the pair (step 5)
+        self.add_pull(CODE, 7, body=f"Store PR: https://github.com/{STORE}/pull/3")
         p = self.plan(store=snap(threads=[]))
         self.assertEqual(self.row(p, "push", "code")["state"], "done")
         rr = self.row(p, "rerequest", "code")
@@ -1056,19 +1108,152 @@ class PassPlan(PassBase):
         self.assertTrue(p["delete_record"])
         self.assertFalse(p["needs_user"])
 
-    def test_pass_plan_reaction_is_rerun_after_reply(self):
-        self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}], resolve=False)])
+    # ---- reaction evidence (#25) ----
+    def replied_code_fix(self, finding):
+        """A code fix committed, pushed and re-requested; the reply is posted (so only the reaction can be missing)."""
+        self.write_record([finding])
         self.fix_code()
         self.push_all()
         self.pushed_at(CODE, BRANCH, self.tip(self.code), "2026-10-08T12:00:00Z")
         self.add_comment(CODE, 5, "@codex review", "KintsugiBot", 2002, created_at="2026-10-08T12:00:03Z")
-        answered = thread(awaiting=True, rev="12@2026-10-08T12:01:00Z", comments=[
-            {"id": "C11", "author": "chatgpt-codex-connector", "at": T0, "edited": None},
-            {"id": "C12", "author": "KintsugiBot", "at": "2026-10-08T12:01:00Z", "edited": None}])
-        p = self.plan(code=snap(threads=[answered]))
+
+    ANSWERED = thread(awaiting=True, rev="12@2026-10-08T12:01:00Z", comments=[
+        {"id": "C11", "author": "chatgpt-codex-connector", "at": T0, "edited": None},
+        {"id": "C12", "author": "KintsugiBot", "at": "2026-10-08T12:01:00Z", "edited": None}])
+
+    def thread_finding(self):
+        return self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}], resolve=False)
+
+    def react_rest(self, login, content, cid=11):
+        st = self.gh()
+        fake_gh.add_review_comment_reaction(st, CODE, cid, login, content)
+        self.save_gh(st)
+
+    def react_node(self, node, login, content):
+        st = self.gh()
+        fake_gh.add_node_reaction(st, CODE, node, login, content)
+        self.save_gh(st)
+
+    def test_pass_plan_reaction_todo_until_github_shows_it(self):
+        self.replied_code_fix(self.thread_finding())
+        p = self.plan(code=snap(threads=[self.ANSWERED]))
         react = self.row(p, "react", finding="F1")
-        self.assertEqual((react["state"], react["react"], react["comment"]), ("rerun", "+1", 11))
-        self.assertTrue(p["delete_record"], "an idempotent reaction re-run does not keep the record")
+        self.assertEqual((react["state"], react["react"], react["comment"]), ("todo", "+1", 11))
+        self.assertNotIn("rerun", {r["state"] for r in p["rows"]})
+        self.assertEqual((p["status"], p["delete_record"]), ("resume", False))
+        done = self.plan(code=snap(threads=[self.ANSWERED]), sub="done", expect=1)
+        self.assertEqual(done["error"], "not_complete")
+        self.assertTrue(self.record_path().exists())
+        # a reaction by someone else, or the opposite one by the viewer, is not this pass's reaction
+        self.react_rest("chatgpt-codex-connector", "+1")
+        self.react_rest("KintsugiBot", "-1")
+        p = self.plan(code=snap(threads=[self.ANSWERED]))
+        self.assertEqual(self.row(p, "react", finding="F1")["state"], "todo")
+        self.react_rest("KintsugiBot", "+1")
+        p = self.plan(code=snap(threads=[self.ANSWERED]))
+        self.assertEqual((self.row(p, "react", finding="F1")["state"], p["status"]), ("done", "complete"))
+        self.assertTrue(self.plan(code=snap(threads=[self.ANSWERED]), sub="done")["deleted"])
+        self.assertFalse(self.record_path().exists())
+
+    def test_pass_plan_reaction_done_when_present(self):
+        self.replied_code_fix(self.thread_finding())
+        self.react_rest("KintsugiBot", "+1")
+        p = self.plan(code=snap(threads=[self.ANSWERED]))
+        react = self.row(p, "react", finding="F1")
+        self.assertEqual((react["state"], react["react"], react["comment"]), ("done", "+1", 11))
+        self.assertEqual((p["status"], p["delete_record"]), ("complete", True))
+        # the thread is gone from the snapshot (answered and resolved): the reaction is still read from GitHub
+        self.assertEqual(self.row(self.plan(code=snap(threads=[])), "react", finding="F1")["state"], "done")
+
+    def test_pass_plan_reaction_on_a_node_id_target(self):
+        self.replied_code_fix(self.finding("F1", dest="code", kind="comment", item="IC_node1", resolve=False,
+                                           edits=[{"file": "greet.py", "contains": ["strip()"]}]))
+        self.react_node("IC_node1", "someone", "THUMBS_DOWN")  # the node exists on GitHub; nobody here has reacted yet
+        p = self.plan(code=snap(comments=[]))  # the comment left the snapshot: answered
+        react =self.row(p, "react", finding="F1")
+        self.assertEqual((react["state"], react["comment"]), ("todo", "IC_node1"))
+        self.react_node("IC_node1", "KintsugiBot", "THUMBS_DOWN")  # the opposite reaction does not count
+        self.react_node("IC_node1", "someone", "THUMBS_UP")  # nor does someone else's
+        self.assertEqual(self.row(self.plan(code=snap(comments=[])), "react", finding="F1")["state"], "todo")
+        self.react_node("IC_node1", "KintsugiBot", "THUMBS_UP")
+        p = self.plan(code=snap(comments=[]))
+        self.assertEqual((self.row(p, "react", finding="F1")["state"], p["status"]), ("done", "complete"))
+
+    def test_pass_plan_reaction_read_failure_is_unknown(self):
+        self.replied_code_fix(self.thread_finding())
+        st = self.gh()
+        st["fail"] = ["/reactions"]
+        self.save_gh(st)
+        p = self.plan(code=snap(threads=[self.ANSWERED]), expect=3)
+        self.assertEqual((p["ok"], p["error"]), (False, "lookup_failed"))
+        self.assertTrue(self.record_path().exists())
+
+    def test_pass_plan_node_reaction_read_failure_is_unknown(self):
+        self.replied_code_fix(self.finding("F1", dest="code", kind="comment", item="IC_node1", resolve=False,
+                                           edits=[{"file": "greet.py", "contains": ["strip()"]}]))
+        st = self.gh()
+        st["fail"] = ["graphql"]
+        self.save_gh(st)
+        p = self.plan(code=snap(comments=[]), expect=3)
+        self.assertEqual((p["ok"], p["error"]), (False, "lookup_failed"))
+
+    # ---- the link row (#30) ----
+    def adopted_code_pr(self, store_url=None):
+        """A store-only pass whose code fix was pushed, and whose code PR was opened without links; replies are done."""
+        intent = {**self.intent([]), "prs": {"store": {"repo": STORE, "number": 3}},
+                  "findings": [self.finding("F1", source="store", dest="code", react=None)]}
+        self.write_record(None, intent=intent)
+        self.fix_code()
+        self.push_all()
+        store_pull = self.pull(STORE, 3)
+        if store_url:
+            store_pull["html_url"] = store_url
+        self.seed_pulls(STORE, [store_pull])
+        self.add_pull(CODE, 7)
+        self.pushed_at(CODE, BRANCH, self.tip(self.code), "2026-10-08T12:00:00Z")
+        self.add_comment(CODE, 7, "@codex review", "KintsugiBot", 2003, created_at="2026-10-08T12:00:03Z")
+
+    def link_args(self, repo, n, kind, peer):
+        return ["link", "--repo", repo, "--pr", n, "--kind", kind, "--peer-url", peer, "--login", "KintsugiBot"]
+
+    def markers(self, slug, n):
+        return [c for c in self.comments(slug, n) if "specwright:link" in c["body"]]
+
+    def test_pass_plan_adopted_code_pr_needs_the_link(self):
+        canonical = "https://github.com/Acme/Plans/pull/3"  # GitHub's own spelling, not the record's slug
+        self.adopted_code_pr(store_url=canonical)
+        p = self.plan(store=snap(threads=[]))
+        # #30: with no link row the pass reports complete although the pair was never linked
+        self.assertNotEqual(p["status"], "complete", "the plan reports complete for an unlinked pair (#30)")
+        link = self.row(p, "link")
+        self.assertEqual((link["state"], link["code"], link["store"]),
+                         ("todo", {"repo": CODE, "number": 7, "url": f"https://github.com/{CODE}/pull/7"},
+                          {"repo": STORE, "number": 3, "url": canonical}))
+        self.assertEqual(p["status"], "resume")
+        self.plan(store=snap(threads=[]), sub="done", expect=1)
+        self.assertTrue(self.record_path().exists())
+        # ship step 5, with the row's URLs
+        self.pp(*self.link_args(CODE, 7, "store", link["store"]["url"]))
+        p = self.plan(store=snap(threads=[]))
+        self.assertEqual((self.row(p, "link")["state"], p["status"]), ("todo", "resume"), "one side linked is not linked")
+        self.pp(*self.link_args(STORE, 3, "code", link["code"]["url"]))
+        p = self.plan(store=snap(threads=[]))
+        self.assertEqual((self.row(p, "link")["state"], p["status"]), ("done", "complete"))
+        self.assertEqual((len(self.markers(CODE, 7)), len(self.markers(STORE, 3))), (1, 1))
+        self.assertTrue(self.plan(store=snap(threads=[]), sub="done")["deleted"])
+        # running both links again changes nothing
+        self.pp(*self.link_args(CODE, 7, "store", link["store"]["url"]))
+        self.assertEqual((len(self.markers(CODE, 7)), len(self.markers(STORE, 3))), (1, 1))
+
+    def test_pass_plan_link_done_when_descriptions_name_the_peer(self):
+        self.adopted_code_pr()
+        st = self.gh()
+        for slug, n, peer in ((CODE, 7, f"https://github.com/{STORE}/pull/3"), (STORE, 3, f"https://github.com/{CODE}/pull/7")):
+            next(p for p in st["repos"][slug]["pulls"] if p["number"] == n)["body"] = f"Peer: {peer}"
+        self.save_gh(st)
+        p = self.plan(store=snap(threads=[]))
+        self.assertEqual((self.row(p, "link")["state"], p["status"]), ("done", "complete"))
+        self.assertEqual([c for c in self.gh_calls() if "POST" in c["argv"] or "PATCH" in c["argv"]], [])
 
     def test_pass_plan_removes_marker_before_code_fix(self):
         # the archive carries the planning-only marker; a code fix must delete it in a store commit first
@@ -1197,6 +1382,36 @@ class PassPlan(PassBase):
             self.assertEqual(self.write_record([bad], expect=2)["error"], "invalid_intent", bad)
         self.assertFalse(self.record_path().exists())
 
+    def refuses(self, intent, key):
+        r = self.write_record(None, intent=intent, expect=2)
+        self.assertEqual(r["error"], "invalid_intent", intent)
+        self.assertIn(key, r["message"])
+        self.assertFalse(self.record_path().exists())
+
+    def test_pass_write_accepts_a_well_formed_intent(self):
+        r = self.write_record([self.finding()], intent={**self.intent([self.finding()]), "prs": {"code": {"repo": CODE, "number": 5}}})
+        self.assertTrue(r["ok"])
+        self.assertTrue(self.record_path().exists())
+        self.assertTrue(self.plan()["ok"])
+
+    def test_pass_write_refuses_malformed_prs(self):
+        base = self.intent([self.finding()])
+        for prs in ("acme/app#5", {"code": "acme/app#5"}, {"code": {"repo": "acme", "number": 5}},
+                    {"code": {"repo": CODE, "number": "5"}}, {"code": {"repo": CODE, "number": 0}},
+                    {"code": {"repo": CODE, "number": True}}, {"other": None}):
+            self.refuses({**base, "prs": prs}, "prs")
+
+    def test_pass_write_refuses_a_bad_round(self):
+        base = self.intent([self.finding()])
+        for rnd in (0, "2", True, -1, 1.5):
+            self.refuses({**base, "round": rnd}, "round")
+
+    def test_pass_write_refuses_a_bad_root_id(self):
+        good = self.finding()
+        for bad in ({k: v for k, v in good.items() if k != "root_id"}, {**good, "root_id": "abc"}, {**good, "root_id": 0},
+                    {**good, "root_id": True}):
+            self.refuses(self.intent([bad]), "root_id")
+
     def test_pass_write_both_needs_a_repo_per_edit(self):
         bad = self.finding("F1", dest="both", edits=[{"file": "greet.py", "contains": ["x"]}])
         self.assertEqual(self.write_record([bad], expect=2)["error"], "invalid_intent")
@@ -1214,7 +1429,378 @@ class PassPlan(PassBase):
         self.assertFalse(self.record_path().exists())
 
 
+class PassOwnership(PassBase):
+    """One owner per feedback pass, and a record key that never aliases two repositories."""
+
+    def fresh_pass(self):
+        """A pass whose every step is done, so `pass done` may remove it."""
+        self.settings("github:\n  login: KintsugiBot\npr:\n  max_fix_rounds: 2\n")
+        self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}], react=None)])
+        self.fix_code()
+        self.push_all()
+        return snap(threads=[])
+
+    def raw(self):
+        return self.record_path().read_bytes()
+
+    def adopt(self, new, frm, expect=0):
+        return self.pp("pass", "adopt", *self.common(), "--owner", new, "--from", frm, expect=expect)
+
+    def cmd_for(self, sub, repo, *extra, expect=0):
+        args = ["pass", sub, "--code", self.code, "--store", self.store, "--code-repo", repo, "--change", "fix-login", *extra]
+        return self.pp(*args, expect=expect)
+
+    def test_record_keys_do_not_alias_hyphenated_identities(self):
+        s = self.write_json("s.json", snap())
+        for repo, rnd in (("acme-tools/widget", 2), ("acme/tools-widget", 3)):
+            f = self.write_json("intent.json", self.intent([self.finding()], rnd))
+            self.cmd_for("write", repo, "--intent", f)
+        names = sorted(p.name for p in (self.state_dir / "feedback").iterdir())
+        self.assertEqual(names, sorted([record_key("acme-tools/widget", "fix-login"), record_key("acme/tools-widget", "fix-login")]))
+        for repo, rnd in (("acme-tools/widget", 2), ("acme/tools-widget", 3)):
+            p = self.cmd_for("plan", repo, "--snapshot", f"code={s}", "--snapshot", f"store={s}")
+            self.assertEqual((p["record"], p["round"]), (True, rnd), repo)
+
+    def test_legacy_record_is_moved_to_the_new_key(self):
+        self.write_record([self.finding()])
+        self.owner = None
+        rec = json.loads(self.raw().decode("utf-8"))
+        rec.pop("owner")
+        rec["version"] = 1
+        legacy = self.state_dir / "feedback" / legacy_key(CODE, CHANGE)
+        legacy.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        before = legacy.read_bytes()
+        self.record_path().unlink()
+        p = self.plan()
+        self.assertTrue(p["record"])
+        self.assertIsNone(p["owned"])
+        self.assertFalse(legacy.exists())
+        self.assertEqual(self.raw(), before)
+
+    def test_record_key_is_bounded_for_the_longest_names(self):
+        # GitHub allows a 39-character owner and a 100-character repository; the record and its `.lock` must stay under 255 characters
+        self.settings("github:\n  login: KintsugiBot\npr:\n  max_fix_rounds: 2\n")
+        repo = "o" * 39 + "/" + "r" * 100
+        base = ["--code", self.code, "--store", self.store, "--code-repo", repo]
+        s = self.write_json("s.json", snap(threads=[]))
+        snaps = ["--snapshot", f"code={s}", "--snapshot", f"store={s}"]
+        for change in ("c" * 80, "d" * 120):  # the second: its 0.1.9 file name is itself too long for the file system
+            intent = self.intent([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}], react=None)])
+            intent.update(change=change, code_repo=repo)
+            w = self.pp("pass", "write", *base, "--change", change, "--intent", self.write_json("intent.json", intent))
+            path = self.state_dir / "feedback" / record_key(repo, change)
+            self.assertTrue(path.exists(), "the record is created")
+            self.assertLessEqual(len(path.name) + len(".lock"), 255)
+            self.assertEqual([p.name for p in path.parent.iterdir()], [path.name])
+            p = self.pp("pass", "plan", *base, "--change", change, "--owner", w["owner"], *snaps)
+            self.assertTrue(p["record"])
+            self.pp("pass", "adopt", *base, "--change", change, "--owner", "new-owner", "--from", w["owner"])  # takes the `.lock`
+            self.assertFalse(Path(str(path) + ".lock").exists())
+            if change[0] == "d":  # the fix is already pushed; adopt and done are covered by the first change
+                continue
+            self.fix_code()
+            self.push_all()
+            d = self.pp("pass", "done", *base, "--change", change, "--owner", "new-owner", *snaps)
+            self.assertTrue(d["deleted"])
+            self.assertFalse(path.exists())
+
+        # where the OS answers ENAMETOOLONG (POSIX) instead of "no such file" (Windows), the old path counts as absent
+        import errno
+        from unittest import mock
+        ns = PublishFallback.namespace()
+        real_exists = Path.exists
+
+        def exists(p):
+            if p.name == legacy_key(repo, "d" * 120):
+                raise OSError(errno.ENAMETOOLONG, "File name too long", str(p))
+            return real_exists(p)
+
+        with mock.patch.dict(os.environ, {"SPECWRIGHT_STATE_DIR": str(self.state_dir)}), mock.patch.object(Path, "exists", exists):
+            path, ignored = ns["locate_record"](repo, "d" * 120)
+        self.assertEqual((Path(path).name, ignored), (record_key(repo, "d" * 120), None))
+
+    def test_legacy_move_finished_by_another_caller(self):
+        # another call sees our published copy identical to the old file and removes the old file before our unlink
+        from unittest import mock
+        ns = PublishFallback.namespace()
+        rec = {"version": 1, "code_repo": CODE, "change": CHANGE, "round": 2, "findings": []}
+        legacy = self.state_dir / "feedback" / legacy_key(CODE, CHANGE)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        real_publish = ns["publish"]
+
+        def publish_then_other_caller_removes_old(src, dst):
+            real_publish(src, dst)
+            os.unlink(src)
+
+        with mock.patch.dict(os.environ, {"SPECWRIGHT_STATE_DIR": str(self.state_dir)}):
+            ns["publish"] = publish_then_other_caller_removes_old
+            path, ignored = ns["locate_record"](CODE, CHANGE)
+        self.assertEqual((Path(path).name, ignored), (record_key(CODE, CHANGE), None))
+        self.assertTrue(Path(path).exists())
+        self.assertFalse(legacy.exists())
+
+    def test_legacy_record_of_another_identity_is_left_alone(self):
+        self.write_record([self.finding()])
+        self.owner = None
+        rec = json.loads(self.raw().decode("utf-8"))
+        rec.update(code_repo="acme-code/add", change="greeting")  # 0.1.9 gave both identities `acme-code-add-greeting.json`
+        self.record_path().unlink()
+        legacy = self.state_dir / "feedback" / legacy_key("acme-code/add", "greeting")
+        self.assertEqual(legacy.name, legacy_key(CODE, CHANGE))
+        legacy.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        before = legacy.read_bytes()
+        p = self.plan()
+        self.assertFalse(p["record"])
+        self.assertEqual(legacy.read_bytes(), before)
+        self.assertFalse(self.record_path().exists())
+
+    def legacy_file(self, content):
+        legacy = self.state_dir / "feedback" / legacy_key(CODE, CHANGE)
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_bytes(content)
+        return legacy
+
+    def test_unreadable_legacy_record_stops(self):
+        cut = b'{"code_repo": "acme/code", "chan'  # a 0.1.9 file cut off mid-write
+        legacy = self.legacy_file(cut)
+        self.assertFalse(self.record_path().exists())
+        intent = self.write_json("intent.json", self.intent([self.finding()]))
+        for out in (self.plan(expect=1), self.pp("pass", "write", *self.common(), "--intent", intent, expect=1)):
+            self.assertEqual((out["ok"], out["error"]), (False, "record_unreadable"))
+            self.assertIn(legacy.name, out["message"])
+        self.assertFalse(self.record_path().exists(), "no new-key record may be started beside an unreadable legacy file")
+        self.assertEqual(legacy.read_bytes(), cut)
+
+    def test_unreadable_legacy_beside_valid_record_is_ignored(self):
+        self.write_record([self.finding()])
+        legacy = self.legacy_file(b"not json")
+        p = self.plan()
+        self.assertTrue(p["record"])
+        self.assertEqual(p["legacy_record_ignored"].replace(chr(92), "/").rsplit("/", 1)[-1], legacy.name)
+        self.assertEqual(legacy.read_bytes(), b"not json")
+        d = self.plan(sub="done", expect=1)  # the pass is not complete, but the legacy file does not stop it
+        self.assertEqual(d["error"], "not_complete")
+
+    def test_denied_legacy_record_is_unreadable(self):
+        # the old file cannot be read at all (a permission error): its identity is unknown, like a cut-off file
+        import errno
+        from unittest import mock
+        ns = PublishFallback.namespace()
+        legacy = self.legacy_file(b"{}")
+        real_text, real_bytes = Path.read_text, Path.read_bytes
+
+        def denied(real):
+            def read(p, *a, **k):
+                if p.name == legacy.name:
+                    raise PermissionError(errno.EACCES, "Permission denied", str(p))
+                return real(p, *a, **k)
+            return read
+
+        env = {"SPECWRIGHT_STATE_DIR": str(self.state_dir)}
+        reads = (mock.patch.dict(os.environ, env), mock.patch.object(Path, "read_text", denied(real_text)),
+                 mock.patch.object(Path, "read_bytes", denied(real_bytes)))
+        with reads[0], reads[1], reads[2]:
+            with self.assertRaises(ns["Stop"]) as cm:
+                ns["locate_record"](CODE, CHANGE)
+        self.assertEqual(cm.exception.error, "record_unreadable")
+        self.assertIn(legacy.name, cm.exception.message)
+        self.assertFalse(self.record_path().exists())
+        self.write_record([self.finding()])
+        with reads[0], reads[1], reads[2]:
+            path, ignored = ns["locate_record"](CODE, CHANGE)  # beside a valid record it is ignored, not fatal
+        self.assertEqual((Path(path).name, Path(ignored).name), (record_key(CODE, CHANGE), legacy.name))
+
+    def test_pass_write_is_exclusive_under_concurrency(self):
+        f = self.write_json("intent.json", self.intent([self.finding()]))
+        cmd = ["bash", str(SCRIPT), "pass", "write", *map(str, self.common()), "--intent", str(f)]
+        res = []
+        gate = threading.Barrier(2)
+
+        def go():
+            gate.wait()
+            r = subprocess.run(cmd, capture_output=True, text=True, env=self.env(), cwd=self.tmp)
+            res.append((r.returncode, json.loads(r.stdout.strip().splitlines()[0])))
+
+        ts = [threading.Thread(target=go) for _ in range(2)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+        self.assertEqual(sorted(rc for rc, _ in res), [0, 1], res)
+        win = next(o for rc, o in res if rc == 0)
+        lose = next(o for rc, o in res if rc == 1)
+        self.assertEqual(lose["error"], "record_exists")
+        self.assertEqual(json.loads(self.raw().decode("utf-8"))["owner"]["id"], win["owner"])
+        self.assertEqual([p.name for p in (self.state_dir / "feedback").iterdir()], [record_key(CODE, CHANGE)])
+
+    def test_pass_owner_plans_and_completes(self):
+        w = self.write_record([self.finding()])
+        self.assertRegex(w["owner"], r"^[0-9a-f]{32}$")
+        rec = json.loads(self.raw().decode("utf-8"))
+        self.assertEqual(rec["version"], 2)
+        self.assertEqual(rec["owner"]["id"], w["owner"])
+        self.assertEqual(set(rec["owner"]), {"id", "at", "checkout", "host"})
+        p = self.plan()
+        self.assertIs(p["owned"], True)
+        self.assertEqual(p["owner"]["id"], w["owner"])
+        self.record_path().unlink()
+        s = self.fresh_pass()
+        self.assertIs(self.plan(code=s)["owned"], True)
+        self.assertTrue(self.plan(code=s, sub="done")["deleted"])
+        self.assertFalse(self.record_path().exists())
+
+    def test_pass_plan_reports_foreign_owner(self):
+        w = self.write_record([self.finding()])
+        self.assertIs(self.plan()["owned"], True)
+        self.owner = "f" * 32
+        p = self.plan()
+        self.assertIs(p["owned"], False)
+        self.assertEqual(p["owner"]["id"], w["owner"])
+        self.assertTrue(p["owner"]["at"] and p["owner"]["checkout"] and p["owner"]["host"])
+        self.assertTrue(p["record"])  # reported, never refused
+
+    def test_pass_adopt_hands_over_the_record(self):
+        w = self.write_record([self.finding()])
+        before = json.loads(self.raw().decode("utf-8"))
+        self.assertTrue(self.adopt("b" * 32, w["owner"])["ok"])
+        after = json.loads(self.raw().decode("utf-8"))
+        self.assertEqual(after["owner"]["id"], "b" * 32)
+        before.pop("owner")
+        after.pop("owner")
+        self.assertEqual(after, before)
+        self.owner = "b" * 32
+        self.assertIs(self.plan()["owned"], True)
+        self.assertEqual([p.name for p in (self.state_dir / "feedback").iterdir()], [record_key(CODE, CHANGE)])
+
+    def test_pass_adopt_refuses_a_stale_from(self):
+        self.write_record([self.finding()])
+        before = self.raw()
+        self.assertEqual(self.adopt("b" * 32, "0" * 32, expect=1)["error"], "not_owner")
+        self.assertEqual(self.raw(), before)
+
+    def test_pass_adopt_and_done_refuse_a_held_lock(self):
+        w = self.write_record([self.finding()])
+        before = self.raw()
+        lock = Path(str(self.record_path()) + ".lock")
+        lock.mkdir()
+        r = self.adopt("b" * 32, w["owner"], expect=1)
+        self.assertEqual(r["error"], "record_busy")
+        self.assertIn(lock.name, r["message"])
+        d = self.plan(sub="done", expect=1)
+        self.assertEqual(d["error"], "record_busy")
+        self.assertIn(lock.name, d["message"])
+        self.assertEqual(self.raw(), before)
+        self.assertTrue(lock.is_dir())
+
+    def test_pass_done_refuses_a_non_owner(self):
+        s = self.fresh_pass()
+        self.owner = "e" * 32
+        self.assertEqual(self.plan(code=s, sub="done", expect=1)["error"], "not_owner")
+        self.assertTrue(self.record_path().exists())
+
+
 # =======================================================================================================
+class PassRepoLocal(Base):
+    """A repo-local change (no store): the same pass record, plan and rounds, with `--store` left out."""
+
+    def setUp(self):
+        super().setUp()
+        self.code = self.make_repo("code", f"https://github.com/{CODE}.git")
+        self.attach_bare(self.code, CODE)
+        self.git(self.code, "checkout", "-q", "-b", BRANCH)
+        self.commit(self.code, {"greet.py": "def greet(n):\n    return n\n", "openspec/specwright.yaml":
+                                "github:\n  login: KintsugiBot\npr:\n  max_fix_rounds: 2\n"}, "feat(add-greeting): task 1.1")
+        self.git(self.code, "push", "-q", "origin", BRANCH)
+        self.owner = None
+
+    def common(self):
+        return ["--code", self.code, "--code-repo", CODE, "--change", CHANGE]
+
+    def finding(self, fid="F1", source="code", dest="code", item="T1"):
+        return {"id": fid, "source": source, "destination": dest, "kind": "thread", "item": item, "root_id": 11,
+                "edits": [{"file": "greet.py", "contains": ["strip()"]}],
+                "disposition": {"reply": True, "resolve": True, "react": None},
+                "revision": {"rev": REV0, "last_reviewer_comment": {"id": "C11", "at": T0}}}
+
+    def intent(self, findings, prs=None, rnd=2):
+        return {"change": CHANGE, "branch": BRANCH, "round": rnd, "code_repo": CODE,
+                "prs": {"code": {"repo": CODE, "number": 5}, "store": None} if prs is None else prs, "findings": findings}
+
+    def write_record(self, findings, prs=None, expect=0):
+        f = self.write_json("intent.json", self.intent(findings, prs))
+        out = self.pp("pass", "write", *self.common(), "--intent", f, expect=expect)
+        if out.get("ok"):
+            self.owner = out["owner"]
+        return out
+
+    def plan(self, code=None, sub="plan", expect=0):
+        args = ["pass", sub, *self.common()]
+        if self.owner:
+            args += ["--owner", self.owner]
+        args += ["--snapshot", f"code={self.write_json('code-snap.json', code if code is not None else snap())}"]
+        return self.pp(*args, expect=expect)
+
+    def fix_code(self, rnd=2):
+        return self.commit(self.code, {"greet.py": "def greet(n):\n    return n.strip()\n"},
+                           f"fix(add-greeting): address review feedback\n\nFeedback-Round: {rnd}")
+
+    def record_path(self):
+        return self.state_dir / "feedback" / record_key(CODE, CHANGE)
+
+    def test_repo_local_final_pass_resumes_without_a_new_round(self):
+        # max_fix_rounds is 2 and pass 2 committed and pushed its fix, then the session died before replying
+        self.write_record([self.finding()])
+        self.fix_code()
+        self.git(self.code, "push", "-q", "origin", BRANCH)
+        r = self.pp("rounds", "--code", self.code, "--branch", BRANCH)
+        self.assertEqual((r["rounds"], r["limit_reached"], r["unpushed"], r["remote_unreadable"]), (2, True, {}, []))
+        p = self.plan(code=snap(threads=[thread()]))
+        self.assertEqual(self.row(p, "fix_commit", "code")["state"], "done")
+        self.assertEqual(self.row(p, "push", "code")["state"], "done")
+        self.assertEqual(self.row(p, "reply", finding="F1")["state"], "todo")
+        self.assertEqual((p["status"], p["round"], p["new_pass_allowed"], p["delete_record"], p["stops"]), ("resume", 2, False, False, []))
+        self.assertEqual({r["repo"] for r in p["rows"] if "repo" in r}, {"code"})  # code rows only
+
+    def test_repo_local_pass_completes_and_is_removed(self):
+        w = self.write_record([self.finding()])
+        self.assertEqual(self.plan(code=snap(threads=[thread()]))["status"], "resume")
+        self.fix_code()
+        self.git(self.code, "push", "-q", "origin", BRANCH)
+        p = self.plan(code=snap(threads=[]))  # the reply and the resolution are on GitHub: the thread is answered and gone
+        self.assertEqual((p["status"], p["delete_record"], p["owned"]), ("complete", True, True))
+        d = self.plan(code=snap(threads=[]), sub="done")
+        self.assertEqual((d["ok"], d["deleted"]), (True, True))
+        self.assertFalse(self.record_path().exists())
+        self.assertEqual(self.plan()["status"], "none")
+        self.assertTrue(w["owner"])
+
+    def test_repo_local_pass_write_refuses_store_destination(self):
+        for dest in ("store", "both"):
+            f = self.finding(dest=dest)
+            if dest == "both":
+                f["edits"][0]["repo"] = "code"
+            out = self.write_record([f], expect=1)
+            self.assertEqual(out["error"], "misrouted", dest)
+            self.assertFalse(self.record_path().exists())
+        out = self.write_record([self.finding(source="store")], expect=1)
+        self.assertEqual(out["error"], "misrouted")
+        self.assertFalse(self.record_path().exists())
+
+    def test_repo_local_pass_write_refuses_a_store_pr(self):
+        out = self.write_record([self.finding()], prs={"code": {"repo": CODE, "number": 5}, "store": {"repo": STORE, "number": 3}}, expect=2)
+        self.assertEqual(out["error"], "invalid_intent")
+        self.assertIn("prs.store", out["message"])
+        self.assertFalse(self.record_path().exists())
+
+    @staticmethod
+    def row(plan, step, repo=None, finding=None):
+        rows = [r for r in plan["rows"] if r["step"] == step and (repo is None or r.get("repo") == repo)
+                and (finding is None or r.get("finding") == finding)]
+        assert len(rows) == 1, f"want one {step}/{repo}/{finding} row in {[(r['step'], r.get('repo'), r.get('finding')) for r in plan['rows']]}"
+        return rows[0]
+
+
 def embedded_python():
     text = SCRIPT.read_text(encoding="utf-8")
     start = text.index("<<'PYSRC'\n") + len("<<'PYSRC'\n")
@@ -1248,6 +1834,84 @@ def find_py38():
             if r.stdout.strip() == "True":
                 return c
     return None
+
+
+class RecordLock(unittest.TestCase):
+    """record_lock: a lock directory that cannot be removed never replaces the outcome of the work done under it."""
+
+    def setUp(self):
+        self.ns = PublishFallback.namespace()
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(self.tmp), True)
+        self.path = self.tmp / "rec.json"
+
+    def held(self, body, path):
+        from unittest import mock
+        with mock.patch.object(self.ns["os"], "rmdir", side_effect=PermissionError(13, "denied")):
+            with self.ns["record_lock"](path):
+                body()
+
+    def test_failed_lock_removal_keeps_the_outcome(self):
+        self.held(lambda: None, self.path)  # the work succeeded: no exception, the lock is reported as left behind
+        self.assertEqual(self.ns["LEFT_LOCKS"], [self.ns["norm"](Path(str(self.path) + ".lock"))])
+        with self.assertRaises(self.ns["Stop"]) as busy:  # the lock that was left stops the next call, as for any held lock
+            self.held(lambda: None, self.path)
+        self.assertEqual(busy.exception.obj()["error"], "record_busy")
+        Stop = self.ns["Stop"]
+
+        def fail():
+            raise Stop("not_owner", "someone else")
+
+        with self.assertRaises(Stop) as cm:  # the body's own stop is what the caller sees
+            self.held(fail, self.tmp / "other.json")
+        self.assertEqual(cm.exception.obj()["error"], "not_owner")
+
+
+class PublishFallback(unittest.TestCase):
+    """publish() without hard links creates the destination with O_EXCL and writes it; a failed write leaves no record behind."""
+
+    @staticmethod
+    def namespace():
+        text = SCRIPT.read_text(encoding="utf-8")
+        src = text.split("<<'PYSRC'\n", 1)[1].rsplit("\nPYSRC", 1)[0]
+        src = src.split("\nargs = sys.argv[1:]", 1)[0]  # the definitions, not the dispatch
+        ns = {"__name__": "pr_pair_under_test"}
+        exec(compile(src, str(SCRIPT), "exec"), ns)
+        return ns
+
+    def test_failed_fallback_publish_leaves_no_record(self):
+        import errno
+        from unittest import mock
+        publish = self.namespace()["publish"]
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp), True)
+        src, dst = tmp / "src.json", tmp / "dst.json"
+        src.write_bytes(b'{"a": 1}')
+        real_fdopen = os.fdopen
+
+        class Failing:
+            def __init__(self, f):
+                self.f = f
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.f.close()
+
+            def write(self, data):
+                raise OSError(errno.ENOSPC, "No space left on device")
+
+        def failing_fdopen(fd, mode="r", *a, **k):
+            return Failing(real_fdopen(fd, mode, *a, **k))
+
+        with mock.patch.object(os, "link", side_effect=OSError(errno.EPERM, "links unsupported")), \
+                mock.patch.object(os, "fdopen", side_effect=failing_fdopen):
+            with self.assertRaises(OSError):
+                publish(str(src), str(dst))
+        self.assertFalse(dst.exists(), "the fallback left a partly written destination that would read as record_unreadable")
+        publish(str(src), str(dst))  # and the next attempt can create it
+        self.assertEqual(dst.read_bytes(), b'{"a": 1}')
 
 
 class PassRuntime(PassBase):
@@ -1381,6 +2045,347 @@ class Cleanup(Base):
         self.assertEqual(p["store"]["commands"], [])
         self.assertEqual(p["code"]["commands"], [])  # code has commits but no PR yet: nothing merged
         self.assertTrue(p["keep"])
+
+
+class ClosingCheck(Base):
+    """closing-check: the issues a description's closing lines name against what GitHub will close (#61)."""
+
+    def seed(self, body, refs=(), base="main", has_next=False, default=None):
+        self.add_pull(CODE, 7, body=body, base=base)
+        st = self.gh()
+        fake_gh.set_closing_refs(st, CODE, 7, [(n, r) for n, r in refs], has_next)
+        if default:
+            fake_gh.set_default_branch(st, CODE, default)
+        self.save_gh(st)
+
+    def check(self, expect=0):
+        return self.pp("closing-check", "--repo", CODE, "--pr", 7, expect=expect)
+
+    def intended(self, body, refs=()):
+        self.seed(body, refs)
+        return self.check()["intended"]
+
+    def test_closing_check_match(self):
+        self.seed("Fixes #21\nFixes #24\n", refs=[(21, CODE), (24, CODE)])
+        r = self.check()
+        self.assertEqual((r["ok"], r["status"]), (True, "match"))
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#24"])
+        self.assertEqual((r["missing"], r["extra"]), ([], []))
+        self.assertEqual((r["base"], r["default_branch"]), ("main", "main"))
+        self.assertEqual(sorted(r["linked"]), [f"{CODE}#21", f"{CODE}#24"])
+        graphql = [c for c in self.gh_calls() if "graphql" in " ".join(c["argv"])]
+        self.assertEqual(len(graphql), 1, "one GraphQL read")
+
+    def test_closing_check_reports_refs_after_one_keyword_as_missing(self):
+        self.seed("Fixes #24, #21, #43\n", refs=[(24, CODE)])
+        r = self.check()
+        self.assertEqual(r["status"], "mismatch")
+        self.assertEqual(sorted(r["intended"]), [f"{CODE}#21", f"{CODE}#24", f"{CODE}#43"])
+        self.assertEqual(sorted(r["missing"]), [f"{CODE}#21", f"{CODE}#43"])
+
+    def test_closing_check_extra_is_not_a_mismatch(self):
+        self.seed("Fixes #21\n", refs=[(21, CODE), (30, CODE)])
+        r = self.check()
+        self.assertEqual((r["status"], r["missing"], r["extra"]), ("match", [], [f"{CODE}#30"]))
+
+    def test_closing_check_not_default_base(self):
+        self.seed("Fixes #21\n", base="develop")
+        r = self.check()
+        self.assertEqual((r["ok"], r["status"]), (True, "not_default_base"))
+        self.assertEqual((r["base"], r["default_branch"], r["intended"]), ("develop", "main", [f"{CODE}#21"]))
+
+    def test_closing_check_default_branch_is_read_from_the_repository(self):
+        self.seed("Fixes #21\n", refs=[(21, CODE)], base="trunk", default="trunk")
+        self.assertEqual(self.check()["status"], "match")
+
+    def test_closing_check_lookup_failure_is_unknown(self):
+        self.seed("Fixes #21\n", refs=[(21, CODE)])
+        st = self.gh()
+        st["fail"] = ["graphql"]  # the one read carries the closing list and the default branch
+        self.save_gh(st)
+        r = self.check(expect=3)
+        self.assertEqual((r["ok"], r["error"], r["unknown"]), (False, "lookup_failed", True))
+
+    def test_closing_check_unreadable_pr_is_unknown(self):
+        r = self.pp("closing-check", "--repo", CODE, "--pr", 99, expect=3)  # no such repo or PR in the fake
+        self.assertEqual((r["ok"], r["error"]), (False, "lookup_failed"))
+
+    def test_closing_check_next_page_is_unknown(self):
+        self.seed("Fixes #21\n", refs=[(21, CODE)], has_next=True)
+        r = self.check(expect=3)
+        self.assertEqual((r["ok"], r["error"]), (False, "lookup_failed"))
+
+    def test_closing_check_requires_repo_and_pr(self):
+        self.pp("closing-check", "--repo", CODE, expect=2)
+        self.pp("closing-check", "--pr", 7, expect=2)
+
+    # ---- the parser ----
+    def test_closing_check_keywords_and_forms(self):
+        body = ("Close #1\nCLOSES: #2\nclosed #3\nfix #4\nFixed #5\nresolve #6\nResolves #7\nresolved: #8\n"
+                "Prefix #9\nunfixed #10\n")
+        self.assertEqual(self.intended(body), [f"{CODE}#{n}" for n in range(1, 9)])
+
+    def test_closing_check_ignores_refs_in_code(self):
+        body = ("Fixes #1\n```\nFixes #2\n```\n~~~\nFixes #3\n~~~\nand `Fixes #4` inline\n"
+                "Fixes #6 and `#5`\n")
+        self.assertEqual(self.intended(body), [f"{CODE}#1", f"{CODE}#6"])
+
+    def test_closing_check_ignores_multi_backtick_code_spans(self):
+        # a span closes at the next run of the same length: the single backtick inside does not end it
+        body = "Fixes #1\nsee ``Fixes #2 ` Fixes #4`` and Fixes #3\n"
+        self.assertEqual(self.intended(body), [f"{CODE}#1", f"{CODE}#3"])
+
+    def test_closing_check_unmatched_backtick_is_literal(self):
+        # no closing run of three or of two: both runs are text, so the keyword between them counts
+        self.assertEqual(self.intended("Fixes #1\nsee ```Fixes #3 `` here\n"), [f"{CODE}#1", f"{CODE}#3"])
+
+    def test_closing_check_reads_numbered_closing_lines(self):
+        self.seed("1. Fixes #24, #21, #43\n2) Closes #7\n", refs=[(24, CODE), (7, CODE)])
+        r = self.check()
+        self.assertEqual(r["status"], "mismatch")
+        self.assertEqual(sorted(r["intended"]), sorted(f"{CODE}#{n}" for n in (7, 21, 24, 43)))
+        self.assertEqual(sorted(r["missing"]), [f"{CODE}#21", f"{CODE}#43"])
+
+    def test_closing_check_normalises_cross_repo_and_urls(self):
+        body = ("Fixes other/repo#5\nFixes https://github.com/acme/code/issues/8\n"
+                "Resolves https://github.com/other/repo/issues/9\nFixes #1\n")
+        self.assertEqual(self.intended(body), ["other/repo#5", f"{CODE}#8", "other/repo#9", f"{CODE}#1"])
+
+    def test_closing_check_normalises_linked_issues_of_other_repos(self):
+        self.seed("Fixes other/repo#5\n", refs=[(5, "other/repo"), (6, CODE)])
+        r = self.check()
+        self.assertEqual((r["status"], r["extra"]), ("match", [f"{CODE}#6"]))
+
+    def test_closing_check_related_is_not_intended(self):
+        self.assertEqual(self.intended("Fixes #21\nRelated: #52\nSee #53 and other/repo#54\n"), [f"{CODE}#21"])
+
+    def test_closing_check_keyword_mid_line_names_only_the_next_ref(self):
+        self.assertEqual(self.intended("This also fixes #5 but see #6\n"), [f"{CODE}#5"])
+
+    def test_closing_check_keyword_line_names_every_ref(self):
+        self.assertEqual(self.intended("- Fixes #5 and #6, other/repo#7\n"), [f"{CODE}#5", f"{CODE}#6", "other/repo#7"])
+
+    def test_closing_check_lists_each_issue_once(self):
+        self.assertEqual(self.intended("Fixes #5\nFixes #5\n"), [f"{CODE}#5"])
+
+
+class ClosedCheck(Base):
+    """closed-check: at cleanup, which issues a merged PR's closing lines name are still open (#61 part 3)."""
+
+    MERGED = "2026-10-08T10:00:00Z"
+
+    def seed(self, body, merged=MERGED, base="main", issues=None):
+        """PR #7 of CODE; `issues` maps (slug, n) to (state, timeline)."""
+        self.add_pull(CODE, 7, body=body, base=base, state="closed", merged=merged)
+        st = self.gh()
+        for (slug, n), (state, timeline) in (issues or {}).items():
+            fake_gh.set_issue(st, slug, n, state, timeline)
+        self.save_gh(st)
+
+    def check(self, repos=CODE, expect=0, pr=7):
+        return self.pp("closed-check", "--repo", CODE, "--pr", pr, "--repos", repos, expect=expect)
+
+    def reads(self, needle):
+        return [c for c in self.gh_calls() if "graphql" in " ".join(c["argv"]) and needle in " ".join(c["argv"])]
+
+    def test_closed_check_lists_open_intended_issues(self):
+        self.seed("Fixes #21\nFixes #24\n", issues={(CODE, 21): ("CLOSED", ["CLOSED"]), (CODE, 24): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["ok"], r["status"]), (True, "merged"))
+        self.assertEqual(r["pr_url"], f"https://github.com/{CODE}/pull/7")
+        self.assertEqual((r["base"], r["default_branch"]), ("main", "main"))
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#24"])
+        self.assertEqual((r["open"], r["closed"], r["reopened"], r["outside"]), ([f"{CODE}#24"], [f"{CODE}#21"], [], []))
+        self.assertEqual(len(self.reads("pullRequest(number")), 1, "one GraphQL read of the PR")
+        self.assertEqual(len(self.reads("issue(number")), 2, "one read per intended issue")
+        writes = [c for c in self.gh_calls() if c["argv"][:2] in (["issue", "close"], ["issue", "comment"]) or "-X" in c["argv"]]
+        self.assertEqual(writes, [], "the check never writes")
+
+    def test_closed_check_all_closed(self):
+        self.seed("Fixes #21\nFixes #24\n", issues={(CODE, 21): ("CLOSED", ["CLOSED"]), (CODE, 24): ("CLOSED", ["CLOSED"])})
+        r = self.check()
+        self.assertEqual((r["status"], r["open"], r["reopened"], r["outside"]), ("merged", [], [], []))
+        self.assertEqual(r["closed"], [f"{CODE}#21", f"{CODE}#24"])
+
+    def test_closed_check_ignores_related(self):
+        self.seed("Fixes #21\n\nRelated: #52\n", issues={(CODE, 21): ("CLOSED", ["CLOSED"]), (CODE, 52): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21"])
+        self.assertEqual((r["open"], r["reopened"], r["outside"]), ([], [], []))
+        self.assertEqual(self.reads("number=52"), [], "a Related issue is never read")
+
+    def test_closed_check_not_merged(self):
+        self.seed("Fixes #21\n", merged=None, issues={(CODE, 21): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["ok"], r["status"]), (True, "not_merged"))
+        self.assertEqual((r["open"], r["reopened"], r["closed"], r["outside"]), ([], [], [], []))
+        self.assertEqual(self.reads("issue(number"), [], "no issue is read for an unmerged PR")
+
+    def test_closed_check_not_default_base(self):
+        self.seed("Fixes #21\n", base="develop", issues={(CODE, 21): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["ok"], r["status"]), (True, "not_default_base"))
+        self.assertEqual((r["base"], r["default_branch"], r["intended"]), ("develop", "main", [f"{CODE}#21"]))
+        self.assertEqual((r["open"], r["reopened"], r["closed"], r["outside"]), ([], [], [], []))
+        self.assertEqual(self.reads("issue(number"), [], "nothing is closed, so nothing is read")
+
+    def test_closed_check_reports_reopened(self):
+        self.seed("Fixes #24\nFixes #25\n", issues={(CODE, 24): ("OPEN", ["CLOSED", "REOPENED"]), (CODE, 25): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["reopened"], r["open"]), ([f"{CODE}#24"], [f"{CODE}#25"]))
+
+    def test_closed_check_does_not_read_outside_issues(self):
+        self.seed("Fixes #21\nFixes other/tool#5\n", issues={(CODE, 21): ("OPEN", [])})
+        st = self.gh()
+        st["fail"] = [{"match": "name=tool", "exit": 1, "stderr": "boom"}]  # any read of the outside repo would fail
+        self.save_gh(st)
+        r = self.check()
+        self.assertEqual(r["status"], "merged")
+        self.assertEqual((r["open"], r["outside"]), ([f"{CODE}#21"], ["other/tool#5"]))
+        self.assertEqual(r["intended"], [f"{CODE}#21", "other/tool#5"])
+        self.assertEqual(self.reads("name=tool"), [], "an outside issue is never read")
+
+    def test_closed_check_reads_issues_of_every_listed_repo_case_insensitively(self):
+        self.seed("Fixes #21\nFixes acme/plans#3\nFixes Other/Tool#5\n",
+                  issues={(CODE, 21): ("OPEN", []), (STORE, 3): ("OPEN", ["CLOSED", "REOPENED"])})
+        r = self.check(repos=f"{CODE.upper()},{STORE}")
+        self.assertEqual((r["open"], r["reopened"], r["outside"]), ([f"{CODE}#21"], [f"{STORE}#3"], ["Other/Tool#5"]))
+        self.assertEqual(len(self.reads("name=plans")), 1)
+
+    def test_closed_check_reads_each_repo_through_its_login(self):
+        # a private store only sh1ny can read: its issue is read as sh1ny while the call runs as KintsugiBot
+        self.seed("Fixes #21\nFixes acme/plans#3\n", issues={(CODE, 21): ("OPEN", []), (STORE, 3): ("OPEN", [])})
+        st = self.gh()
+        st.setdefault("repos", {}).setdefault(STORE, {})["readers"] = ["sh1ny"]
+        self.save_gh(st)
+        args = ("closed-check", "--repo", CODE, "--pr", 7, "--repos", f"{CODE},{STORE}")
+        self.assertEqual(self.pp(*args, env={"GH_TOKEN": "tok-k"}, expect=3)["error"], "lookup_failed")
+        r = self.pp(*args, "--login", f"{STORE}=sh1ny", env={"GH_TOKEN": "tok-k"})
+        self.assertEqual(r["open"], [f"{CODE}#21", f"{STORE}#3"])
+        self.pp(*args, "--login", "sh1ny", expect=2)
+
+    def test_closed_check_lookup_failure_is_unknown(self):
+        self.seed("Fixes #21\n", issues={(CODE, 21): ("OPEN", [])})
+        st = self.gh()
+        st["fail"] = [{"match": r"pullRequest\(number", "exit": 1, "stderr": "boom"}]  # the PR read
+        self.save_gh(st)
+        r = self.check(expect=3)
+        self.assertEqual((r["ok"], r["error"], r["unknown"]), (False, "lookup_failed", True))
+        st["fail"] = [{"match": r"issue\(number", "exit": 1, "stderr": "boom"}]  # an in-scope issue read
+        self.save_gh(st)
+        r = self.check(expect=3)
+        self.assertEqual((r["ok"], r["error"], r["unknown"]), (False, "lookup_failed", True))
+
+    def test_closed_check_unreadable_pr_or_issue_is_unknown(self):
+        self.seed("Fixes #21\n")  # issue 21 does not exist in the fake
+        self.assertEqual(self.check(expect=3)["error"], "lookup_failed")
+        self.assertEqual(self.check(expect=3, pr=99)["error"], "lookup_failed")
+
+    def test_closed_check_ignores_hidden_references(self):
+        body = ("Fixes #21\n\n    Fixes #30\n\n## Notes\n    Fixes #31\n\nsee `code\nFixes #32` here\n\n"
+                "<!-- hidden\nFixes #33\n-->\n")
+        self.seed(body, issues={(CODE, 21): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["intended"], r["open"]), ([f"{CODE}#21"], [f"{CODE}#21"]))
+        for n in (30, 31, 32, 33):
+            self.assertEqual(self.reads(f"number={n}"), [], f"hidden #{n} is never read")
+
+    def test_closed_check_ignores_related_on_a_closing_line(self):
+        self.seed("Fixes #21; Related: #52\n", issues={(CODE, 21): ("OPEN", []), (CODE, 52): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["intended"], r["open"]), ([f"{CODE}#21"], [f"{CODE}#21"]))
+        self.assertEqual(self.reads("number=52"), [], "a Related issue is never read")
+
+    def test_closed_check_ignores_a_line_without_a_closing_list(self):
+        self.seed("Fixes the crash; Related: #52\n", issues={(CODE, 52): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["intended"], r["open"]), ([], []))
+        self.assertEqual(self.reads("number=52"), [], "a Related issue is never read")
+
+    def test_closed_check_fence_closes_only_on_a_bare_fence(self):
+        # a fence line closes only with the same character, at least as long, and nothing but white space after it
+        body = ("Fixes #21\n```\nFixes #30\n``` not a closer\nFixes #31\n```\nFixes #22\n"
+                "~~~~\nFixes #32\n~~~ short\nFixes #33\n~~~~   \nFixes #34\n")
+        self.seed(body, issues={(CODE, n): ("OPEN", []) for n in (21, 22, 34)})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#22", f"{CODE}#34"])
+        for n in (30, 31, 32, 33):
+            self.assertEqual(self.reads(f"number={n}"), [], f"fenced #{n} is never read")
+
+    def test_closed_check_removed_span_leaves_a_space(self):
+        # the text around a removed code span never joins into a new word: Fi`x`xes is not Fixes
+        self.seed("Fi`x`xes #30\nFixes #21\n", issues={(CODE, 21): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["intended"], r["open"]), ([f"{CODE}#21"], [f"{CODE}#21"]))
+        self.assertEqual(self.reads("number=30"), [], "a joined word is no keyword")
+
+    def test_closed_check_comment_opener_in_a_span_is_code(self):
+        # code spans are found before HTML comments in a paragraph; a real comment still hides its text
+        body = ("see `<!--` here\nFixes #21\n\nText `<!--\nstill code` and <!-- hidden\nFixes #30\n-->\nFixes #22\n")
+        self.seed(body, issues={(CODE, 21): ("OPEN", []), (CODE, 22): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#22"])
+        self.assertEqual(self.reads("number=30"), [], "text in a real comment is never read")
+
+    def test_closed_check_list_needs_a_ref_right_after_the_keyword(self):
+        # only white space and an optional colon may sit between the leading keyword and the first reference
+        body = "Fixes, #30\nFixes `x`; #31\nFixes `#21` and #32\nFixes: #22, #23\n"
+        self.seed(body, issues={(CODE, n): ("OPEN", []) for n in (22, 23)})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#22", f"{CODE}#23"])
+        for n in (30, 31, 32):
+            self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is in no closing list")
+
+    def test_closed_check_ignores_code_inside_containers(self):
+        # block rules apply after the blockquote markers: `>     Fixes` is indented code in a quote, and a quoted fence hides its
+        # lines; a list marker followed by five spaces starts indented code too
+        body = (">     Fixes #30\n\n> ```\n> Fixes #31\n> ```\n\n-     Fixes #32\n\n> Fixes #21\n\n- Fixes #22\n")
+        self.seed(body, issues={(CODE, n): ("OPEN", []) for n in (21, 22)})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#22"])
+        for n in (30, 31, 32):
+            self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is code in a container")
+
+    def test_closed_check_ignores_fences_in_list_items(self):
+        # a fence opened after a list marker hides its lines like any other fence
+        body = "- ~~~\n  Fixes #52\n  ~~~\n\n1. ```\n   Fixes #53\n   ```\n\n- Fixes #21\n"
+        self.seed(body, issues={(CODE, 21): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21"])
+        for n in (52, 53):
+            self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is fenced code in a list item")
+
+    def test_closed_check_list_marker_in_a_fence_is_code(self):
+        # inside an open fence a list-marked fence line is content, never the closer; a tab after a marker counts like a space
+        body = "```\n- ```\nFixes #30\n```\nFixes #21\n\n-\t~~~\nFixes #31\n~~~\n\nFixes #22\n"
+        self.seed(body, issues={(CODE, n): ("OPEN", []) for n in (21, 22)})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#22"])
+        for n in (30, 31):
+            self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is fenced code")
+
+    def test_closed_check_close_before_the_merge_is_open(self):
+        # only a close at or after the merge, then a reopen, makes `reopened`; an older close/reopen leaves the issue `open`
+        early = ("CLOSED", "2026-10-01T00:00:00Z")
+        self.seed("Fixes #24\nFixes #25\n", issues={(CODE, 24): ("OPEN", [early, "REOPENED"]),
+                                                    (CODE, 25): ("OPEN", [early, "REOPENED", ("CLOSED", self.MERGED), "REOPENED"])})
+        r = self.check()
+        self.assertEqual((r["open"], r["reopened"]), ([f"{CODE}#24"], [f"{CODE}#25"]))
+
+    def test_closed_check_reads_text_after_an_inline_comment(self):
+        # an inline comment that opens after paragraph text ends at `-->`, and the text after it is rendered; an HTML block that
+        # starts its own line takes the rest of its closing line with it
+        body = "Intro <!-- hidden\nFixes #30 --> Fixes #21\n\n<!-- block\n--> Fixes #31\n\nFixes #22\n"
+        self.seed(body, issues={(CODE, n): ("OPEN", []) for n in (21, 22)})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#22"])
+        for n in (30, 31):
+            self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is hidden")
+
+    def test_closed_check_requires_repo_pr_and_repos(self):
+        self.pp("closed-check", "--repo", CODE, "--pr", 7, expect=2)
+        self.pp("closed-check", "--repo", CODE, "--repos", CODE, expect=2)
+        self.pp("closed-check", "--pr", 7, "--repos", CODE, expect=2)
 
 
 if __name__ == "__main__":
