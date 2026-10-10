@@ -199,10 +199,10 @@ def _safe(t):
 
 
 def record_key(repo, change):
-    """The record's file name: readable owner.name.change, then 32 hex of sha256(lower(owner), lower(name), change)."""
+    """The record's file name: readable owner.name.change (first 120 characters), then 32 hex of sha256(lower(owner), lower(name), change)."""
     owner, _, name = repo.partition("/")
     h = hashlib.sha256(f"{owner.lower()}\n{name.lower()}\n{change}".encode("utf-8")).hexdigest()[:32]
-    return f"{_safe(owner)}.{_safe(name)}.{_safe(change)}-{h}.json".lower()
+    return f"{_safe(owner)}.{_safe(name)}.{_safe(change)}"[:120].lower() + f"-{h}.json"
 
 
 def legacy_key(repo, change):
@@ -1477,6 +1477,69 @@ class PassOwnership(PassBase):
         self.assertFalse(legacy.exists())
         self.assertEqual(self.raw(), before)
 
+    def test_record_key_is_bounded_for_the_longest_names(self):
+        # GitHub allows a 39-character owner and a 100-character repository; the record and its `.lock` must stay under 255 characters
+        self.settings("github:\n  login: KintsugiBot\npr:\n  max_fix_rounds: 2\n")
+        repo = "o" * 39 + "/" + "r" * 100
+        base = ["--code", self.code, "--store", self.store, "--code-repo", repo]
+        s = self.write_json("s.json", snap(threads=[]))
+        snaps = ["--snapshot", f"code={s}", "--snapshot", f"store={s}"]
+        for change in ("c" * 80, "d" * 120):  # the second: its 0.1.9 file name is itself too long for the file system
+            intent = self.intent([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}], react=None)])
+            intent.update(change=change, code_repo=repo)
+            w = self.pp("pass", "write", *base, "--change", change, "--intent", self.write_json("intent.json", intent))
+            path = self.state_dir / "feedback" / record_key(repo, change)
+            self.assertTrue(path.exists(), "the record is created")
+            self.assertLessEqual(len(path.name) + len(".lock"), 255)
+            self.assertEqual([p.name for p in path.parent.iterdir()], [path.name])
+            p = self.pp("pass", "plan", *base, "--change", change, "--owner", w["owner"], *snaps)
+            self.assertTrue(p["record"])
+            self.pp("pass", "adopt", *base, "--change", change, "--owner", "new-owner", "--from", w["owner"])  # takes the `.lock`
+            self.assertFalse(Path(str(path) + ".lock").exists())
+            if change[0] == "d":  # the fix is already pushed; adopt and done are covered by the first change
+                continue
+            self.fix_code()
+            self.push_all()
+            d = self.pp("pass", "done", *base, "--change", change, "--owner", "new-owner", *snaps)
+            self.assertTrue(d["deleted"])
+            self.assertFalse(path.exists())
+
+        # where the OS answers ENAMETOOLONG (POSIX) instead of "no such file" (Windows), the old path counts as absent
+        import errno
+        from unittest import mock
+        ns = PublishFallback.namespace()
+        real_exists = Path.exists
+
+        def exists(p):
+            if p.name == legacy_key(repo, "d" * 120):
+                raise OSError(errno.ENAMETOOLONG, "File name too long", str(p))
+            return real_exists(p)
+
+        with mock.patch.dict(os.environ, {"SPECWRIGHT_STATE_DIR": str(self.state_dir)}), mock.patch.object(Path, "exists", exists):
+            path, ignored = ns["locate_record"](repo, "d" * 120)
+        self.assertEqual((Path(path).name, ignored), (record_key(repo, "d" * 120), None))
+
+    def test_legacy_move_finished_by_another_caller(self):
+        # another call sees our published copy identical to the old file and removes the old file before our unlink
+        from unittest import mock
+        ns = PublishFallback.namespace()
+        rec = {"version": 1, "code_repo": CODE, "change": CHANGE, "round": 2, "findings": []}
+        legacy = self.state_dir / "feedback" / legacy_key(CODE, CHANGE)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        real_publish = ns["publish"]
+
+        def publish_then_other_caller_removes_old(src, dst):
+            real_publish(src, dst)
+            os.unlink(src)
+
+        with mock.patch.dict(os.environ, {"SPECWRIGHT_STATE_DIR": str(self.state_dir)}):
+            ns["publish"] = publish_then_other_caller_removes_old
+            path, ignored = ns["locate_record"](CODE, CHANGE)
+        self.assertEqual((Path(path).name, ignored), (record_key(CODE, CHANGE), None))
+        self.assertTrue(Path(path).exists())
+        self.assertFalse(legacy.exists())
+
     def test_legacy_record_of_another_identity_is_left_alone(self):
         self.write_record([self.finding()])
         self.owner = None
@@ -2157,6 +2220,27 @@ class ClosedCheck(Base):
         self.seed("Fixes #21\n")  # issue 21 does not exist in the fake
         self.assertEqual(self.check(expect=3)["error"], "lookup_failed")
         self.assertEqual(self.check(expect=3, pr=99)["error"], "lookup_failed")
+
+    def test_closed_check_ignores_hidden_references(self):
+        body = ("Fixes #21\n\n    Fixes #30\n\n## Notes\n    Fixes #31\n\nsee `code\nFixes #32` here\n\n"
+                "<!-- hidden\nFixes #33\n-->\n")
+        self.seed(body, issues={(CODE, 21): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["intended"], r["open"]), ([f"{CODE}#21"], [f"{CODE}#21"]))
+        for n in (30, 31, 32, 33):
+            self.assertEqual(self.reads(f"number={n}"), [], f"hidden #{n} is never read")
+
+    def test_closed_check_ignores_related_on_a_closing_line(self):
+        self.seed("Fixes #21; Related: #52\n", issues={(CODE, 21): ("OPEN", []), (CODE, 52): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["intended"], r["open"]), ([f"{CODE}#21"], [f"{CODE}#21"]))
+        self.assertEqual(self.reads("number=52"), [], "a Related issue is never read")
+
+    def test_closed_check_ignores_a_line_without_a_closing_list(self):
+        self.seed("Fixes the crash; Related: #52\n", issues={(CODE, 52): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["intended"], r["open"]), ([], []))
+        self.assertEqual(self.reads("number=52"), [], "a Related issue is never read")
 
     def test_closed_check_requires_repo_pr_and_repos(self):
         self.pp("closed-check", "--repo", CODE, "--pr", 7, expect=2)

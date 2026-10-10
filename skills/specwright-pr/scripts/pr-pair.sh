@@ -18,7 +18,7 @@
 #   closed-check --repo o/n --pr N --repos o/n[,o/n] [--login o/n=L ...]
 #                                     at cleanup: which issues the merged PR's closing lines name are still open
 #                                     status merged | not_merged | not_default_base; open, reopened, closed, outside (a failed read = unknown, exit 3)
-                                     --login: the login that reads o/n when it is not the one the call runs as
+#                                     --login: the login that reads o/n when it is not the one the call runs as
 #   link --repo o/n --pr N --kind store|code --peer-url URL [--login L]
 #                                     one marker comment <!-- specwright:link KIND URL -->; edits its own on a new peer
 #   pair-state --code d --store d --branch b [--snapshot code=f] [--snapshot store=f] [--dropped id@rev]...
@@ -57,6 +57,7 @@ export PR_PAIR_BASH
 exec "$py" -I -X utf8 - "$@" <<'PYSRC'
 import contextlib
 import datetime
+import errno
 import hashlib
 import json
 import os
@@ -696,19 +697,77 @@ def strip_code_spans(line):
     return "".join(out)
 
 
+def indent_columns(line):
+    """Leading white space of a line in columns, a tab advancing to the next multiple of four."""
+    col = 0
+    for ch in line:
+        if ch == " ":
+            col += 1
+        elif ch == "\t":
+            col += 4 - col % 4
+        else:
+            break
+    return col
+
+
 def without_code(body):
-    """The description's lines with fenced blocks and inline code spans removed (GitHub reads closing keywords outside code only)."""
-    out, fence = [], None
-    for line in body.replace("\r\n", "\n").split("\n"):
-        m = re.match(r"\s{0,3}(`{3,}|~{3,})", line)
-        if fence:
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
-                fence = None
+    """The description's lines with what GitHub does not read as text removed: fenced blocks, indented code (every line indented
+    four or more columns, unless the line before it is a paragraph line), HTML comments (also across lines) and inline code
+    spans, which may continue across the lines of one paragraph (a blank line ends it)."""
+    out, para = [], []
+    fence, in_comment = None, False
+    prev_para = False  # the previous line was a paragraph line, so an indented line continues it
+
+    def flush():
+        if para:
+            out.extend(strip_code_spans("\n".join(para)).split("\n"))
+            del para[:]
+
+    for raw in body.replace("\r\n", "\n").split("\n"):
+        line, comment_line = raw, in_comment
+        if in_comment:
+            end = line.find("-->")
+            if end < 0:
+                prev_para = False
+                continue
+            line, in_comment = line[end + 3:], False
+        else:
+            m = re.match(r"\s{0,3}(`{3,}|~{3,})", line)
+            if fence:
+                if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                    fence = None
+                continue
+            if m:
+                flush()
+                fence, prev_para = m.group(1), False
+                continue
+            if indent_columns(line) < 4 and line.lstrip().startswith("<!--"):
+                comment_line = True
+        while "<!--" in line:
+            start = line.index("<!--")
+            end = line.find("-->", start + 4)
+            if end < 0:
+                line, in_comment = line[:start], True
+                break
+            line = line[:start] + line[end + 3:]
+        if not raw.strip():
+            flush()
+            prev_para = False
             continue
-        if m:
-            fence = m.group(1)
+        if indent_columns(raw) >= 4 and not prev_para and not comment_line:
+            flush()
             continue
-        out.append(strip_code_spans(line))
+        stripped = raw.lstrip()
+        if (comment_line or re.match(r"#{1,6}(?:\s|$)", stripped) or re.match(r"([-*_])(?:\s*\1){2,}\s*$", stripped)
+                or not line.strip()):
+            flush()  # a heading, thematic break or comment line is no paragraph line and ends the paragraph
+            prev_para = False
+            if line.strip() and not comment_line:
+                out.append(strip_code_spans(line))
+            continue
+        prev_para = True
+        para.append(line)
+    flush()
     return out
 
 
@@ -721,15 +780,29 @@ def issue_key(m, repo):
     return repo, int(m.group(5))
 
 
+LIST_GAP = re.compile(r"(?:[\s,;]|\band\b|" + CLOSE_KW + r")*", re.I)
+
+
 def intended_issues(body, repo):
-    """Issues a description's closing lines name: every ref directly after a closing keyword, and every ref on a line that starts with one."""
+    """Issues a description's closing lines name: every ref directly after a closing keyword, and the closing list of a line that
+    starts with one: the ref directly after that keyword and each next ref separated from the one before by only `,`, `;`, `and`,
+    white space or another closing keyword. Any other text ends the list; a line whose first ref does not directly follow the
+    keyword has none."""
     found = []
     for line in without_code(body):
-        refs = [(m.start(), issue_key(m, repo)) for m in re.finditer(ISSUE_REF, line)]
-        if re.match(r"(?:[\s>*+-]|\d{1,9}[.)](?=\s))*" + CLOSE_KW, line, re.I):
-            found.extend(k for _, k in refs)
+        refs = [(m.start(), m.end(), issue_key(m, repo)) for m in re.finditer(ISSUE_REF, line)]
+        lead = re.match(r"(?:[\s>*+-]|\d{1,9}[.)](?=\s))*" + CLOSE_KW, line, re.I)
+        if lead:
+            prev = lead.end()
+            for at, end, k in refs:
+                if at < lead.end():
+                    continue
+                if LIST_GAP.match(line, prev).end() != at:
+                    break
+                found.append(k)
+                prev = end
         for kw in re.finditer(CLOSE_KW, line, re.I):
-            nxt = next((k for at, k in refs if at >= kw.end() and not line[kw.end():at].strip()), None)
+            nxt = next((k for at, _, k in refs if at >= kw.end() and not line[kw.end():at].strip()), None)
             if nxt:
                 found.append(nxt)
     seen, out = set(), []
@@ -1059,10 +1132,11 @@ def _safe(s):
 
 def record_path(code_repo, change):
     """<owner>.<name>.<change>-<32 hex of sha256(lower(owner), lower(name), change)>.json: the hash keeps hyphenated
-    identities apart (0.1.9 joined the parts with '-', so acme-tools/widget and acme/tools-widget shared a file)."""
+    identities apart (0.1.9 joined the parts with '-', so acme-tools/widget and acme/tools-widget shared a file). The readable
+    part is cut to 120 characters so the file and its `.lock` stay under the 255-character name limit; the hash covers it all."""
     owner, _, name = code_repo.partition("/")
     h = hashlib.sha256(f"{owner.lower()}\n{name.lower()}\n{change}".encode("utf-8")).hexdigest()[:32]
-    return record_dir() / f"{_safe(owner)}.{_safe(name)}.{_safe(change)}-{h}.json".lower()
+    return record_dir() / (f"{_safe(owner)}.{_safe(name)}.{_safe(change)}"[:120].lower() + f"-{h}.json")
 
 
 def legacy_record_path(code_repo, change):
@@ -1098,6 +1172,16 @@ def publish(src, dst):
         raise
 
 
+def exists_here(p):
+    """Path.exists(), except that a path the OS rejects as too long is absent: no file can have that name."""
+    try:
+        return p.exists()
+    except OSError as e:
+        if e.errno == errno.ENAMETOOLONG or getattr(e, "winerror", None) == 206:
+            return False
+        raise
+
+
 def locate_record(code_repo, change):
     """(path, ignored legacy path or None). A 0.1.9-key record of this repository and change is moved to the new key on first
     use; one of another identity stays where it is, and one beside an existing new-key record is left and reported. A legacy
@@ -1105,7 +1189,7 @@ def locate_record(code_repo, change):
     unreadable legacy file stops (record_unreadable): it may be the pass in progress, and a new pass must not start beside it;
     beside a new-key record it is reported as ignored."""
     path, old = record_path(code_repo, change), legacy_record_path(code_repo, change)
-    if not old.exists():
+    if not exists_here(old):
         return path, None
     if path.exists():
         try:
@@ -1128,7 +1212,10 @@ def locate_record(code_repo, change):
         publish(old, path)
     except FileExistsError:
         return path, norm(old)
-    old.unlink()
+    try:
+        old.unlink()
+    except FileNotFoundError:  # another call finished the move first
+        pass
     return path, None
 
 
