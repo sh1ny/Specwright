@@ -60,6 +60,10 @@ Each pass record SHALL be stored under a key that keeps the repository owner, th
 - **WHEN** no record exists under the new key, and a file under the old key exists whose contents cannot be parsed, so its repository and change are unknown
 - **THEN** the lookup stops with `record_unreadable` naming that file, and no new pass is allowed
 
+#### Scenario: Old key denied by the filesystem
+- **WHEN** a valid record exists under the new key, and reading the file under the old key fails with a permission error
+- **THEN** the plan uses the new record and reports the old file as ignored; without a new-key record, the lookup stops with `record_unreadable`
+
 #### Scenario: Unreadable old key beside a valid record
 - **WHEN** a valid record exists under the new key, and the file under the old key cannot be parsed
 - **THEN** the plan and `pass done` use the new record, and the old file is reported as ignored

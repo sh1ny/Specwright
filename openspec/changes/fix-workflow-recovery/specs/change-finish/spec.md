@@ -7,7 +7,7 @@ Lets `specwright-finish` complete a change that an earlier finish run left partl
 ## ADDED Requirements
 
 ### Requirement: Finish resumes from git evidence
-When finish runs for a change whose archive is already committed, it SHALL derive what is done from git in each repo of the change: an archive commit on the change branch, a `merge: <change-name>` commit on main's first-parent history (which counts for an existing change branch only when that branch's tip is on main), and whether the change branch still exists. It SHALL continue from the first step not done and SHALL NOT repeat a done step.
+When finish runs again for a change it already archived, it SHALL derive what is done from git in each repo of the change: an archive commit on the change branch, a `merge: <change-name>` commit on main's first-parent history (which counts for an existing change branch only when that branch's tip is on main), and whether the change branch still exists. It SHALL continue from the first step not done and SHALL NOT repeat a done step.
 
 #### Scenario: Interrupted after the archive commit, local mode
 - **WHEN** a repo-local change in `finish: local` has its archive commit on the change branch, the branch is not merged, and finish runs again
@@ -44,3 +44,18 @@ When finish runs for a change whose archive is already committed, it SHALL deriv
 #### Scenario: Archive committed on the branch but archive paths dirty
 - **WHEN** the archive commit is on the change branch and a file under the archive directory has uncommitted changes
 - **THEN** finish merges nothing, lists that file, and asks the user
+
+### Requirement: Finish resume keeps the planning-only test and each repo's scope
+A resumed finish SHALL run the planning-only test before an archive commit it still has to make. It SHALL NOT merge, ship or delete the code repo's branch after a store-only archive recovery, and SHALL count a code repo with no archive commit, merge or branch beside a finished store as done only when the store's archive marks the change as having no code changes.
+
+#### Scenario: Interrupted before the archive commit, planning-only change
+- **WHEN** a store-backed planning-only change was archived but finish stopped before step 2, so the archive paths are uncommitted and no archive commit exists, and finish runs again
+- **THEN** the planning-only test runs and writes `specwright-change.yaml` with `code_changes: none` before the archive commit
+
+#### Scenario: Planning-only change already finished
+- **WHEN** a store-backed planning-only change finished locally (store merged, empty code branch deleted), and finish runs again
+- **THEN** both repos are done, and finish reports `Nothing to finish - archive is on <main>`
+
+#### Scenario: Interrupted store-only archive recovery
+- **WHEN** a store-only archive recovery (`chore/archive-<change-name>` in the store) finished its store merge and was interrupted, and the code repo has a change branch with commits not on main
+- **THEN** finish does not merge, ship or delete the code branch, and reports it

@@ -72,11 +72,23 @@ When a PR's base is not its repository's default branch, the check SHALL report 
 - **THEN** the check exits with GitHub state unknown, and ship reports the check as not done
 
 ### Requirement: Issues a merged PR left open are closed at cleanup
-When Specwright cleans up after a PR merged into its repository's default branch, it SHALL read the issues the PR's closing lines name in the change's repositories and close each one that is still open and was never closed before, with a comment naming the PR, using the identity of the issue's repository. Issues outside the change's repositories, and issues a person reopened, SHALL be reported and not closed. Issues named only by `Related:` SHALL NOT be closed.
+When Specwright cleans up after a PR merged into its repository's default branch, it SHALL read the issues the PR's closing lines name in the change's repositories and close each one that is still open and was never closed before and that the user confirmed, with a comment naming the PR, using the identity of the issue's repository. Issues outside the change's repositories, and issues a person reopened, SHALL be reported and not closed. Issues named only by `Related:` SHALL NOT be closed.
 
 #### Scenario: Merged PR left an issue open
 - **WHEN** a merged PR's closing lines name issues 21 and 24, issue 21 is closed and issue 24 is still open
-- **THEN** cleanup closes 24 with a comment naming the PR, and does not touch 21
+- **THEN** cleanup asks the user to confirm closing 24, then closes it with a comment naming the PR, and does not touch 21
+
+#### Scenario: Fence-like line inside a fenced block
+- **WHEN** a merged PR's description has a fenced block holding a line of three backticks followed by other text, then `Fixes #52`, and issue 52 is open
+- **THEN** the block is not closed by that line, 52 is not an intended issue, and cleanup does not close it
+
+#### Scenario: Code span inside a word
+- **WHEN** a merged PR's description has the text ``Fi`x`xes #52``, and issue 52 is open
+- **THEN** 52 is not an intended issue
+
+#### Scenario: Comment opener inside a code span
+- **WHEN** a description has the line ``Shows `<!--` in the docs``, followed by the line `Fixes #21`
+- **THEN** 21 is an intended issue
 
 #### Scenario: Every intended issue closed
 - **WHEN** every issue a merged PR's closing lines name is closed
@@ -116,8 +128,15 @@ When Specwright cleans up after a PR merged into its repository's default branch
 
 #### Scenario: Closing an issue fails
 - **WHEN** cleanup closes issue 21 and then fails to close issue 24
-- **THEN** cleanup reports 21 as closed and 24 as still open, continues its branch cleanup, and a later cleanup closes only 24
+- **THEN** cleanup reports 21 as closed and 24 as still open, continues its branch cleanup, and a later cleanup asks about and closes only 24
 
 #### Scenario: Issue state cannot be read
 - **WHEN** the lookup of the PR, or of an intended issue in the change's repositories, fails
 - **THEN** the check exits with GitHub state unknown, cleanup reports the backstop as not done, closes nothing, and continues its branch cleanup
+
+### Requirement: Cleanup asks before closing issues
+Before cleanup closes any issue, it SHALL list the open intended issues of the change's merged PRs and ask the user once to confirm them. A declined issue SHALL stay open and be reported.
+
+#### Scenario: User declines a close
+- **WHEN** cleanup lists open issue 24 for closing and the user declines it
+- **THEN** 24 stays open and is reported as left open
