@@ -211,5 +211,83 @@ class ClosingReferences(unittest.TestCase):
         self.assertRegex(tail, r"(?i)names? the `?missing`? issues")
 
 
+FINISH = SKILL.parents[1] / "specwright-finish" / "SKILL.md"
+
+
+class CleanupClosingReferences(unittest.TestCase):
+    """Cleanup after merge closes the issues a merged PR's closing lines named and GitHub left open (#61 part 3)."""
+
+    def cleanup(self):
+        self.assertIn("cleanup after merge", SECTIONS, f"SKILL.md has no '## Cleanup after merge' section; found {sorted(SECTIONS)}")
+        return SECTIONS["cleanup after merge"][1]
+
+    def closing_bullet(self):
+        text = self.cleanup()
+        at = text.find("closed-check")
+        self.assertNotEqual(at, -1, "Cleanup after merge never runs `pr-pair.sh closed-check`")
+        start = text.rfind("\n- ", 0, at) + 1
+        end = text.find("\n- ", at)
+        return text[start:end if end != -1 else len(text)]
+
+    def test_cleanup_closes_open_intended_issues(self):
+        text = self.cleanup()
+        self.assertTrue(positions(sub("closed-check"), text), "Cleanup after merge never runs `pr-pair.sh closed-check`")
+        b = self.closing_bullet()
+        self.assertRegex(b, r"--repos", "`closed-check` is not given the change's repositories as `--repos`")
+        self.assertRegex(b, r"(?i)each merged PR", "the check does not run for each merged PR")
+        close = re.search(r"gh issue close <n> --repo <owner>/<name> --comment", b)
+        self.assertTrue(close, "an `open` issue is not closed with `gh issue close <n> --repo ... --comment`")
+        self.assertRegex(b, r"<pr_url>", "the closing comment does not name the PR")
+        self.assertRegex(b[close.start() - 12:close.start()], r"\[as\]", "the close does not run under the repository's identity")
+        self.assertRegex(b, r"(?i)each `open` issue", "only `open` issues are closed")
+        self.assertRegex(b, r"(?i)Related", "the text never says a `Related:` issue is not closed")
+        fin = FINISH.read_text(encoding="utf-8")
+        merged = fin[fin.index("- **After the PR is merged**"):]
+        merged = merged[:merged.index("\n\n")]
+        self.assertRegex(merged, r"specwright-pr\W+\*\*Cleanup after merge\*\*", "finish does not point to `specwright-pr` Cleanup after merge")
+        self.assertRegex(merged, r"closed-check|closing|issues", "finish's After the PR is merged never mentions the issue backstop")
+        self.assertNotIn("Store-backed: follow `specwright-pr` **Cleanup after merge** instead", merged,
+                         "finish still sends only store-backed changes to Cleanup after merge")
+
+    def test_cleanup_reports_issues_outside_the_change(self):
+        b = self.closing_bullet()
+        m = re.search(r"`outside`[^.;]*", b)
+        self.assertTrue(m, "the closing bullet never handles `outside` issues")
+        self.assertRegex(b, r"(?is)`outside`.{0,200}never close|never close.{0,200}`outside`", "`outside` issues may be closed")
+        self.assertRegex(b, r"(?i)outside[^.]{0,120}(report|list)|(report|list)[^.]{0,120}outside")
+
+    def test_cleanup_reports_backstop_not_done(self):
+        b = self.closing_bullet()
+        m = re.search(r"(?i)exit 3[^.;]*", b)
+        self.assertTrue(m, "the closing bullet never handles exit 3")
+        self.assertRegex(m.group(0), r"(?i)not done")
+        self.assertRegex(m.group(0), r"(?i)continue|branch cleanup")
+        self.assertRegex(b, r"(?i)close nothing|closes nothing|nothing is closed")
+
+    def test_cleanup_closes_nothing_off_the_default_branch(self):
+        b = self.closing_bullet()
+        m = re.search(r"`not_default_base`[^.]*\.", b)
+        self.assertTrue(m, "the closing bullet never handles `not_default_base`")
+        self.assertRegex(m.group(0), r"(?i)close nothing")
+        self.assertRegex(m.group(0), r"default branch")
+        self.assertRegex(b, r"`not_merged`[^.]*nothing")
+
+    def test_cleanup_never_recloses_reopened(self):
+        b = self.closing_bullet()
+        m = re.search(r"`reopened`[^.]*\.", b)
+        self.assertTrue(m, "the closing bullet never handles `reopened`")
+        self.assertRegex(b, r"(?is)`reopened`.{0,200}never close|never close.{0,200}`reopened`", "a `reopened` issue may be closed again")
+        self.assertRegex(b, r"(?i)reopened by a person|a person reopened|person reopened")
+
+    def test_cleanup_reports_a_failed_close_and_continues(self):
+        b = self.closing_bullet()
+        m = re.search(r"(?i)a failed close[^;]*(;[^.]*)?\.", b)
+        self.assertTrue(m, "the closing bullet never handles a failed close")
+        self.assertRegex(m.group(0), r"(?i)closed")
+        self.assertRegex(m.group(0), r"(?i)still open")
+        self.assertRegex(m.group(0), r"(?i)continue")
+        self.assertRegex(m.group(0), r"(?i)later cleanup")
+
+
 if __name__ == "__main__":
     unittest.main()
