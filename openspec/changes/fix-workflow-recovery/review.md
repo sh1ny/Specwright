@@ -2,10 +2,18 @@
 
 ## Metadata
 
-- **Round:** 1
-- **Prior round:** none
-- **Reviewer:** fresh-context subagent (Claude Code, Claude Agent SDK reviewer); Required Changes re-checked by the same reviewer in a separate run
-- **Reviewed:** proposal.md, design.md, specs/feedback-passes/spec.md, specs/change-finish/spec.md, specs/pr-descriptions/spec.md, specs/planning-stores/spec.md (MODIFIED, compared with openspec/specs/planning-stores/spec.md); skills/specwright-pr/scripts/pr-pair.sh (record_path, pass_write, pass_plan, pass_done, cmd_rounds, cmd_link, cmd_ensure_pr, contexts), skills/specwright-pr/scripts/pr-snapshot.sh (shaping of threads, comments and reviews), skills/specwright-pr/scripts/pr-reply.sh, skills/specwright-pr/SKILL.md (ship 4.3 and 5, feedback 2, 3, 6, 10, repo notes), skills/specwright-pr/references/description.md, skills/specwright-finish/SKILL.md, evals/pr-pair/test_pr_pair.py (`rerun` assertions); openspec/architecture.md (pass record, rounds and local finish rows), openspec/roadmap.md (M1 change 2), docs/adr/0002, 0003, 0004, 0006; GitHub issue sh1ny/specwright#61. The re-check read design.md D3, D7, D8 and D9, all of specs/pr-descriptions/spec.md, the new scenarios in specs/feedback-passes/spec.md and specs/change-finish/spec.md, and the output of `openspec validate fix-workflow-recovery` (valid).
+- **Round:** 2
+- **Prior round:** Round 1: APPROVE_WITH_CHANGES, changes applied and re-checked by the reviewer. That verdict was voided by amendments made after implementation: #61 part 3 (D10) and the local pre-ship review fixes in D2, D8 and D9.
+- **Reviewer:** fresh-context subagent (Claude Code, Claude Agent SDK reviewer); Required Changes and the applied suggestions re-checked by the same reviewer in a separate run
+- **Reviewed:**
+  - The amendment diff (`git diff HEAD -- openspec/`) and the full current proposal.md, design.md, specs/change-finish/spec.md, specs/feedback-passes/spec.md, specs/pr-descriptions/spec.md and specs/planning-stores/spec.md (for context). tasks.md was read for the test map and groups 9-10 only.
+  - openspec/roadmap.md (M1, change 2 entry) and openspec/architecture.md (closing and known-gap rows). The in-force ADRs docs/adr/0002, 0003, 0004 and 0006.
+  - skills/specwright-pr/scripts/pr-pair.sh: header, `without_code`, `issue_key`, `intended_issues`, `cmd_closing_check`, `link_state`, `record_path`, `legacy_record_path`, `publish`, `locate_record`, `record_lock`, `load_record`, `pass_write`, `pass_done`, `pass_adopt` and `cmd_cleanup`.
+  - skills/specwright-pr/SKILL.md (watch step 2, **Cleanup after merge**) and skills/specwright-finish/SKILL.md (**Resume**, **After the PR is merged**).
+  - GitHub issue sh1ny/specwright#61.
+  - The output of `openspec validate fix-workflow-recovery --strict` (valid).
+  - The re-check read the current diff (`git diff HEAD -- openspec/changes/fix-workflow-recovery/`): design.md (Triage, D2, D8, D9, D10, Failure & Visibility, Resource Bounds, Flow & State Gaps, Mechanism Ledger), all of specs/pr-descriptions/spec.md, the new scenarios in specs/feedback-passes/spec.md, the tasks.md test map and groups 9-10, and the output of `openspec validate fix-workflow-recovery --strict` (valid).
+  - None of the amendments is implemented yet: `closed-check` does not exist, and `without_code` and `intended_issues` still match single-backtick spans and no ordered-list marker (tasks 9.x and 10.x are open). So this round reviews the amended design against the current code it will change.
 
 <!-- This verdict covers only the contents reviewed. Editing proposal, specs or design afterward (other than applying Required Changes) voids it. -->
 
@@ -17,36 +25,49 @@ None.
 
 ### Moderate
 
-**M1. D4 reads a thread's reaction through `root_id`, but D3 does not validate `root_id`. A bad intent can again block every later pass (#26 class).**
-D4 sends a thread finding's reaction read to `repos/<repo>/pulls/comments/<id>/reactions` with the numeric root comment id. In `pass_plan` that id is `f.get("root_id")` (`pr-pair.sh:1156`). `pass_write` does not require `root_id` or check its type (`pr-pair.sh:911`). D3 adds checks for `branch`, `round` and `prs` only. Today a missing `root_id` is harmless because the row only becomes `rerun`. Under D4, a thread finding with a reaction and a missing, null or non-numeric `root_id` makes every plan's reaction read fail with exit 3 (unknown). The record can then never reach `complete` and `pass done` never removes it. That is the failure #26 is meant to remove: an accepted intent that later blocks every pass. The same applies to `item` for `comment` and `review` findings: it must be a node id string that GraphQL `node(id:)` can resolve.
+**M1. D10 closes intended issues after a merge into a branch other than the default, which contradicts D9's `not_default_base` handling.**
+- D9 and the requirement "Closing references need the default branch" deliberately treat a PR into a non-default base as one that does not close its issues: ship reports that GitHub will not close them from this PR.
+- D10's `closed-check` reads only `state`, `url` and `body`. Its status is `merged` or `not_merged`, so it closes every open intended issue of any merged PR.
+- Specwright supports a `main_branch` that differs from the repository's default branch (round 1, M3). In such a repo, for example a gitflow repo with `develop` as main and `master` as the default branch, every merged change has its issues closed at cleanup. They close before the fix reaches the default branch, with the comment "Its closing keyword did not close this issue on merge". That comment is wrong: the keyword was never meant to apply there. The cleanup also reverses what ship just told the user.
+- The design must decide this case, and the spec needs a scenario for it.
 
-**M2. D7's link test compares exact URL substrings, but the record holds only `repo` and `number`, and the design does not say where the row gets its peer URLs.**
-`cmd_link` treats a PR as linked when `peer in body`, or when a marker's URL `== peer` (`pr-pair.sh:655`, `:664`). Both are exact, case-sensitive string tests. The record's `prs` entries hold `{repo, number}` only, and the repo slug is whatever the intent said. D2 itself relies on repo names being case-insensitive. Suppose the plan builds `https://github.com/<repo>/pull/<n>` from a slug whose case differs from GitHub's canonical URL. The row then stays `todo` even when the description already links the peer. Rerunning `link` with that constructed URL posts a second marker. That breaks the spec's "each PR then has exactly one link to its peer". If the skill passes GitHub's canonical URL instead, `link` skips and the row never turns `done`, so the pass never completes. The row's evidence and the repair command must use the same URL, and it must be the URL GitHub reports.
+**M2. D10 re-closes an issue that a person reopened after GitHub had already closed it from this PR.**
+- The backstop's test is "intended and currently open". Cleanup is not one-shot:
+  - **Cleanup after merge** runs whenever the user says the PRs merged;
+  - `specwright-finish` **Resume** routes "pr, the branch's PR merged" to cleanup on any later finish attempt;
+  - `cleanup-plan` keeps reporting a merged PR after its branch is gone (`pr-pair.sh` `cmd_cleanup`).
+- A maintainer who reopens issue 21 because the fix did not work has it closed again by the next cleanup run, with a comment that claims the PR fixed it. That silently reverses a human decision on GitHub, which ADR 0003 treats as the state of record.
+- The case is detectable in the same read. The issue's timeline shows a `ClosedEvent` whose `closer` is this PR. GitHub's own close happened, so the issue was later reopened on purpose.
 
-**M3. D9 ignores that closing keywords work only on PRs into the repository's default branch.**
-GitHub interprets closing keywords, and fills `closingIssuesReferences`, only when the PR's base is the default branch. #61 says so itself ("A closing keyword only takes effect when the PR merges into the default branch"). Specwright allows a main other than the default (`main_branch`, `planning_store.main_branch`; finish SKILL.md step 4). For such a repo, every created PR with a `Fixes` line follows the same path: `linked` is empty, mismatch, rewrite, second mismatch. The `Still missing after the rewrite` scenario then stops ship and withholds `ready` on every ship. The cause is unrelated to the description. The check needs a distinct outcome for that case, and the spec needs a scenario for it.
+**M3. D10's tables and requirement leave out its failure behavior, and the Mechanism Ledger states the opposite decision.**
+- The Mechanism Ledger still has "Cleanup backstop that closes issues | No | Deferred by the user (#61 part 3)", while D10 builds it.
+- Failure & Visibility has no row for `closed-check` or for the `gh issue close` step. D10 says only "Any failed read exits 3". It does not say what happens when one `gh issue close` fails after others succeeded:
+  - is the backstop reported done or not done;
+  - is a rerun safe (it is, since closed issues are skipped, but the design must say so);
+  - who finds out.
+- The new requirement has no scenario for a failed close, so an implementation that reports "backstop done" after a failed close would pass every test in the map.
+- Triage T1 and T4 still list only `pass adopt` and `closing-check` and the `closingIssuesReferences` read. D10 adds a subcommand, per-issue reads, and the change's first issue write on GitHub (close plus comment).
 
-**M4. D9 and the description rule leave a planning-only store-backed change unable to close its issues.**
-D9 tells the store PR to use `Related: <owner>/<repo>#N` and to put closing lines "on the PR in the repository that holds the issues (normally the code PR)". A planning-only change has no code PR (`description.md`: "When there is no code PR ... planning-only"). Its issues in the code repo then never get a closing keyword from any PR, so they stay open after merge. That is the exit-criterion failure this scope addition exists to prevent. GitHub closes cross-repository issues from `Fixes <owner>/<repo>#N` on a PR merged into the default branch, so the store PR can carry them when no PR exists in the issue's repository.
+**M4. Two new D9 scenarios are under the wrong requirement.**
+`Closing keyword inside code` and `Numbered closing line` were appended under "Closing references need the default branch" (specs/pr-descriptions/spec.md). They test the parser of "Closing references are checked after ship", and the tasks.md test map already lists them under that requirement. At archive they would sync into the main spec under a requirement about the base branch, and the map's requirement → scenario rows would no longer match the spec.
 
 ### Suggestions
 
-**S1. GitHub may update closing references late (Open Question).** The second check runs right after `gh pr edit`. If GitHub computes `closingIssuesReferences` asynchronously, the stale second read stops ship with a false "still missing". Re-read a bounded number of times (for example 3 reads a few seconds apart) before the rewrite and before the stop.
+**S1. D2: stop on an unreadable legacy file only when the new key is absent.**
+- As amended, "the lookup stops with `record_unreadable`" applies to every `pass` call, including `pass done` and `pass plan` of a valid, owned new-key record. The legacy path is the 0.1.9 colliding key: `acme-tools/widget` and `acme/tools-widget` share `acme-tools-widget-<change>.json`. A corrupt file of another identity would then block this repo's in-progress pass.
+- When the new key exists, report the unreadable legacy file the way `legacy_record_ignored` is reported, and continue. The record's identity question only matters when the lookup would otherwise start a new pass.
 
-**S2. Define `mismatch` as a non-empty `missing` list.** D9 says `extra` is informational, but the `status` field does not say whether `extra` alone means `mismatch`. On a `found` PR with sidebar-linked issues, ship would otherwise ask on every re-ship (each feedback round and the archive). Also consider asking about a given `found` PR's mismatch once per session, not on every ship.
+**S2. D10: do not read the state of issues outside the change's repositories, or read them so that one failure does not abort the check.**
+"Each intended issue's state read through its repository's login" has no login for an arbitrary `other/tool#5`. With "any failed read exits 3", a closing line naming an issue the configured login cannot read (a private repo, a typo in the owner) makes the whole check unknown. Then the open issues inside the change are not closed either. Since out-of-change issues are only reported, list them as "not checked" without reading them, or record a per-issue `unknown`.
 
-**S3. Rewriting from `intended` can promote a passing reference to a closing one.** The parser counts every reference on a line that starts with a keyword, so `Fixes #21 (see also #52)` marks #52 as intended. The automatic rewrite would then add `Fixes #52` and close an issue the PR does not resolve. Limit the automatic rewrite to closing lines that hold only references and separators. Report any other mismatch instead of rewriting it.
+**S3. D10: compare repositories case-insensitively.**
+`issue_key` keeps the slug's case as written in the description. Deciding "in the PR's repository or the change's other repository" must lower-case both sides, as D2 and D9 already do. Otherwise `Fixes Acme/App#5` is reported instead of closed.
 
-**S4. D8 does not say how `<branch>` and the archive subject's `<type>` are found when finish runs from main.** Today both come from the current branch ("Commit type: the branch prefix"). In the "M and B" case after the code merge, both repos are on main. Find the branch with `git for-each-ref refs/heads/*/<change-name>` (more than one result → ask). Match the archive subject as `^[a-z]+\(<change-name>\): archive change$` rather than with a known type.
+**S4. D8 still carries the round-1 S7 wording slip.**
+D8 says the `*/<change-name>` match includes `chore/archive-<change-name>`. It does not. skills/specwright-finish/SKILL.md (Resume) and tasks 6.2 already use the correct order: the prefix branch, then a local `chore/archive-<change-name>`, then the one `*/<change-name>` branch. The new "Archive-recovery branch after the change merged" scenario depends on that lookup, so align the design text with it.
 
-**S5. D8 pr-mode resume after the PR merged on GitHub.** After a squash merge the branch still shows A on the branch, so the table routes to ship, and `ensure-pr` stops with `already_merged`. Add a row that sends a merged PR to "After the PR is merged" (or `specwright-pr` Cleanup after merge for store-backed changes).
-
-**S6. Spec coverage.** Add scenarios for:
-- a leftover `<record>.lock` (`record_busy` names the path, and nothing is removed);
-- finish re-run when every repo is already done (`Nothing to finish`);
-- a repo-local intent with a non-null `prs.store` (D3 refuses it, but no scenario covers it).
-
-**S7 (from the re-check, non-blocking). Fix the wording of D8's branch lookup.** D8's "Finding the branch from main" says the `*/<change-name>` match includes `chore/archive-<change-name>`. That glob does not match the recovery branch: its last segment is `archive-<change-name>`. Either add `chore/archive-<change-name>` as a separate pattern or drop the parenthetical. Otherwise a resume that should consider the recovery branch will not find it. The result is safe either way: the change branch or "ask" still applies.
+**S5. D9: state the CommonMark rule for code spans precisely.**
+"Delimited by a backtick run of any length" should say that a span closes only at a backtick run of the same length, and that an unmatched run is literal text. A naive any-length regex that pairs the first run with any later run would strip a real `Fixes #21` that sits between an unmatched backtick and a later span. Add one parser case for an unmatched backtick in 10.4.
 
 ## Verdict
 
@@ -54,44 +75,54 @@ VERDICT: APPROVE_WITH_CHANGES
 
 ## Required Changes
 
-1. **design.md D3 and specs/feedback-passes "A pass intent is validated before it is written" (M1).**
-   - D3: for `kind: thread` (the default), `pass write` requires `root_id` to be an `int` (not a bool) ≥ 1. For `comment` and `review` findings, `item` must be a non-empty string. Otherwise it refuses with `invalid_intent` naming `root_id` or `item`.
-   - Spec: add a scenario. WHEN a thread finding has no `root_id` (or `root_id` is `"abc"`), THEN `pass write` exits with `invalid_intent` naming `root_id`, and no record exists.
-2. **design.md D7 (M2).**
-   - State that the `link` row reads each PR's canonical URL from GitHub (`url`/`html_url` of `repos/<repo>/pulls/<n>`, through the same per-repo login) and does not build it from the record's slug.
-   - The row's output carries `code.url` and `store.url`. The skill passes exactly those URLs as `--peer-url` to the two `link` calls.
-   - The shared linked-test function compares against those URLs.
-3. **design.md D9 and specs/pr-descriptions "Closing references are checked after ship" (M3).**
-   - `closing-check` also reads the PR's `baseRefName` and the repository's `defaultBranchRef`. When they differ, it prints `status: not_default_base` with the intended issues. Ship then does not rewrite the description and does not stop. It reports that GitHub will not close the listed issues from this PR.
-   - Add a spec scenario: WHEN ship creates a PR into a branch other than the repository's default branch and its description has `Fixes #21`, THEN the check reports that the base is not the default branch, the description is not edited, and ship reports that #21 will not be closed by this PR.
-4. **design.md D9, specs/pr-descriptions "One closing keyword per issue", and the planned `references/description.md` wording (M4).**
-   - State that when no PR is expected in the repository that holds an issue (for example, a planning-only store-backed change whose issues are in the code repo), the PR that does exist carries the closing line in cross-repository form, `Fixes <owner>/<repo>#N`. The check normalises both sides to `owner/repo#N`.
-   - Add a spec scenario: WHEN a planning-only store-backed change fully resolves code-repo issue 21, THEN the store PR's description has `Fixes <code owner>/<code repo>#21` on its own line.
+1. **design.md D10 and specs/pr-descriptions "Issues a merged PR left open are closed at cleanup" (M1).**
+   - `closed-check` also reads the PR's `baseRefName` and the repository's `defaultBranchRef` in its one PR read.
+   - When they differ, it prints `status: not_default_base` with the open intended issues, and cleanup closes nothing and reports them. Or, if the author decides the backstop should close them, D10 must say so and give the comment a wording that does not claim a keyword failed. Either way, state the decision.
+   - Add a scenario. WHEN a PR merged into a branch other than the repository's default branch names issue 21 on a closing line, and 21 is open, THEN cleanup does what the design decided, and the report says why.
+2. **design.md D10 and the same requirement (M2).**
+   - For each open intended issue, `closed-check` reads whether its timeline holds a `ClosedEvent` whose `closer` is this PR. Such an issue is listed as `reopened` and is never closed; cleanup reports it.
+   - Add a scenario. WHEN issue 24 was closed by the merged PR and later reopened, THEN cleanup does not close it and reports it as reopened.
+3. **design.md tables and the same requirement (M3).**
+   - Mechanism Ledger: change the backstop row to "Yes", with D10's reason (#61: issues left open silently after merge) and the evidence that would change the call.
+   - Failure & Visibility: add rows for `closed-check` (a failed read → exit 3, the backstop is reported not done, branch cleanup continues; retry safe) and for `gh issue close` (a failed close → the backstop is reported not done, naming the issues still open; a rerun skips closed issues, so it is safe; the user finds out from the cleanup report).
+   - Triage T1/T4 evidence: add `closed-check`, its per-issue reads and the issue-close write.
+   - Spec: add a scenario. WHEN closing an open intended issue fails, THEN cleanup reports the backstop as not done and names that issue, and branch cleanup continues.
+4. **specs/pr-descriptions/spec.md (M4).** Move `Closing keyword inside code` and `Numbered closing line` from "Closing references need the default branch" to the end of "Closing references are checked after ship", matching the tasks.md test map.
 
 <!-- yes (applied, and re-checked by the reviewer - only the reviewer sets it) | no (outstanding) | n/a (any other verdict) -->
 CHANGES_APPLIED: yes
 
 ## Rebuttals
 
-Author, round 1:
+<!-- Author: fixed (cite) or rebutted (reason) per finding. A Critical/Moderate rebuttal counts only once marked "accepted by reviewer". -->
 
-- **M1:** fixed. D3 requires `root_id` (int ≥ 1, not a bool) for thread findings and a non-empty `item` for comment and review findings. New scenario "Thread finding without a usable root id" in `specs/feedback-passes`.
-  - **Reviewer:** verified. D3's last bullet and the scenario at `specs/feedback-passes/spec.md:70-72` match Required Change 1. Accepted by reviewer.
-- **M2:** fixed. In D7, the `link` row reads each PR's canonical `html_url` from GitHub through the repo's login, never from the slug. It carries `code.url` and `store.url`, the linked test compares against them, and the skill passes exactly those URLs as `--peer-url`.
-  - **Reviewer:** verified. D7's bullets on the row shape, the `html_url` source and the `--peer-url` hand-off match Required Change 2. Accepted by reviewer.
-- **M3:** fixed. D9's `closing-check` reads `baseRefName` and `defaultBranchRef` and prints `not_default_base`; ship then neither rewrites nor stops. Because the requirement text exceeded 500 characters, this became its own requirement in `specs/pr-descriptions`, "Closing references need the default branch", with the requested scenario plus "Default branch cannot be read".
-  - **Reviewer:** verified. The design's one GraphQL read, its `not_default_base` status and the ship routing, plus the separate requirement and its two scenarios, match Required Change 3. Splitting it into its own requirement is fine. Accepted by reviewer.
-- **M4:** fixed. D9 and the "One closing keyword per issue" requirement: when no PR is expected in the repo that holds the issue, the existing PR carries `Fixes <owner>/<repo>#N`, and both sides are normalised to `owner/repo#N`. New scenario "Planning-only store-backed change".
-  - **Reviewer:** verified. The D9 description bullet and normalisation step, the requirement's last sentence and the new scenario match Required Change 4. Accepted by reviewer.
-- **S1:** rebutted. D9 already re-reads once: on a created PR, a mismatch leads to a rewrite and a second check. A third read would only delay a real stop. If late computation shows up in practice, the stop names the issues and the user can re-run ship.
-  - **Reviewer:** accepted by reviewer. It is a suggestion, and the stop names the issues, so a false stop is visible and cheap to retry.
-- **S2:** applied. `status` is `match` when `missing` is empty; `extra` never makes a mismatch. New scenario "Issue linked by hand only".
-  - **Reviewer:** verified; it introduces no new problem.
-- **S3:** applied. The rewrite touches only closing lines that hold nothing but a keyword and references; any other closing line is left as is and reported.
-  - **Reviewer:** verified. It stays consistent with the "Several issues after one keyword" scenario, whose line holds only a keyword and references.
-- **S4:** applied. D8 says how the branch is found from main (the prefix rule, else the one `*/<change-name>` branch, else ask) and that the archive subject matches `^[a-z]+\(<change-name>\): archive change$`.
-  - **Reviewer:** verified, with one wording slip: the glob does not match `chore/archive-<change-name>` (see S7, non-blocking).
-- **S5:** applied. D8 has a row for pr mode with the branch's PR merged: cleanup, not ship.
-  - **Reviewer:** verified; it introduces no new problem.
-- **S6:** applied. New scenarios "Lock left by an interrupted handover" and "Repo-local intent names a store PR" (`feedback-passes`), and "Every repo already done" (`change-finish`).
-  - **Reviewer:** verified. The scenarios are assertable and consistent with D1, D3 and D8. `openspec validate fix-workflow-recovery` reports the change valid.
+Author, round 2 (as reported by the coordinator): M1-M4 and S1-S5 applied.
+
+- **M1:** fixed.
+  - **Reviewer:** verified, and accepted by reviewer.
+    - `closed-check` reads `baseRefName` and `defaultBranchRef` in its one PR read and prints `status: not_default_base`. Cleanup then closes nothing and reports that the issues stay open until the fix reaches the default branch.
+    - The requirement now says "merged into its repository's default branch", and the scenario "PR into a branch other than the default, at cleanup" is assertable.
+- **M2:** fixed.
+  - **Reviewer:** verified, and accepted by reviewer.
+    - An open issue with any earlier `ClosedEvent` is listed as `reopened`, reported, and never closed. The scenario "Issue reopened after it was closed" covers it.
+    - The test is broader than the one Required Change 2 named (any close event, not only one whose closer is this PR), so it never closes an issue a person reopened.
+    - Its cost is that an issue closed and reopened for some other reason before this PR is reported instead of closed. That errs toward asking, which is acceptable.
+- **M3:** fixed.
+  - **Reviewer:** verified, and accepted by reviewer.
+    - Triage T1 and T4 name `closed-check`, its reads and the issue-close write.
+    - Failure & Visibility has rows for `closed-check`, a close that fails partway (a rerun is safe because a failed close leaves no close event), and reopened issues.
+    - Resource Bounds has a row for the issue reads, and the Mechanism Ledger rows say "Yes".
+    - The scenario "Closing an issue fails" is assertable.
+- **M4:** fixed.
+  - **Reviewer:** verified, and accepted by reviewer. Both scenarios now sit under "Closing references are checked after ship" (spec.md:51-57), matching the test map.
+- **S1:** applied.
+  - **Reviewer:** verified. D2 and Flow & State Gaps stop on an unreadable legacy file only when the new key is absent. The new scenario "Unreadable old key beside a valid record" covers the other case.
+  - Editorial nit, non-blocking: D2's bullet reads "Otherwise, with the new path absent, When its `code_repo`". Lower-case "When".
+- **S2:** applied.
+  - **Reviewer:** verified. Issues outside `--repos` are listed as `outside` and never read. The scenario "Issue in another repository" says so, and task 9.1 tests that an outside read failure does not cause exit 3.
+- **S3:** applied.
+  - **Reviewer:** verified. D10 compares repositories case-insensitively.
+- **S4:** applied.
+  - **Reviewer:** verified. D8's lookup order (prefix branch, then `chore/archive-<change-name>`, then `*/<change-name>`) matches the finish skill.
+- **S5:** applied.
+  - **Reviewer:** verified. D9 states the CommonMark rule: a span closes only at a run of the same length, and an unmatched run is literal. The scenario "Unmatched backtick" and its test row cover it.
