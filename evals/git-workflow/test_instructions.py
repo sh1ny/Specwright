@@ -382,6 +382,24 @@ class ChangeFinishResume(unittest.TestCase):
         self.assertRegex(row, r"(?i)no (new )?merge", "M and B may merge again")
         self.assertTrue(resume_row(s, "M, not B"), "no row for a repo that is done (M, not B)")
 
+    def test_resume_checks_out_main_before_deleting(self):
+        s = resume_section()
+        rows = (("M and B", resume_row(s, "M and B")),
+                ("store done; code branch without commits", resume_row(s, r"store done[^|]*code branch without commits[^|]*")))
+        for name, row in rows:
+            self.assertTrue(row, f"no Resume row for {name}")
+            self.assertRegex(row, r"git checkout <main> && git branch -d <branch>",
+                             f"the {name} row deletes the branch without checking out <main> first (it may be the checked-out branch)")
+
+    def test_resume_merge_requires_branch_tip_on_main(self):
+        s = resume_section()
+        m = re.search(r"\*\*M\*\*[^\n]*", s)
+        self.assertTrue(m, "Resume does not define fact M")
+        fact = m.group(0)
+        self.assertIn("git merge-base --is-ancestor <branch> <main>", fact,
+                      "M does not require the branch tip to be on main, so an archive-recovery branch made after the merge counts as merged")
+        self.assertRegex(fact, r"(?i)\bB\b|exists", "the tip check is not limited to a branch that exists")
+
     def test_finish_resume_pr_mode_ships_without_a_second_archive_commit(self):
         s = resume_section()
         self.assertRegex(s, r"(?i)never repeat|not repeat", "Resume does not forbid repeating a done step")

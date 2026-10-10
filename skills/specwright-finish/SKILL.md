@@ -19,7 +19,7 @@ Applies when the change directory is gone and finish runs again: the user asks t
 
 For each repo of the change (repo-local: one; store-backed: the store, then the code repo), find `<branch>` from `<main>`: `<prefix>/<change-name>` by the prefix rule of `specwright-branch` step 6, else a local `chore/archive-<change-name>`, else the one local branch matching `*/<change-name>`; several candidates → list them and ask. Then read three facts:
 - **A** - an archive commit: a subject matching `^[a-z]+\(<change-name>\): archive change$` in `git log --format=%s <main>..<branch>`, or on `<main>`.
-- **M** - the exact subject `merge: <change-name>` in `git log --first-parent --format=%s <main>`.
+- **M** - the exact subject `merge: <change-name>` in `git log --first-parent --format=%s <main>`, and, when B, the branch tip is on `<main>` (`git merge-base --is-ancestor <branch> <main>`): an archive-recovery branch made after the change merged holds a new archive commit, so the earlier merge does not count for it.
 - **B** - `<branch>` exists.
 
 None of A, M, B in any repo → report that no archive of `<change-name>` was found, and do nothing. `git status --porcelain` showing changes under `<P>/changes/<change-name>/` or the archive directory (with A found) → stop, list the files and ask the user; merge nothing. Otherwise continue at the first step not done, per repo:
@@ -28,10 +28,10 @@ None of A, M, B in any repo → report that no archive of `<change-name>` was fo
 |---|---|
 | archive paths uncommitted, no A | step 3, as today |
 | A on branch, not M, B, `local` | merge (`## local`) |
-| M and B | `git branch -d <branch>`, no merge |
+| M and B | `git checkout <main> && git branch -d <branch>`, no merge |
 | M, not B | repo done |
 | store done; code branch with commits, code not M | code merge (`## local` store-backed step 2) |
-| store done; code branch without commits | `git branch -d <branch>`, no merge |
+| store done; code branch without commits | `git checkout <main> && git branch -d <branch>`, no merge |
 | `pr`, A on branch, PR not merged | `## pr` ship; push and PR are idempotent |
 | `pr`, the branch's PR merged | **After the PR is merged** cleanup, not ship |
 
