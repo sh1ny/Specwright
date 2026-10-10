@@ -2355,6 +2355,15 @@ class ClosedCheck(Base):
         for n in (52, 53):
             self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is fenced code in a list item")
 
+    def test_closed_check_list_marker_in_a_fence_is_code(self):
+        # inside an open fence a list-marked fence line is content, never the closer; a tab after a marker counts like a space
+        body = "```\n- ```\nFixes #30\n```\nFixes #21\n\n-\t~~~\nFixes #31\n~~~\n\nFixes #22\n"
+        self.seed(body, issues={(CODE, n): ("OPEN", []) for n in (21, 22)})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#22"])
+        for n in (30, 31):
+            self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is fenced code")
+
     def test_closed_check_close_before_the_merge_is_open(self):
         # only a close at or after the merge, then a reopen, makes `reopened`; an older close/reopen leaves the issue `open`
         early = ("CLOSED", "2026-10-01T00:00:00Z")

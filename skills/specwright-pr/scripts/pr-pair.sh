@@ -738,9 +738,15 @@ def indent_columns(line):
 
 def container_content(line):
     """The line after its blockquote markers (each `>` with up to three spaces before it and one optional space after it) and list
-    markers (`-`, `+`, `*`, `1.` or `1)` with up to three spaces before it and the one space after it), where CommonMark applies
-    the block rules: `>     x` is indented code inside a quote, and `- ~~~` opens a fence inside a list item."""
-    return line[re.match(r"(?: {0,3}(?:> ?|(?:[-+*]|\d{1,9}[.)])(?: |$)))*", line).end():]
+    markers (`-`, `+`, `*`, `1.` or `1)` with up to three spaces before it and the one space or tab after it), where CommonMark
+    applies the block rules: `>     x` is indented code inside a quote, and `- ~~~` opens a fence inside a list item."""
+    return line[re.match(r"(?: {0,3}(?:>[ \t]?|(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)))*", line).end():]
+
+
+def quote_content(line):
+    """The line after its blockquote markers only. Inside an open fence a list marker is content, so the closer is matched here:
+    `- ```` inside a fence is code, not its end."""
+    return line[re.match(r"(?: {0,3}>[ \t]?)*", line).end():]
 
 
 LIST_CODE = re.compile(r" {0,3}(?:[-+*]|\d{1,9}[.)]) {5,}\S")  # a list item whose first block is indented code
@@ -799,7 +805,7 @@ def without_code(body):
         else:
             m = re.match(r"\s{0,3}(`{3,}|~{3,})", container_content(line))
             if fence:
-                closer = re.match(r"\s{0,3}(`{3,}|~{3,})\s*$", container_content(line))
+                closer = re.match(r"\s{0,3}(`{3,}|~{3,})\s*$", quote_content(line))
                 if closer and closer.group(1)[0] == fence[0] and len(closer.group(1)) >= len(fence):
                     fence = None
                 continue
