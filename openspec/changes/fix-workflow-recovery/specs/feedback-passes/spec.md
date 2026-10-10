@@ -64,6 +64,14 @@ Each pass record SHALL be stored under a key that keeps the repository owner, th
 - **WHEN** a valid record exists under the new key, and the file under the old key cannot be parsed
 - **THEN** the plan and `pass done` use the new record, and the old file is reported as ignored
 
+#### Scenario: Longest repository and change names
+- **WHEN** a pass starts for a 39-character owner, a 100-character repository name and an 80-character change name
+- **THEN** the record and its lock can be created, and the pass can be handed over and completed
+
+#### Scenario: Two callers move one old record
+- **WHEN** two `pass` calls find the same 0.1.9 record, and the other caller removes the old file after this one published the new key
+- **THEN** both calls continue with the record under the new key, and neither fails
+
 #### Scenario: Copy left by an interrupted move
 - **WHEN** a record under the old key is byte-identical to the record under the new key, because a move was interrupted after the new key was written
 - **THEN** the old file is removed, and once the pass is done no record for the change remains

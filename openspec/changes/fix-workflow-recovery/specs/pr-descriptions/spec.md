@@ -86,6 +86,18 @@ When Specwright cleans up after a PR merged into its repository's default branch
 - **WHEN** a merged PR's description has `Related: #52`, and issue 52 is open
 - **THEN** cleanup does not close 52
 
+#### Scenario: Related reference on a closing line
+- **WHEN** a merged PR's description has the line `Fixes #21; Related: #52`, issue 21 is closed and issue 52 is open
+- **THEN** 52 is not an intended issue, and cleanup does not close it
+
+#### Scenario: Closing line without a closing list
+- **WHEN** a merged PR's description has the line `Fixes the crash; Related: #52`, and issue 52 is open
+- **THEN** 52 is not an intended issue, and cleanup does not close it
+
+#### Scenario: Closing keyword hidden from the rendered description
+- **WHEN** a merged PR's description shows `Fixes #52` only in an indented code block (also one directly after a heading), a code span that continues onto the next line, or an HTML comment, and issue 52 is open
+- **THEN** 52 is not an intended issue, and cleanup does not close it
+
 #### Scenario: Issue in another repository
 - **WHEN** a merged PR's closing line names `other/tool#5`, which is not one of the change's repositories
 - **THEN** cleanup does not read or close that issue, and reports it as outside the change

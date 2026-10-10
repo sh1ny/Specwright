@@ -25,6 +25,10 @@ When finish runs for a change whose archive is already committed, it SHALL deriv
 - **WHEN** main has `merge: <change-name>` from the change's earlier merge, and `chore/archive-<change-name>` holds an archive commit that is not on main
 - **THEN** finish does not treat that repo as merged and does not delete the branch: it continues with that branch's next step (ship in `finish: pr`, merge in `finish: local`)
 
+#### Scenario: Store merged by hand, code PR still open
+- **WHEN** a store-backed change in `finish: pr` has its store branch merged by hand (a store with no GitHub origin), and the code branch's PR is still open
+- **THEN** finish does not merge the code branch or delete it, and ships it: the open code PR is reported
+
 #### Scenario: Interrupted after the archive commit, pr mode
 - **WHEN** a change in `finish: pr` has its archive commit on the change branch, not yet pushed, and finish runs again
 - **THEN** no second archive commit is made, and ship pushes the branch and reports the PR
