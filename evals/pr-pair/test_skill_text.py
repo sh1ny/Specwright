@@ -249,6 +249,18 @@ class CleanupClosingReferences(unittest.TestCase):
         self.assertNotIn("Store-backed: follow `specwright-pr` **Cleanup after merge** instead", merged,
                          "finish still sends only store-backed changes to Cleanup after merge")
 
+    def test_cleanup_asks_before_closing(self):
+        b = self.closing_bullet()
+        ask = re.search(r"(?i)list(?:s)? them all with their PRs", b)
+        self.assertTrue(ask, "the bullet never lists every `open` issue with its PR before closing")
+        self.assertRegex(b, r"(?i)when any merged PR of the change has `open` issues", "the question is not tied to the merged PRs' `open` issues")
+        self.assertRegex(b, r"(?i)one question for the change", "the user is not asked one question for the whole change")
+        self.assertRegex(b, r"(?i)(ask|asks) nothing", "the text never says nothing is asked when there are no `open` issues")
+        close = b.find("gh issue close")
+        self.assertTrue(0 <= ask.start() < close, "the question must come before `gh issue close`")
+        self.assertRegex(b, r"(?i)each `open` issue (the user )?confirmed|only (the )?confirmed", "only confirmed issues are closed")
+        self.assertRegex(b, r"(?is)declined[^.]*left open|left open[^.]*declined", "declined issues are not reported as left open")
+
     def test_cleanup_reports_issues_outside_the_change(self):
         b = self.closing_bullet()
         m = re.search(r"`outside`[^.;]*", b)
