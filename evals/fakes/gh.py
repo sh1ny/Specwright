@@ -284,6 +284,8 @@ def cmd_graphql(st, fields):
         repo = st.get("repos", {}).get(slug)
         if repo is None:
             raise Fail(f"GraphQL: Could not resolve to a Repository with the name '{slug}'. (repository)")
+        if repo.get("readers") and whoami(st) not in repo["readers"]:  # the same access check as the REST path
+            raise Fail(f"GraphQL: Could not resolve to a Repository with the name '{slug}'. (repository)")
         p = find_pull(slug, repo, fields.get("number", ""))
         refs = p.get("closing_refs", [])
         return {"data": {"repository": {"defaultBranchRef": {"name": repo.get("default_branch", "main")},
@@ -291,7 +293,7 @@ def cmd_graphql(st, fields):
                                 "closingIssuesReferences": {
                                     "nodes": [{"number": r["number"], "repository": {"nameWithOwner": r.get("repo", slug)}}
                                               for r in refs[:100]],
-                                    "pageInfo": {"hasNextPage": bool(p.get("closing_refs_has_next"))}}}}}}
+                                    "pageInfo": {"hasNextPage": bool(p.get("closing_refs_has_next")) or len(refs) > 100}}}}}}
     raise Fail("fake gh: unsupported graphql query", 2)
 
 

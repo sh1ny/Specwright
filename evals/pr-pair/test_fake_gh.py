@@ -253,6 +253,33 @@ class ReactionsAndGraphql(FakeGhCase):
         pr = json.loads(self.gh(*args).stdout)["data"]["repository"]["pullRequest"]
         self.assertEqual(pr["closingIssuesReferences"], {"nodes": [], "pageInfo": {"hasNextPage": False}})
 
+    def test_graphql_repository_applies_the_reader_check(self):
+        st = self.seeded()
+        st["repos"]["o/n"]["readers"] = ["sh1ny"]  # the default user is KintsugiBot
+        self.seed(st)
+        args = ("api", "graphql", "-f", "query=" + self.GQL_PR, "-f", "owner=o", "-f", "name=n", "-F", "number=7")
+        rest = self.gh("api", "repos/o/n/pulls", check=False)
+        self.assertEqual(rest.returncode, 1, "the REST path rejects a login that cannot read the repository")
+        r = self.gh(*args, check=False)
+        self.assertEqual(r.returncode, 1, f"GraphQL answered a login that cannot read the repository: {r.stdout}")
+        self.assertIn("Could not resolve to a Repository", r.stderr)
+        st["user"] = "sh1ny"
+        self.seed(st)
+        self.assertEqual(self.gh(*args).returncode, 0)
+
+    def test_graphql_reports_has_next_page_when_more_than_100_refs_are_seeded(self):
+        st = self.seeded()
+        fake_gh.set_closing_refs(st, "o/n", 7, [(n, "o/n") for n in range(1, 102)], has_next=False)  # no explicit flag
+        self.seed(st)
+        args = ("api", "graphql", "-f", "query=" + self.GQL_PR, "-f", "owner=o", "-f", "name=n", "-F", "number=7")
+        refs = json.loads(self.gh(*args).stdout)["data"]["repository"]["pullRequest"]["closingIssuesReferences"]
+        self.assertEqual(len(refs["nodes"]), 100)
+        self.assertTrue(refs["pageInfo"]["hasNextPage"])
+        fake_gh.set_closing_refs(st, "o/n", 7, [(n, "o/n") for n in range(1, 101)], has_next=False)
+        self.seed(st)
+        refs = json.loads(self.gh(*args).stdout)["data"]["repository"]["pullRequest"]["closingIssuesReferences"]
+        self.assertEqual((len(refs["nodes"]), refs["pageInfo"]["hasNextPage"]), (100, False))
+
     def test_graphql_unknown_query_exits_2(self):
         r = self.gh("api", "graphql", "-f", "query={ viewer { login } }", check=False)
         self.assertEqual(r.returncode, 2)
