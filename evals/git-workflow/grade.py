@@ -753,6 +753,13 @@ def is_merge_of(repo, name):
     return n == 2 and subj == f"merge: {name}"
 
 
+def code_tree_kept(code, fx):
+    """(passed, evidence): the code main's tree is the tree the fixture recorded for the code branch's tip. A merge commit with the
+    right subject and two parents is not enough: `git merge -s ours` makes one and keeps none of the branch's code."""
+    want, got = fx.get("code_tree"), git(code, "rev-parse", "main^{tree}")
+    return bool(want) and got == want, f"main tree={got} code branch tip tree={want}"
+
+
 def archive_dirs(store, rev):
     """Names of the directories under openspec/changes/archive/ at rev."""
     out = git(store, "ls-tree", "--name-only", rev, "openspec/changes/archive/") or ""
@@ -893,6 +900,7 @@ def check_store_finish(name, repo, code, store, rep):
                   is_merge_of(code, cn), f"code main={merge_head(code)}"))
         R.append(("The code branch feat/add-greeting was deleted and the code repo is on main with only main left",
                   on(code) == "main" and bs(code) == ["main"], f"code={on(code)} {bs(code)}"))
+        R.append(("The code repo's main tree equals the code branch's tip tree, so the merge kept the code",) + code_tree_kept(code, fx))
         R.append(("Both working trees are clean", not status_of(code) and not status_of(store), f"code={status_of(code)} store={status_of(store)}"))
         R.append(("The report does not give the Nothing to finish stop line", "nothing to finish - archive is on" not in rep, f"report excerpt={rep[-240:]!r}"))
         R.append(no_amend)

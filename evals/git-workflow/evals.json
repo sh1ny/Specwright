@@ -776,6 +776,7 @@
         "The store gets no new commit: its history and main are exactly as the fixture left them, with one archive commit",
         "The code repo's main HEAD is a merge commit with two parents and subject merge: add-greeting",
         "The code branch feat/add-greeting was deleted and the code repo is on main with only main left",
+        "The code repo's main tree equals the code branch's tip tree, so the merge kept the code",
         "Both working trees are clean",
         "The report does not say Nothing to finish",
         "No commit was amended in either repo"
@@ -812,6 +813,7 @@
         "The store gets no new commit: its history and main are exactly as the fixture left them, with one archive commit",
         "The code repo's main HEAD is a merge commit with two parents and subject merge: add-greeting",
         "The code branch feat/add-greeting was deleted and the code repo is on main with only main left",
+        "The code repo's main tree equals the code branch's tip tree, so the merge kept the code",
         "Both working trees are clean",
         "The report does not say Nothing to finish",
         "No commit was amended in either repo"

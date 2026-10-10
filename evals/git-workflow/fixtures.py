@@ -647,7 +647,9 @@ def build_store(name, dest):
         git(store, "commit", "-q", "-m", "feat(add-greeting): archive change")
         merge_into_main(store)
         out = lambda *a: subprocess.run(["git", *a], cwd=store, check=True, capture_output=True, text=True).stdout.strip()
-        write(dest, "fixture-state.json", json.dumps({"store_main": out("rev-parse", "main"), "store_commits": int(out("rev-list", "--count", "--all"))}, indent=2))
+        code_tree = subprocess.run(["git", "rev-parse", "feat/add-greeting^{tree}"], cwd=code, check=True, capture_output=True, text=True).stdout.strip()
+        write(dest, "fixture-state.json", json.dumps({"store_main": out("rev-parse", "main"), "store_commits": int(out("rev-list", "--count", "--all")),
+                                                      "code_tree": code_tree}, indent=2))  # code_tree: what a recovered code main must hold
         if name.endswith("-from-main"):
             git(code, "checkout", "-q", "main")  # the code repo was left on main; its branch still has the commits
     elif name == "eval-store-archive-on-main":
