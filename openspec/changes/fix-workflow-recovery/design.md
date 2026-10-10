@@ -49,7 +49,7 @@ See proposal.md for the issues. Current state:
     - `<readable>` is the old sanitised `owner.name.change`, kept for humans with `.` as the separator, cut to its first 120 characters, so the name and its `.lock` stay far below the 255-character file-name limit (GitHub allows 39 + 100 characters for owner and name alone);
     - `<h>` is the first 32 hex characters of `sha256(lower(owner) + "\n" + lower(name) + "\n" + change)`.
   - The hash keeps the fields apart, so different identities never share a file. Lower-casing matches GitHub's case-insensitive names.
-  - On every `pass` call, if the 0.1.9 path exists, it is read. When the new path is absent and the old file cannot be parsed, its identity is unknown, so the lookup stops with `record_unreadable`; when the new path exists, an unreadable old file is reported as ignored and never blocks the valid record. A readable old file byte-identical to the new record is the leftover of an interrupted move and is removed. Otherwise, with the new path absent, when its `code_repo` (compared case-insensitively) and `change` equal the lookup, it is moved with `os.link` plus `unlink` under the same exclusive rule as D1. The move runs outside the record lock, so another caller can finish it first: an old file already gone at `unlink` counts as moved. An old path the OS rejects as too long counts as absent. Otherwise it is left alone and the lookup reports no record.
+  - On every `pass` call, if the 0.1.9 path exists, it is read. When the new path is absent and the old file cannot be parsed or cannot be read (any OS error, such as a denied permission), its identity is unknown, so the lookup stops with `record_unreadable`; when the new path exists, an unreadable old file is reported as ignored and never blocks the valid record. A readable old file byte-identical to the new record is the leftover of an interrupted move and is removed. Otherwise, with the new path absent, when its `code_repo` (compared case-insensitively) and `change` equal the lookup, it is moved with `os.link` plus `unlink` under the same exclusive rule as D1. The move runs outside the record lock, so another caller can finish it first: an old file already gone at `unlink` counts as moved. An old path the OS rejects as too long counts as absent. Otherwise it is left alone and the lookup reports no record.
 - **Rejected: percent-encoding each field with a separator.** It is equally collision-free and fully readable, but filenames grow and still depend on the encoding being applied consistently by hand. The hash suffix is fixed length. **Rejected: no migration.** A pass interrupted under 0.1.9 would silently vanish and the next run would start a fresh pass at a higher round.
 - **Reversal cost:** low. It is a local cache path.
 
@@ -113,14 +113,17 @@ See proposal.md for the issues. Current state:
   - **M:** `merge: <change-name>` in `git log --first-parent --format=%s <main>`, and, when B, the branch tip is on main (`git merge-base --is-ancestor <branch> <main>`). An archive-recovery branch made after the change merged holds a new archive commit, so the earlier merge does not count for it;
   - **B:** `<branch>` exists.
 
-  Then continue from the first missing step of the normal order:
+  Then continue from the first missing step of the normal order. Rows are checked top to bottom, and the first match wins:
 
   | Case | Next step |
   |---|---|
-  | uncommitted archive paths | step 3 (as today) |
+  | uncommitted archive paths, no A | steps 1-3 in order (branch check and recovery branch, planning-only test, archive commit) |
   | A on branch, not M, B, local mode | merge |
+  | code repo, store's A has `Archive-Scope: store-only` | out of scope: report its branch and PR state, touch nothing; counts as done for `Nothing to finish` |
   | M and B | `git checkout <main> && git branch -d` |
   | M, not B | repo done |
+  | code repo without A, M, B; store done; store archive marked `code_changes: none` | code repo done |
+  | code repo without A, M, B; store done; no such marker | report and ask |
   | store done, code branch with commits, code not M, local mode | code merge |
   | store done, code branch without commits | `git checkout <main> && git branch -d` |
   | pr mode, A on branch, PR not merged | step 4 pr (ship; push and PR are idempotent) |
@@ -133,7 +136,9 @@ See proposal.md for the issues. Current state:
   - `Nothing to finish` is reported only when every repo is done.
   - Uncommitted changes under the archive directory or the change directory stop the resume, listed for the user.
   - When none of the facts is found, finish reports that it found no archive of the change and does nothing.
-  - The planning-only test (step 2) runs only before an archive commit; a resume never writes the marker.
+  - The planning-only test (step 2) runs only before an archive commit: a resume that finds archive paths uncommitted and no A runs it, then the archive commit; once A exists, a resume never writes the marker.
+  - **Store-only archive recovery** (step 1 on main: the recovery branch `chore/archive-<change-name>` is created in the store only): step 3 writes the body line `Archive-Scope: store-only` into the archive commit message when the change is store-backed and the store is on `chore/archive-<change-name>` (true on a first run and on a resume alike). Resume reads it from the newest store A: `git log -1 --format=%B <A>`, matching the exact line. When it is there, the code repo is out of scope for the resume: no code merge, ship or branch deletion; the resume reports the code branch's state and leaves it to its own PR or finish.
+  - **Planning-only, already finished:** a local finish of a planning-only change deletes the empty code branch and makes no code merge, so the code repo shows no A, M or B. The marker's path comes from the store's A: `git show --name-only --format= <A>` lists `<P>/changes/archive/<archived-name>/specwright-change.yaml` when one was written; `git show <main>:<that path>` must match `^code_changes:\s*none\s*$` (the test `find_marker` uses). When the store is done and that holds, the code repo is done. Without that marker, a code repo with no A, M or B beside a finished store is reported and the user is asked.
   - Every branch deletion checks out `<main>` first: a resume can start on the branch it deletes, and git refuses to delete the checked-out branch.
 - **Rejected: a finish progress file.** That is a second source of truth (ADR 0003), and git already holds every fact.
 - **Reversal cost:** low. It is skill text.
@@ -143,7 +148,7 @@ See proposal.md for the issues. Current state:
 - **Choice:**
   - `references/description.md`: one `Fixes #N` line per fully resolved issue; `Related: #N` otherwise. In a store-backed change, closing lines go on the PR in the repository that holds the issues (normally the code PR), and the store PR uses `Related: <owner>/<repo>#N`. When no PR is expected in the repository that holds an issue (a planning-only store-backed change whose issues are in the code repo), the PR that does exist carries the closing line in cross-repository form, `Fixes <owner>/<repo>#N`.
   - New `pr-pair.sh closing-check --repo o/n --pr N` reads, in one `gh api graphql` call (no newer `gh` than 2.40 needed): the PR body, its `baseRefName`, the repository's `defaultBranchRef`, and `closingIssuesReferences(first: 100)`. It then:
-    - parses the intended issues, skipping code and hidden text: every reference directly after a closing keyword (`close[sd]?`, `fix(e[sd])?`, `resolve[sd]?`, case-insensitive, optional `:`), plus the closing list of a line that starts with one (`#N`, `owner/repo#N` or an issue URL). The closing list starts at the reference directly after the line's leading keyword (only whitespace and the optional `:` between them) and continues with each next reference separated from the one before by only `,`, `;`, `and`, whitespace or another closing keyword; any other text (such as `Related:`) ends it, so `Fixes #21; Related: #52` names only 21. A keyword-led line whose first reference does not directly follow the keyword (`Fixes the crash; Related: #52`) has no closing list. A later closing keyword on the line still names the reference directly after it;
+    - parses the intended issues, skipping code and hidden text: every reference directly after a closing keyword (`close[sd]?`, `fix(e[sd])?`, `resolve[sd]?`, case-insensitive, optional `:`), plus the closing list of a line that starts with one (`#N`, `owner/repo#N` or an issue URL). The closing list starts at the reference directly after the line's leading keyword (only whitespace and the optional `:` between them; a `,`, `;`, `and`, another keyword or a removed code span there means no closing list) and continues with each next reference separated from the one before by only `,`, `;`, `and`, whitespace or another closing keyword; any other text (such as `Related:`) ends it, so `Fixes #21; Related: #52` names only 21. A keyword-led line whose first reference does not directly follow the keyword (`Fixes the crash; Related: #52`) has no closing list. A later closing keyword on the line still names the reference directly after it;
     - normalises intended and linked issues alike to `owner/repo#N`, a bare `#N` taking the PR's own repository;
     - prints `{status, intended, linked, missing, extra, base, default_branch}`. `status` is `match` when `missing` is empty and `mismatch` otherwise. `extra` (issues linked by hand in the sidebar) is informational and never makes a mismatch.
     - When the base is not the default branch, it prints `status: not_default_base` with the intended issues. GitHub applies closing keywords only on PRs into the default branch.
@@ -152,7 +157,7 @@ See proposal.md for the issues. Current state:
     - `not_default_base` → no rewrite and no stop: ship reports that GitHub will not close the listed issues from this PR;
     - `created` + mismatch → rewrite only the closing lines that hold nothing but a keyword and references, one keyword per reference. A closing line with other text is left as is and reported. Then `gh pr edit --body-file` and check again; a second mismatch → stop and name the missing issues;
     - `found` + mismatch → report and ask; never edit the description unprompted.
-  - Code and hidden text are skipped as GitHub renders them (CommonMark): fenced blocks; indented code: every line indented four or more columns (a tab advances to the next multiple of four) unless the line before it is a paragraph line, that is non-blank text other than a heading, a fence line, a thematic break or an HTML-comment line; the first line of the description counts as following a blank line. Lists get no exception: an indented list paragraph skipped this way only makes its reference count as `extra`; HTML comments (`<!-- ... -->`, also across lines); and code spans, which may continue across the lines of one paragraph. A span opens at a backtick run and closes only at the next run of the same length, so ` ``Fixes #21`` ` is code; a run with no matching closer is literal text. Erring toward skipping is safe: a reference wrongly skipped is reported as `extra` or left for a person, while one wrongly counted would be closed at cleanup. An ordered-list marker (`1.`, `1)`) before a keyword counts as the start of the line, like `-`, `*` and `>`.
+  - Code and hidden text are skipped as GitHub renders them (CommonMark): fenced blocks, closed only by a fence line of the same character, at least as long, with nothing but white space after it; indented code: every line indented four or more columns (a tab advances to the next multiple of four) unless the line before it is a paragraph line, that is non-blank text other than a heading, a fence line, a thematic break or an HTML-comment line; the first line of the description counts as following a blank line. Lists get no exception: an indented list paragraph skipped this way only makes its reference count as `extra`; HTML comments (`<!-- ... -->`, also across lines); and code spans, which may continue across the lines of one paragraph. A span opens at a backtick run and closes only at the next run of the same length, so ` ``Fixes #21`` ` is code; a run with no matching closer is literal text. A removed span leaves a space, so the text around it never joins into a new word (`` Fi`x`xes #52 `` is not `Fixes #52`). Within a paragraph, code spans are found before HTML comments: a `<!--` inside a span is code, not the start of a comment (a line that starts with `<!--` is an HTML block, not a paragraph). Erring toward skipping is safe: a reference wrongly skipped is reported as `extra` or left for a person, while one wrongly counted would be closed at cleanup. An ordered-list marker (`1.`, `1)`) before a keyword counts as the start of the line, like `-`, `*` and `>`.
 - **Rejected: a prose rule alone.** PR #59 was written with a prose rule in place.
 - **Reversal cost:** low.
 
@@ -163,7 +168,7 @@ See proposal.md for the issues. Current state:
     - `status` is `not_merged` when the PR is not merged; `not_default_base` when its base is not the default branch (GitHub closes nothing from such a PR, and the fix has not reached the default branch); `merged` otherwise;
     - `open`: open and never closed; `reopened`: open with an earlier close event, so a person reopened it.
   - A failed or malformed read of the PR, or of an issue it reads, exits 3 (unknown).
-  - `specwright-pr` **Cleanup after merge** runs it for each merged PR of the change (store-backed and repo-local; `specwright-finish` **After the PR is merged** points there). For each `open` issue: `[as] gh issue close <n> --repo <owner/name> --comment "Fixed by <pr_url>. Its closing keyword did not close this issue on merge."`, with that repository's identity. `reopened` and `outside` issues are reported, never closed. `not_merged` → nothing. `not_default_base` → close nothing; report that the intended issues stay open until the fix reaches the default branch. Exit 3 → report the backstop as not done; branch cleanup continues. A failed close → report what was closed and what is still open, and continue; a later cleanup closes only the rest.
+  - `specwright-pr` **Cleanup after merge** runs it for each merged PR of the change (store-backed and repo-local; `specwright-finish` **After the PR is merged** points there). Before closing, when any merged PR of the change has `open` issues, it lists them all with their PRs and asks the user one question for the change (the user may drop any); with none, it asks nothing: the parser approximates GitHub's renderer, so a person checks the list before an issue is closed. For each confirmed issue: `[as] gh issue close <n> --repo <owner/name> --comment "Fixed by <pr_url>. Its closing keyword did not close this issue on merge."`, with that repository's identity. Declined issues are reported as left open. `reopened` and `outside` issues are reported, never closed. `not_merged` → nothing. `not_default_base` → close nothing; report that the intended issues stay open until the fix reaches the default branch. Exit 3 → report the backstop as not done; branch cleanup continues. A failed close → report what was closed and what is still open, and continue; a later cleanup closes only the rest.
   - Only closing lines count, so a `Related:` issue is never closed.
 - **Rejected: edit the PR description after merge.** GitHub applies closing keywords only at merge, so an edit closes nothing. **Rejected: close issues named anywhere in the body.** `Related:` issues are only partly resolved.
 - **Reversal cost:** low. It is one script subcommand and one cleanup step.
@@ -205,7 +210,7 @@ Finish resume (T2):
 ```mermaid
 flowchart TD
     S[finish re-entered] --> D{archive paths uncommitted?}
-    D -- yes --> C[step 3 archive commit]
+    D -- yes --> C[steps 1-3: branch check, planning-only test, archive commit]
     D -- no --> R{per repo: A / M / B}
     R -- "A, ¬M, B (local)" --> MG[merge --no-ff]
     R -- "M, B" --> DEL[branch -d]
@@ -215,6 +220,9 @@ flowchart TD
     R -- "store done, code commits, PR none/open (pr)" --> SH
     R -- "store done, code commits, PR closed unmerged (pr)" --> ASK[report and ask]
     CM --> DEL
+    R -- "code repo, store A has Archive-Scope: store-only" --> OUT[report code branch, touch nothing]
+    R -- "code ¬A ¬M ¬B, store done, marker none" --> OK
+    R -- "code ¬A ¬M ¬B, store done, no marker" --> ASK
     R -- "none found" --> NF[report: no archive found]
     MG --> DEL --> OK
 ```
@@ -244,7 +252,7 @@ Record format (T4): `{version: 2, owner: {id, at, checkout, host}, branch, round
 | Finish resume | Stops between steps | The next resume reads the evidence again | Yes, by D8 | User (report) |
 | `closing-check` | GitHub error or more than 100 closing issues | Exit 3; ship reports the check as not done | Yes | User (ship report) |
 | `closed-check` | GitHub error on the PR or on an issue of the change's repositories | Exit 3; cleanup reports the backstop as not done, closes nothing and continues its branch cleanup | Yes | User (cleanup report) |
-| Issue close at cleanup | `gh issue close` fails partway through the list | Cleanup reports which issues it closed and which are still open; a later cleanup reads the states again and closes only the rest (a failed close leaves no close event) | Yes | User (cleanup report) |
+| Issue close at cleanup | `gh issue close` fails partway through the confirmed list | Cleanup reports which issues it closed and which are still open; a later cleanup reads the states again, asks about the rest and closes only those (a failed close leaves no close event) | Yes | User (cleanup report) |
 | Issue reopened by a person after a close | — | `closed-check` lists it as `reopened` (it has a close event); cleanup reports it and never closes it again | — | User (cleanup report) |
 
 ## Resource Bounds (FULL)
@@ -270,6 +278,9 @@ Record format (T4): `{version: 2, owner: {id, at, checkout, host}, branch, round
 - **Reaction of the opposite content already present:** the recorded content is still added. The plan never removes reactions.
 - **Code PR closed between adoption and link:** only an open PR is adopted (`:1061`). A closed one is not linked, and the push row's `ship` path handles it.
 - **Finish resume while the store branch was deleted but its merge is missing:** the facts read as ¬A (the branch is gone), ¬M and ¬B. Finish reports no archive found for the store and asks.
+- **Store-only archive recovery interrupted after the store merge:** the store's A carries `Archive-Scope: store-only`, so the code branch, with or without commits or a PR, is reported and left alone; the store being done is enough for `Nothing to finish`.
+- **Planning-only change finished, then finish runs again:** the code repo has no A, M or B. With the store's `code_changes: none` marker it is done; without it (a marker lost or never written), finish reports and asks rather than guessing.
+- **Issue declined at the cleanup confirmation:** it stays open and has no close event, so every later cleanup of that change lists it and asks again; the user closes it by hand or declines again.
 - **`closing-check` right after creation:** if GitHub has not yet computed the references, the first check may show a mismatch. The rewrite is harmless, and the second check decides.
 
 ## Mechanism Ledger (FULL)
@@ -286,6 +297,8 @@ Record format (T4): `{version: 2, owner: {id, at, checkout, host}, branch, round
 | `link` row | Yes | #30: the store PR is left without its peer link, unnoticed | — |
 | Finish progress file | No | Git holds the facts (ADR 0003) | — |
 | `closing-check` | Yes | #61: issues stay open silently after merge | — |
+| Confirmation before the cleanup close | Yes | The parser approximates GitHub's renderer; a corner case it misreads would close an unrelated issue without anyone looking | Parser verified against GitHub's renderer on real descriptions |
+| `Archive-Scope: store-only` line on the recovery archive commit | Yes | Without it a resume cannot tell a store-only recovery from an interrupted two-repo finish, and merges or ships a code branch that goes its own way | — |
 | `closed-check` and the cleanup close | Yes | #61 part 3: an intended issue stays open after merge (a PR merged before `closing-check`, or a check that was skipped or failed); nobody notices until the milestone gate | — |
 | Skip reopened issues | Yes | Without it a re-run cleanup closes an issue a person reopened on purpose | — |
 | Base and default-branch check in `closed-check` | Yes | Without it cleanup closes issues whose fix has not reached the default branch (a `develop` main) | — |
@@ -294,7 +307,7 @@ Record format (T4): `{version: 2, owner: {id, at, checkout, host}, branch, round
 
 - [Every resume after a crash asks the user about ownership] → The prompt shows when and where the record was written. The question is one confirmation, and the evidence-based plan still drives everything after it.
 - [`os.link` on Windows needs NTFS] → The O_EXCL fallback; the state dir is under the user's home, normally NTFS.
-- [The intended-issue parser disagrees with GitHub's on an exotic form] → `extra` and `missing` are reported, not acted on silently, and the rewrite uses the canonical one-line form GitHub always parses.
+- [The intended-issue parser disagrees with GitHub's on an exotic form] → `extra` and `missing` are reported, not acted on silently, and the rewrite uses the canonical one-line form GitHub always parses. At cleanup, the user confirms the list before any issue is closed.
 - [The repo-local pass record adds a step for repo-local users] → It is the same step store-backed users already run; without it #34 cannot be fixed.
 
 ## ADRs
