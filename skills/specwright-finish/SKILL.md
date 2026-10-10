@@ -30,10 +30,12 @@ None of A, M, B in any repo → report that no archive of `<change-name>` was fo
 | A on branch, not M, B, `local` | merge (`## local`) |
 | M and B | `git checkout <main> && git branch -d <branch>`, no merge |
 | M, not B | repo done |
-| store done; code branch with commits, code not M | code merge (`## local` store-backed step 2) |
+| store done; code branch with commits, code not M, `local` | code merge (`## local` store-backed step 2) |
 | store done; code branch without commits | `git checkout <main> && git branch -d <branch>`, no merge |
 | `pr`, A on branch, PR not merged | `## pr` ship; push and PR are idempotent |
 | `pr`, the branch's PR merged | **After the PR is merged** cleanup, not ship |
+| `pr`, store done; code branch with commits, code not M, no PR or an open PR | `## pr` ship for the code branch; push and PR are idempotent. Merge nothing, delete nothing |
+| `pr`, store done; code branch with commits, its PR closed unmerged | report the closed PR and ask. Merge nothing, delete nothing |
 
 Report `Nothing to finish - archive is on <main>` only when every repo is done. A resume writes no planning-only marker: step 2 runs only before an archive commit.
 

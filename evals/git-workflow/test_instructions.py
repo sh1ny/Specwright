@@ -411,6 +411,23 @@ class ChangeFinishResume(unittest.TestCase):
         self.assertRegex(merged, r"After the PR is merged", "a merged PR does not go to the cleanup")
         self.assertRegex(merged, r"(?i)not ship", "a merged PR may be shipped again")
 
+    def test_resume_pr_mode_keeps_an_open_code_pr(self):
+        s = resume_section()
+        local = resume_row(s, r"store done[^|]*code branch with commits[^|]*")
+        self.assertRegex(s, r"(?m)^\|\s*store done[^|]*code branch with commits[^|]*`local`", "the code-merge row is not restricted to local mode")
+        self.assertRegex(local, r"(?i)code merge", "the local row no longer merges the code branch")
+        open_pr = resume_row(s, r"`pr`, store done[^|]*code branch with commits[^|]*(?:no PR|open PR)[^|]*")
+        self.assertTrue(open_pr, "no pr-mode row for a store done, code branch with commits, no PR or an open PR")
+        self.assertRegex(open_pr, r"## pr", "the open-PR row does not go to `## pr` ship")
+        self.assertRegex(open_pr, r"(?i)\bship\b", "the open-PR row does not ship")
+        self.assertRegex(open_pr, r"(?i)merge nothing|no merge|not merge", "the open-PR row may merge the code branch")
+        self.assertRegex(open_pr, r"(?i)delete nothing|no delet|not delete", "the open-PR row may delete the code branch")
+        closed = resume_row(s, r"`pr`, store done[^|]*code branch with commits[^|]*closed[^|]*")
+        self.assertTrue(closed, "no pr-mode row for a code PR closed unmerged")
+        self.assertRegex(closed, r"(?i)\breport\b.*\bask\b", "the closed-PR row does not report and ask")
+        self.assertRegex(closed, r"(?i)merge nothing|no merge|not merge", "the closed-PR row may merge")
+        self.assertRegex(closed, r"(?i)delete nothing|no delet|not delete", "the closed-PR row may delete the branch")
+
     def test_finish_resume_stops_on_dirty_archive_paths(self):
         s = resume_section()
         block = find_block(s, r"git status --porcelain", r"<P>/changes/<change-name>/", r"archive directory", r"\bstop\b")
