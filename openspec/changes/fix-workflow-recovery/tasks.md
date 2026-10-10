@@ -80,6 +80,12 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 | planning-stores → An interrupted feedback pass is completed first | Reply posted, reaction not sent | evals/pr-pair/test_pr_pair.py | test_pass_plan_reaction_todo_until_github_shows_it | green |
 | planning-stores → An interrupted feedback pass is completed first | Reaction already present | evals/pr-pair/test_pr_pair.py | test_pass_plan_reaction_done_when_present | green |
 | planning-stores → An interrupted feedback pass is completed first | Code PR adopted before the pair was linked | evals/pr-pair/test_pr_pair.py | test_pass_plan_adopted_code_pr_needs_the_link | green |
+| feedback-passes → Pass records are keyed per repository and change | Longest repository and change names | evals/pr-pair/test_pr_pair.py | test_record_key_is_bounded_for_the_longest_names | red |
+| feedback-passes → Pass records are keyed per repository and change | Two callers move one old record | evals/pr-pair/test_pr_pair.py | test_legacy_move_finished_by_another_caller | red |
+| change-finish → Finish resumes from git evidence | Store merged by hand, code PR still open | evals/git-workflow/test_instructions.py | test_resume_pr_mode_keeps_an_open_code_pr | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | Related reference on a closing line | evals/pr-pair/test_pr_pair.py | test_closed_check_ignores_related_on_a_closing_line | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | Closing line without a closing list | evals/pr-pair/test_pr_pair.py | test_closed_check_ignores_a_line_without_a_closing_list | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | Closing keyword hidden from the rendered description | evals/pr-pair/test_pr_pair.py | test_closed_check_ignores_hidden_references | red |
 
 Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re-runs them after the record format changes (the owner, and the reaction read), and updates their fixtures where the new contract requires it, without weakening an assertion. Text checks prove a rule is in the instructions, not that a live agent follows it. The finish evals cover the live paths that change branch state. They are regression guards, not red-first tests: every one, including the `-from-main` variants added during apply (HEAD on main, where the old step 1 said `Nothing to finish`), also passed against the 0.1.9 skill with Opus and Haiku, because the agents reasoned out the resume from the git state. The red evidence for group 6 is its five text tests.
 
@@ -233,6 +239,13 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 - [x] 10.4 Add the red tests `test_closing_check_ignores_multi_backtick_code_spans`, `test_closing_check_unmatched_backtick_is_literal` and `test_closing_check_reads_numbered_closing_lines`, then fix `without_code` (CommonMark code spans: a closer of the same run length; an unmatched run is literal) and the closing-line match in `pr-pair.sh` per D9. Verify and flip the rows green.
 - [x] 10.5 In `evals/fakes/gh.py`, apply the repository reader check to the GraphQL repository path, and report `hasNextPage` when more than 100 closing references are seeded. Add `test_fake_gh.py` cases (red first), then verify `test_fake_gh.py` and the closing-check tests pass.
 - [x] 10.6 Re-run the 8.2 checks. Verify every test map row is green and `git diff main -- docs/adr` is empty.
+
+## 11. OMP pre-ship review fixes
+
+- [ ] 11.1 Add the red tests `test_closed_check_ignores_hidden_references` (an indented code block after a blank line, one directly after a heading, a code span across two lines, an HTML comment), `test_closed_check_ignores_related_on_a_closing_line` and `test_closed_check_ignores_a_line_without_a_closing_list` (`Fixes the crash; Related: #52`), then fix `without_code` and `intended_issues` in `pr-pair.sh` per D9 (indented code unless after a paragraph line; the closing list starts at a reference directly after the leading keyword and ends at any text other than separators or another closing keyword). Verify, including the existing `ClosingCheck` and `ClosedCheck` tests, and flip the rows green.
+- [ ] 11.2 Add the red test `test_resume_pr_mode_keeps_an_open_code_pr` to `evals/git-workflow/test_instructions.py`, then restrict the Resume row "store done; code branch with commits, code not M" in `skills/specwright-finish/SKILL.md` to `local` and add the two pr-mode rows per D8 (no PR or an open PR → ship; closed unmerged → report and ask). Verify and flip the row green.
+- [ ] 11.3 Add the red tests `test_record_key_is_bounded_for_the_longest_names` (record and lock created; adopt and done work; a change name over 110 characters, whose 0.1.9 path is too long, still plans) and `test_legacy_move_finished_by_another_caller`, then cut the readable key prefix to 120 characters in `record_path`, treat a legacy file already gone at `unlink` as moved, and treat an old path the OS rejects as too long as absent, per D2. Verify and flip the rows green.
+- [ ] 11.4 Re-run the 8.2 checks. Verify every test map row is green and `git diff main -- docs/adr` is empty.
 
 ## Workflow follow-up
 
