@@ -46,10 +46,10 @@ See proposal.md for the issues. Current state:
 
 - **Choice:**
   - The key is `<readable>-<h>.json`:
-    - `<readable>` is the old sanitised `owner.name.change`, kept for humans with `.` as the separator;
+    - `<readable>` is the old sanitised `owner.name.change`, kept for humans with `.` as the separator, cut to its first 120 characters, so the name and its `.lock` stay far below the 255-character file-name limit (GitHub allows 39 + 100 characters for owner and name alone);
     - `<h>` is the first 32 hex characters of `sha256(lower(owner) + "\n" + lower(name) + "\n" + change)`.
   - The hash keeps the fields apart, so different identities never share a file. Lower-casing matches GitHub's case-insensitive names.
-  - On every `pass` call, if the 0.1.9 path exists, it is read. When the new path is absent and the old file cannot be parsed, its identity is unknown, so the lookup stops with `record_unreadable`; when the new path exists, an unreadable old file is reported as ignored and never blocks the valid record. A readable old file byte-identical to the new record is the leftover of an interrupted move and is removed. Otherwise, with the new path absent, When its `code_repo` (compared case-insensitively) and `change` equal the lookup, it is moved with `os.link` plus `unlink` under the same exclusive rule as D1. Otherwise it is left alone and the lookup reports no record.
+  - On every `pass` call, if the 0.1.9 path exists, it is read. When the new path is absent and the old file cannot be parsed, its identity is unknown, so the lookup stops with `record_unreadable`; when the new path exists, an unreadable old file is reported as ignored and never blocks the valid record. A readable old file byte-identical to the new record is the leftover of an interrupted move and is removed. Otherwise, with the new path absent, when its `code_repo` (compared case-insensitively) and `change` equal the lookup, it is moved with `os.link` plus `unlink` under the same exclusive rule as D1. The move runs outside the record lock, so another caller can finish it first: an old file already gone at `unlink` counts as moved. An old path the OS rejects as too long counts as absent. Otherwise it is left alone and the lookup reports no record.
 - **Rejected: percent-encoding each field with a separator.** It is equally collision-free and fully readable, but filenames grow and still depend on the encoding being applied consistently by hand. The hash suffix is fixed length. **Rejected: no migration.** A pass interrupted under 0.1.9 would silently vanish and the next run would start a fresh pass at a higher round.
 - **Reversal cost:** low. It is a local cache path.
 
@@ -121,10 +121,12 @@ See proposal.md for the issues. Current state:
   | A on branch, not M, B, local mode | merge |
   | M and B | `git checkout <main> && git branch -d` |
   | M, not B | repo done |
-  | store done, code branch with commits, code not M | code merge |
+  | store done, code branch with commits, code not M, local mode | code merge |
   | store done, code branch without commits | `git checkout <main> && git branch -d` |
   | pr mode, A on branch, PR not merged | step 4 pr (ship; push and PR are idempotent) |
   | pr mode, the branch's PR merged | **After the PR is merged** (cleanup), not ship |
+  | pr mode, store done, code branch with commits, code not M, no PR or an open PR | `## pr` ship for the code branch (push and PR are idempotent: it opens the PR or reports the open one); merge nothing, delete nothing |
+  | pr mode, store done, code branch with commits, its PR closed unmerged | report the closed PR and ask; merge nothing, delete nothing |
 
   - **Finding the branch from main:** `<prefix>/<change-name>` with the prefix rule of `specwright-branch` step 6; else a local `chore/archive-<change-name>`; else the one local branch matching `*/<change-name>`. Several candidates → list them and ask.
   - **The archive subject** matches any type: the regex `^[a-z]+\(<change-name>\): archive change$`.
@@ -141,7 +143,7 @@ See proposal.md for the issues. Current state:
 - **Choice:**
   - `references/description.md`: one `Fixes #N` line per fully resolved issue; `Related: #N` otherwise. In a store-backed change, closing lines go on the PR in the repository that holds the issues (normally the code PR), and the store PR uses `Related: <owner>/<repo>#N`. When no PR is expected in the repository that holds an issue (a planning-only store-backed change whose issues are in the code repo), the PR that does exist carries the closing line in cross-repository form, `Fixes <owner>/<repo>#N`.
   - New `pr-pair.sh closing-check --repo o/n --pr N` reads, in one `gh api graphql` call (no newer `gh` than 2.40 needed): the PR body, its `baseRefName`, the repository's `defaultBranchRef`, and `closingIssuesReferences(first: 100)`. It then:
-    - parses the intended issues, skipping fenced and inline code: every reference directly after a closing keyword (`close[sd]?`, `fix(e[sd])?`, `resolve[sd]?`, case-insensitive, optional `:`), plus every reference on a line that starts with one (`#N`, `owner/repo#N` or an issue URL);
+    - parses the intended issues, skipping code and hidden text: every reference directly after a closing keyword (`close[sd]?`, `fix(e[sd])?`, `resolve[sd]?`, case-insensitive, optional `:`), plus the closing list of a line that starts with one (`#N`, `owner/repo#N` or an issue URL). The closing list starts at the reference directly after the line's leading keyword (only whitespace and the optional `:` between them) and continues with each next reference separated from the one before by only `,`, `;`, `and`, whitespace or another closing keyword; any other text (such as `Related:`) ends it, so `Fixes #21; Related: #52` names only 21. A keyword-led line whose first reference does not directly follow the keyword (`Fixes the crash; Related: #52`) has no closing list. A later closing keyword on the line still names the reference directly after it;
     - normalises intended and linked issues alike to `owner/repo#N`, a bare `#N` taking the PR's own repository;
     - prints `{status, intended, linked, missing, extra, base, default_branch}`. `status` is `match` when `missing` is empty and `mismatch` otherwise. `extra` (issues linked by hand in the sidebar) is informational and never makes a mismatch.
     - When the base is not the default branch, it prints `status: not_default_base` with the intended issues. GitHub applies closing keywords only on PRs into the default branch.
@@ -150,14 +152,14 @@ See proposal.md for the issues. Current state:
     - `not_default_base` → no rewrite and no stop: ship reports that GitHub will not close the listed issues from this PR;
     - `created` + mismatch → rewrite only the closing lines that hold nothing but a keyword and references, one keyword per reference. A closing line with other text is left as is and reported. Then `gh pr edit --body-file` and check again; a second mismatch → stop and name the missing issues;
     - `found` + mismatch → report and ask; never edit the description unprompted.
-  - Code is skipped as GitHub renders it (CommonMark): fenced blocks, and inline code spans. A span opens at a backtick run and closes only at the next run of the same length, so ` ``Fixes #21`` ` is code; a run with no matching closer is literal text. An ordered-list marker (`1.`, `1)`) before a keyword counts as the start of the line, like `-`, `*` and `>`.
+  - Code and hidden text are skipped as GitHub renders them (CommonMark): fenced blocks; indented code: every line indented four or more columns (a tab advances to the next multiple of four) unless the line before it is a paragraph line, that is non-blank text other than a heading, a fence line, a thematic break or an HTML-comment line; the first line of the description counts as following a blank line. Lists get no exception: an indented list paragraph skipped this way only makes its reference count as `extra`; HTML comments (`<!-- ... -->`, also across lines); and code spans, which may continue across the lines of one paragraph. A span opens at a backtick run and closes only at the next run of the same length, so ` ``Fixes #21`` ` is code; a run with no matching closer is literal text. Erring toward skipping is safe: a reference wrongly skipped is reported as `extra` or left for a person, while one wrongly counted would be closed at cleanup. An ordered-list marker (`1.`, `1)`) before a keyword counts as the start of the line, like `-`, `*` and `>`.
 - **Rejected: a prose rule alone.** PR #59 was written with a prose rule in place.
 - **Reversal cost:** low.
 
 ### D10: Issues a merged PR left open are closed at cleanup (#61 part 3)
 
 - **Choice:**
-  - New `pr-pair.sh closed-check --repo o/n --pr N --repos o/n[,o/n]` (`--repos`: the change's repositories). One GraphQL read of the PR (`state`, `url`, `body`, `baseRefName`, the repository's `defaultBranchRef`) through the repo's login; the intended issues parsed by D9's function. Only intended issues in `--repos` (compared case-insensitively) are read, each through its repository's login: its `state` and whether its timeline has any `ClosedEvent`. Others are listed as `outside`, unread. It prints `{status, pr_url, base, default_branch, intended, open, reopened, closed, outside}`:
+  - New `pr-pair.sh closed-check --repo o/n --pr N --repos o/n[,o/n] [--login o/n=L ...]` (`--repos`: the change's repositories; `--login`: the login that reads a repository other than the one the call runs as, such as a private store read by `planning_store.login`). One GraphQL read of the PR (`state`, `url`, `body`, `baseRefName`, the repository's `defaultBranchRef`) through the repo's login; the intended issues parsed by D9's function. Only intended issues in `--repos` (compared case-insensitively) are read, each through its repository's login: its `state` and whether its timeline has any `ClosedEvent`. Others are listed as `outside`, unread. It prints `{status, pr_url, base, default_branch, intended, open, reopened, closed, outside}`:
     - `status` is `not_merged` when the PR is not merged; `not_default_base` when its base is not the default branch (GitHub closes nothing from such a PR, and the fix has not reached the default branch); `merged` otherwise;
     - `open`: open and never closed; `reopened`: open with an earlier close event, so a person reopened it.
   - A failed or malformed read of the PR, or of an issue it reads, exits 3 (unknown).
@@ -209,6 +211,10 @@ flowchart TD
     R -- "M, B" --> DEL[branch -d]
     R -- "M, ¬B" --> OK[repo done]
     R -- "A on branch (pr)" --> SH[ship]
+    R -- "store done, code commits, ¬M (local)" --> CM[code merge]
+    R -- "store done, code commits, PR none/open (pr)" --> SH
+    R -- "store done, code commits, PR closed unmerged (pr)" --> ASK[report and ask]
+    CM --> DEL
     R -- "none found" --> NF[report: no archive found]
     MG --> DEL --> OK
 ```
@@ -250,6 +256,7 @@ Record format (T4): `{version: 2, owner: {id, at, checkout, host}, branch, round
 | Issue reads in `closed-check` | One per intended issue in the change's repositories | — | gh's own | Bounded by the description's closing lines |
 | Pass records on disk | One per repository and change | — | — | Deleted at `done` |
 | Record lock hold time | One read-check-write | — | — | — |
+| Record file name | Readable prefix cut to 120 characters + `-` + 32 hex + `.json`: at most 158 characters, 163 with `.lock` | — | — | Under the 255-character limit for every owner, name and change length |
 
 ## Flow & State Gaps (FULL)
 
@@ -257,6 +264,8 @@ Record format (T4): `{version: 2, owner: {id, at, checkout, host}, branch, round
 - **Owner alive but asked to adopt:** the user is the arbiter. After `adopt`, the old session's `done` gets `not_owner`, and its remaining replies are its own risk. The skill tells it to stop on `not_owner`.
 - **Legacy record and a new record both exist:** the new key wins. A legacy file byte-identical to the new record is the leftover of an interrupted move and is removed; any other is left in place and reported once in the plan output (`legacy_record_ignored`). It is a separate pass of a 0.1.9 session: once the new record is done, it surfaces with no owner and the user is asked.
 - **Legacy record that cannot be read:** with no new-key record, its identity is unknown, so the lookup stops with `record_unreadable` rather than allowing a new pass. Beside a valid new-key record it is reported as ignored and does not block that record's plan or `done`.
+- **Two callers move one old record:** the move runs outside the record lock. If another caller removed the old file first (it saw the identical copy), this caller's `unlink` finds it gone and counts the move as done.
+- **0.1.9 name too long for the filesystem:** the old key keeps the full names and has no bound. A lookup whose old path the OS rejects as too long (`ENAMETOOLONG`) treats the old record as absent, since 0.1.9 could not have written it.
 - **Fallback publish fails mid-write** (no hard links): the destination it created is removed before the error is raised, so no partial record blocks the next write.
 - **Reaction of the opposite content already present:** the recorded content is still added. The plan never removes reactions.
 - **Code PR closed between adoption and link:** only an open PR is adopted (`:1061`). A closed one is not linked, and the push row's `ship` path handles it.
