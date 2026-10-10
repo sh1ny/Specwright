@@ -199,7 +199,7 @@ The other amendments hold:
 
 ## Verdict
 
-VERDICT: APPROVE_WITH_CHANGES
+Round 3 verdict (void, superseded by round 4): APPROVE_WITH_CHANGES
 
 ## Required Changes
 
@@ -217,7 +217,7 @@ VERDICT: APPROVE_WITH_CHANGES
    - Add both cases to the tests named in 11.1 (`test_closed_check_ignores_hidden_references`, `test_closed_check_ignores_related_on_a_closing_line`) and to the test map.
 
 <!-- yes (applied, and re-checked by the reviewer - only the reviewer sets it) | no (outstanding) | n/a (any other verdict) -->
-CHANGES_APPLIED: yes
+Round 3 changes applied: yes
 
 ## Rebuttals
 
@@ -235,3 +235,167 @@ CHANGES_APPLIED: yes
   - **Reviewer:** verified. The Resource Bounds row (158 characters, 163 with `.lock`) and both Flow & State Gaps lines are present.
 - **Gate lines:** round 2's `VERDICT` and `CHANGES_APPLIED` lines are relabelled, so only round 3's lines match.
   - **Reviewer:** verified. Only round 3's `VERDICT:` and `CHANGES_APPLIED:` lines start a line. `openspec validate fix-workflow-recovery --strict` reports the change valid.
+
+---
+
+# Round 4
+
+## Metadata
+
+- **Round:** 4
+- **Prior round:** Round 3: APPROVE_WITH_CHANGES, changes applied and re-checked (`CHANGES_APPLIED: yes`). That verdict was voided by amendments made after a second local pre-ship review of the implemented branch found nine P2 defects (D9: fence closer, a removed span joining words, a `<!--` inside a span; D8: store-only archive recovery, the planning-only test on resume, a finished planning-only change; D2: OS errors in `load_record`; task 12.5: the store-resume graders; task 12.6: the fake `gh` node-reaction read), plus D10's confirmation before closing, added at the user's request.
+- **Reviewer:** fresh-context subagent (Claude Code, Claude Agent SDK reviewer); Required Changes and the applied suggestions re-checked by the same reviewer in a separate run
+- **Reviewed:**
+  - The amendment diff (`git diff -- openspec/changes/fix-workflow-recovery`) and the full current design.md (Triage, D8, D9, D10, Diagrams, every FULL table, Risks); specs/change-finish/spec.md (all); specs/pr-descriptions/spec.md ("Issues a merged PR left open are closed at cleanup" and the scenarios before it); the new scenario in specs/feedback-passes/spec.md; specs/planning-stores/spec.md ("Local finish merges the repos that have work"); tasks.md (test map, group 12).
+  - skills/specwright-finish/SKILL.md (all: **Resume**, steps 1-4, `## local`, `## pr`, **Planning repo**, **Archive name**).
+  - skills/specwright-pr/SKILL.md (ship step 4.3, watch step 2, **Cleanup after merge**).
+  - skills/specwright-pr/scripts/pr-pair.sh: `CLOSE_KW`, `ISSUE_REF`, `strip_code_spans`, `without_code`, `LIST_GAP`, `intended_issues`, `locate_record`, `load_record`, `find_marker`.
+  - evals/git-workflow/grade.py (`merge_head`, `is_merge_of`, the `eval-store-finish-resume-code-merge` branch), evals/git-workflow/fixtures.py (that fixture), evals/fakes/gh.py (`whoami`, `cmd_graphql`, `cmd_api`), and the list of tests in evals/pr-pair/test_skill_text.py that name `closed-check`.
+  - The output of `openspec validate fix-workflow-recovery --strict` (valid).
+  - The re-check read the current diff (`git diff -- openspec/changes/fix-workflow-recovery`): design.md (D2, D8 table and bullets, D9, D10, flowchart, Failure & Visibility, Flow & State Gaps, Mechanism Ledger, Risks), specs/change-finish/spec.md and specs/pr-descriptions/spec.md (both new requirements and the amended ones), the tasks.md test map and group 12, and the output of `openspec validate fix-workflow-recovery --strict` (valid).
+- **Findings verified against the code:** all nine hold.
+  - 1-3: `intended_issues`, run in process from the current pr-pair.sh, returns 52 for `` Fi`x`xes #52 `` and for a fenced block holding ```` ``` not a fence ```` followed by `Fixes #52`, and returns nothing for `` Shows `<!--` in the docs `` followed by `Fixes #21`.
+  - 4: specwright-finish/SKILL.md:47 makes the store-only recovery branch and leaves the code repo "as it is", while the rows at :33 and :37 act on the code branch whenever the store is done.
+  - 5: SKILL.md:29 sends "archive paths uncommitted, no A" to step 3 and :40 says a resume writes no marker.
+  - 6: the planning-only local finish (`## local` store-backed step 3) leaves the code repo with no A, M or B, which no row matches.
+  - 7: `load_record` catches only `FileNotFoundError` and `ValueError` (pr-pair.sh:1247-1253).
+  - 8: the resume code-merge grader checks only the merge commit's parents and subject (grade.py:886-893, `is_merge_of`).
+  - 9: the `node(id` branch of `cmd_graphql` (gh.py:282-295) calls neither `whoami` nor the `readers` check that the issue and pull-request branches apply.
+
+<!-- This verdict covers only the contents reviewed. Editing proposal, specs or design afterward (other than applying Required Changes) voids it. -->
+
+## Findings
+
+### Critical (blocking)
+
+None.
+
+### Moderate
+
+**M1. D8's new "uncommitted archive paths, no A" row skips step 1, so a resume on main can commit the archive on main.**
+- The row now says "step 2 (the planning-only test, store-backed), then step 3". Step 1 is the step that handles main: when archive changes are uncommitted on main, it offers `chore/archive-<change-name>` and says "Never commit on main" (specwright-finish/SKILL.md:44-47). It also confirms a branch whose change name differs.
+- Step 3 has a branch guard only for store-backed changes (`test "$(git branch --show-current)" = <branch>`). A repo-local change has none (SKILL.md:54).
+- Example: a repo-local change in `finish: pr`. The PR merged before archive, the user ran the archive on main, and the first finish died before step 1 made the recovery branch. On the rerun, Resume applies (the change directory is gone), no A exists, so the row runs step 3, and the archive commit lands on main.
+- The skill's own entry rule already says a repo with no A runs steps 1-3 (SKILL.md:18). The row should say the same: steps 1, 2 and 3 in order. The flowchart's "archive paths uncommitted? yes → step 3" edge has the same gap.
+
+**M2. D8's `Archive-Scope: store-only` line has no stated writer, no stated read, and no stated precedence over the code rows.**
+- **Writer.** D8 says only that the recovery's archive commit "carries" the line. Step 3 writes the subject alone to `<msgfile>`. Task 12.4 says "(step 1 and step 3)", but the design never says which step writes it or what decides it. Step 3 can decide it from git: store-backed, and the store's current branch is `chore/archive-<change-name>`, the only branch step 1 makes in the store. That condition also holds on a resume of an interrupted recovery, where step 1's own decision is gone. Without the condition stated, a resume that reaches step 3 on the recovery branch (M1) can write the commit without the line, and then the code rows act on the code repo again, which is finding 4.
+- **Read.** A is found with `git log --format=%s`, which shows subjects only. The marker needs the body, for example `git log -1 --format=%B <A>` with an exact-line match `^Archive-Scope: store-only$`. When a change name is reused, there can be more than one A on main, so the design must say which one: the newest, on the branch, or else on `<main>`.
+- **Precedence.** The table is read as "the first step not done". The new row sits after "store done; code branch with commits, code not M, local → code merge" and the pr-mode ship row, and its condition is a subset of theirs. An agent that matches rows top-down merges or ships the code branch first. D8's bullet says the code repo is out of scope, but the table has to agree: put the row first among the "store done" rows, or say it is checked before them.
+- **Report.** It is unstated whether an out-of-scope code repo counts as done for `Nothing to finish`. As written, a store-only recovery never reaches that line, and every later finish reports the code branch again. The scenario says only "reports it". State the final report.
+
+**M3. D8's planning-only marker read has no path a resume can compute.**
+- "Its archive on `<main>` holds `specwright-change.yaml`" needs `<archived-name>`. The skill's **Archive name** rule takes `archivedAs` from the archive output, which a resume does not have, or else `YYYY-MM-DD-<change-name>`. On a resume, the only date at hand is today's.
+- A resume on a later day than the archive builds the wrong path, finds no marker, and asks the user. The scenario "Planning-only change already finished" says it reports `Nothing to finish`, so it fails.
+- A glob over `<P>/changes/archive/*-<change-name>/` on `<main>` avoids the date problem, but with a reused change name it can find an earlier archive's marker and wrongly call the code repo done. pr-pair.sh's `find_marker` handles that case explicitly (the regex `(\d{4}-\d{2}-\d{2}-)?<change>` plus the main-ref filter).
+- The store's A is always found in this case, because the marker was committed in it (step 2 adds it to the archive paths that step 3 commits). Read the path from A: `git show --name-only --format= <A>` gives `<P>/changes/archive/<dir>/specwright-change.yaml` if the marker exists. Then match `git show <main>:<that path>` against `^code_changes:\s*none\s*$`, the same test `find_marker` uses. No such file in A means the change is not planning-only.
+
+**M4. The requirement texts do not carry the new behaviour, only the scenarios do.**
+- pr-descriptions, "Issues a merged PR left open are closed at cleanup": the SHALL still says cleanup closes each open, never-closed intended issue. It does not mention the confirmation. An implementation that closes without asking meets the requirement and fails only the scenarios. At archive, the main spec's requirement says the opposite of its scenarios "Merged PR left an issue open" and "User declines a close".
+- change-finish, "Finish resumes from git evidence": the SHALL is scoped to "a change whose archive is already committed". The new scenario "Interrupted before the archive commit, planning-only change" is outside that scope. The store-only and planning-only-done rules have no SHALL at all.
+
+**M5. The implemented closing list accepts `,`, `;`, `and` or a keyword before its first reference, contrary to D9, and the new span rule makes that matter more.**
+- D9 (round 3, Required Change 2) says the closing list starts at the reference directly after the leading keyword, "only whitespace and the optional `:` between them". `intended_issues` measures that first gap with `LIST_GAP` (pr-pair.sh:796-801), which also accepts `,`, `;`, `and` and another keyword.
+- Run in process today, `Fixes, #52`, `` Fixes `x`; #52 `` and `` Fixes `#21` and #52 `` all return 52. GitHub links none of them: the keyword's own reference is missing or in code.
+- The consequence: on a `created` PR, 52 is `missing`. The line holds other text, so it is not rewritten, and ship stops on the second check with a false mismatch. At cleanup, 52 is offered for closing. With the new D9 rule, any removed span between the keyword and a later reference produces this shape.
+- No test covers it: the round-3 tests' lines start with a reference or with prose. Add it to task 12.1.
+
+**M6. The FULL sections do not reflect the round-4 amendments.**
+- **Diagrams:** the finish flowchart still shows "archive paths uncommitted → step 3" and has no path for a store-only recovery, a finished planning-only change, or a code repo without A, M or B that is reported and asked about.
+- **Flow & State Gaps:** add a line for each of these:
+  - the store-only recovery (the code repo is left to its own PR);
+  - the finished planning-only change, and the same state without a marker (ask);
+  - a declined issue. It stays `open`, so every later cleanup asks about it again. Cleanup is not one-shot: Resume routes a merged PR to cleanup, and `cleanup-plan` keeps reporting it.
+- **Mechanism Ledger:** two new mechanisms have no row:
+  - the `Archive-Scope: store-only` commit line, a new contract in commit messages that later finish versions read;
+  - the user confirmation before closing. Its reason is that the parser only approximates GitHub's renderer: this review alone found three P2 parser defects. Give the evidence that would remove it.
+- **Failure & Visibility:** the "Issue close at cleanup" row should cover a declined issue: it is reported as left open, and a rerun asks again.
+- **Risks:** the parser-disagreement entry should name the cleanup confirmation as its mitigation.
+
+### Suggestions
+
+**S1. D10: define the confirmation's scope.**
+- "Asks the user once" is inside "for each merged PR". A store-backed change can have two merged PRs. Say whether that is one question for the change or one per PR. One question for the change matches "once".
+- Ask only when some PR has a non-empty `open` list. The scenario "Every intended issue closed" should not trigger a question, and neither should `not_merged`, `not_default_base` or exit 3.
+- Watch's `cleanup` action (specwright-pr/SKILL.md:119-120) now reaches a question. That fits watch, which already asks elsewhere. No live eval runs this cleanup (only text tests name `closed-check`), so nothing automated is blocked.
+
+**S2. Test map and scenarios after the confirmation.**
+- The row "Merged PR left an issue open" is still green, but its THEN changed to "asks the user to confirm". Add `test_cleanup_asks_before_closing` to that row and mark it red until 12.3.
+- The scenario "Closing an issue fails" says "a later cleanup closes only 24". Make it "a later cleanup asks about and closes only 24".
+
+**S3. Task 12.5: make the grader check exact.**
+- "Contains the fixture's code branch tree" is not one assertion. The fixture's code main has only the initial commit, so a correct `--no-ff` merge has exactly the branch tip's tree. Record `git rev-parse feat/add-greeting^{tree}` in fixture-state.json and assert that `git rev-parse main^{tree}` equals it. An `-s ours` merge leaves main's old tree and fails.
+- Say where the `-s ours` negative check lives: a test case, or a one-off check recorded in the task's commit. As written, nobody can tell later whether it was run.
+
+**S4. D9: two precision notes, non-blocking.**
+- "Code spans are found before HTML comments" differs from CommonMark's rule only where a comment opens before a backtick run. There, CommonMark takes the comment, and the D9 order can only hide more text, because removing a span that swallows `-->` extends the comment. Removing a span never exposes text GitHub hides, so the rule is on the safe side. Say "within a paragraph": a line that starts with `<!--` is an HTML block, which CommonMark recognises before any inline parsing.
+- The fence rule is correct for the closer (same character, at least as long, up to three spaces of indent, only white space after). A backtick opener whose info string holds a backtick is not a fence in CommonMark. Treating it as one only skips more, which is the safe side.
+
+**S5. Task 12.6: name the fixture change.** Seeding nodes with their repository changes `add_node_reaction`'s signature. The task should say that the existing callers in test_pr_pair.py are updated without weakening their assertions, as group 2 says for record fixtures.
+
+The other amendments hold:
+- D9's fence-closer and span-space rules match CommonMark and the three new scenarios. The fence-closer and span-space rules err toward skipping. The comment-opener rule fixes a reference that was wrongly skipped, and it follows CommonMark's leftmost-first rule for the case it names.
+- D2's "cannot be read (any OS error)" fits `locate_record`. Its `except Stop` branch already reports the old file as ignored beside a valid record. So making `load_record` raise `record_unreadable` for any `OSError` other than `FileNotFoundError` gives the scenario "Old key denied by the filesystem" in both halves, as task 12.2 says.
+- D10's confirmation conflicts with no scenario once S2 is applied. "Issue reopened", "Issue in another repository", "PR not merged", the non-default base and "Issue state cannot be read" ask nothing.
+- Task 12.6 matches finding 9. The `readers` rule it adds is the one the issue and pull-request GraphQL branches already use.
+- The eight new test-map rows match the eight new scenarios, are red, and name files that exist (`evals/pr-pair/test_skill_text.py`, `evals/pr-pair/test_pr_pair.py`, `evals/git-workflow/test_instructions.py`).
+
+## Verdict
+
+VERDICT: APPROVE_WITH_CHANGES
+
+## Required Changes
+
+1. **design.md D8 table and flowchart (M1).** Change the row to "uncommitted archive paths, no A → steps 1-3 in order (step 1's branch and main checks, then step 2, store-backed, then step 3)". Make the flowchart's "archive paths uncommitted: yes" edge go to steps 1-3. Align change-finish's scenario "Interrupted before the archive commit, planning-only change" if it names only step 2.
+2. **design.md D8, store-only recovery (M2).**
+   - Step 3 writes `Archive-Scope: store-only` as its own body line in `<msgfile>` exactly when the change is store-backed and the store's current branch is `chore/archive-<change-name>`.
+   - Resume reads it from the store's newest A (on `<branch>`, else on `<main>`) with `git log -1 --format=%B <A>`, matching the exact line.
+   - The store-only row is checked before every "store done" code row: move it to the top of them, or state the order.
+   - State the report: either the out-of-scope code repo counts as done for `Nothing to finish`, or the final line names the code branch as left to its own PR.
+   - Make task 12.4 say the same.
+3. **design.md D8, planning-only finished (M3).** The marker path comes from the store's A (`git show --name-only --format= <A>`, the `specwright-change.yaml` under `<P>/changes/archive/`). The marker counts when `git show <main>:<path>` matches `^code_changes:\s*none\s*$`. A without that file → not planning-only, report and ask. Make task 12.4 say the same.
+4. **Spec requirement texts (M4).**
+   - pr-descriptions, "Issues a merged PR left open are closed at cleanup": cleanup SHALL list the issues it would close and ask the user to confirm, close only the confirmed ones, and report declined ones as left open.
+   - change-finish, "Finish resumes from git evidence": extend the scope to a change whose archive paths are uncommitted, with the planning-only test before the archive commit. Add SHALLs that a code repo is left untouched when the store's archive commit is marked store-only, and that a code repo with no archive commit, merge or branch is done when the store's archive commit holds the planning-only marker.
+5. **tasks.md 12.1 and the test map (M5).** Add a parser test (for example `test_closed_check_list_starts_directly_after_the_keyword`) with `Fixes, #52`, `` Fixes `x`; #52 `` and `` Fixes `#21` and #52 ``, each naming no intended issue. Give it a red test-map row under "Closing line without a closing list", or a new scenario. Fix `intended_issues` so that only whitespace and an optional `:` may separate the leading keyword from the first reference.
+6. **design.md FULL sections (M6).** Update the flowchart, Flow & State Gaps, Mechanism Ledger, the "Issue close at cleanup" Failure & Visibility row and the parser Risk as listed in M6.
+
+<!-- yes (applied, and re-checked by the reviewer - only the reviewer sets it) | no (outstanding) | n/a (any other verdict) -->
+CHANGES_APPLIED: yes
+
+## Rebuttals
+
+<!-- Author: fixed (cite) or rebutted (reason) per finding. A Critical/Moderate rebuttal counts only once marked "accepted by reviewer". -->
+
+- **M1:** fixed. D8's no-A row runs steps 1-3 in order (branch check and recovery branch first); the flowchart edge says the same. Task 12.4.
+  - **Reviewer:** verified, and accepted by reviewer. The row reads "steps 1-3 in order (branch check and recovery branch, planning-only test, archive commit)", and the flowchart edge "steps 1-3: branch check, planning-only test, archive commit" matches. The change-finish scenario names the planning-only test, not a step number alone, so it needs no change.
+- **M2:** fixed. D8: step 3 writes `Archive-Scope: store-only` when store-backed and the store is on `chore/archive-<change-name>`; Resume reads it with `git log -1 --format=%B <A>` on the newest store A; rows are checked top to bottom, first match wins, and the out-of-scope row sits right after "M, not B", ahead of the code-merge and ship rows; an out-of-scope code repo counts as done for `Nothing to finish`.
+  - **Reviewer:** verified, and accepted by reviewer. The design now states the writer and its git-decidable condition (it holds on a resume too), the body read with an exact-line match on the newest store A, first-match ordering with the row ahead of every "store done" code row and the pr-mode rows, and the report: done for `Nothing to finish`. The Flow & State Gaps line and task 12.4 say the same.
+  - Non-blocking: "M and B" still sits above the store-only row. A code repo that is store-only out of scope but still has a fully merged branch with its own `merge: <change-name>` would get `git branch -d`. The deletion is safe, because M requires the tip on main, but it contradicts the new SHALL NOT "delete the code repo's branch". Moving the store-only row above "M and B", or limiting the SHALL to unmerged branches, would remove the conflict. Fix it during 12.4.
+- **M3:** fixed. D8 takes the marker path from `git show --name-only --format= <A>` and checks `git show <main>:<path>` against `^code_changes:\s*none\s*$`; without it, report and ask (its own row).
+  - **Reviewer:** verified, and accepted by reviewer. The marker is located through the store's A, so it is independent of the archive date and of an earlier archive with the same name. It is tested with `find_marker`'s regex. The "no such marker → report and ask" case has its own row and a flowchart edge.
+- **M4:** fixed. The cleanup requirement now lists, asks once, closes confirmed issues and keeps declined ones open; the change-finish rules for a re-run before the archive commit, the store-only recovery and the finished planning-only case are a new requirement, "Finish resume keeps the planning-only test and each repo's scope", holding those three scenarios; the confirmation is its own requirement, "Cleanup asks before closing issues", holding "User declines a close" (openspec warned that the extended requirement texts were over 500 characters). The test map names the new requirements.
+  - **Reviewer:** verified, and accepted by reviewer.
+    - "Issues a merged PR left open are closed at cleanup" now closes only issues "that the user confirmed".
+    - The new requirement "Cleanup asks before closing issues" carries the list-ask-once rule and the rule that declined issues stay open.
+    - "Finish resumes from git evidence" is rescoped to "runs again for a change it already archived".
+    - The new requirement "Finish resume keeps the planning-only test and each repo's scope" carries all three rules.
+    - Splitting them into two requirements meets the intent of Required Change 4.
+    - The three change-finish scenarios and "User declines a close" sit under the new requirements, and the test-map rows name them.
+    - `openspec validate fix-workflow-recovery --strict` reports the change valid.
+- **M5:** fixed. D9 says a `,`, `;`, `and`, another keyword or a removed code span between the leading keyword and the first reference means no closing list. Task 12.1 adds `test_closed_check_list_needs_a_ref_right_after_the_keyword` with a red test-map row (scenario "Closing line without a closing list").
+  - **Reviewer:** verified, and accepted by reviewer. D9 names the forbidden separators explicitly. Task 12.1 lists the three probe lines and extends the `intended_issues` fix to the first gap, and the red row sits under the right scenario.
+- **M6:** fixed. Flowchart: steps 1-3 edge, store-only and planning-only edges. Flow & State Gaps: store-only recovery, finished planning-only with and without its marker, a declined issue asked about again. Mechanism Ledger rows for the confirmation and the `Archive-Scope` line. Failure & Visibility close row and the parser risk mention the confirmation.
+  - **Reviewer:** verified, and accepted by reviewer. Every listed update is present, including the steps 1-3 edge, the OUT edge and both planning-only edges, the three Flow & State Gaps lines and the two Ledger rows. The confirmation row names its exit evidence, and the close row says a rerun asks about the rest. The parser Risk names the confirmation.
+- **S1:** applied. One question per change, only when some merged PR has `open` issues (D10, task 12.3).
+  - **Reviewer:** verified. D10 and task 12.3 ask one question for the change, and nothing when no merged PR has `open` issues.
+- **S2:** applied. The "Merged PR left an issue open" row adds `test_cleanup_asks_before_closing` and is red; "Closing an issue fails" says a later cleanup asks about and closes only 24.
+  - **Reviewer:** verified. Both edits are present.
+- **S3:** applied. Task 12.5 asserts `main^{tree}` equals the recorded tip tree and names where the `-s ours` check lives.
+  - **Reviewer:** verified. The `main^{tree}` equality is one assertion. The `-s ours` negative check is a unit test in `test_instructions.py` or a new `test_grade.py`, so later readers can find it.
+- **S4:** applied. D9: "within a paragraph", and a line starting with `<!--` is an HTML block.
+  - **Reviewer:** verified.
+- **S5:** applied. Task 12.6 says `add_node_reaction`'s callers are updated without weakening their assertions.
+  - **Reviewer:** verified.
+- **Gate lines:** round 3's `VERDICT` and `CHANGES_APPLIED` lines are relabelled, so only round 4's lines start a line with those keys.
+  - **Reviewer:** verified.
