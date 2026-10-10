@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Makes the issues a PR says it fixes the issues GitHub closes when it merges: closing references are written one per issue, and checked against GitHub's closing list after ship.
+Makes the issues a PR says it fixes the issues GitHub closes when it merges: closing references are written one per issue, checked against GitHub's closing list after ship, and any intended issue still open after the merge is closed at cleanup.
 
 ## ADDED Requirements
 
@@ -48,6 +48,18 @@ After ship creates or finds a PR, Specwright SHALL compare the issues its descri
 - **WHEN** the GitHub lookup for the PR's closing issues fails
 - **THEN** the check exits with GitHub state unknown, and ship reports the check as not done rather than as a match
 
+#### Scenario: Closing keyword inside code
+- **WHEN** a description shows ``` ``Fixes #21`` ``` as an inline code example, or inside a fenced block
+- **THEN** the check does not count issue 21 as intended
+
+#### Scenario: Numbered closing line
+- **WHEN** a description has the line `1. Fixes #24, #21, #43`, and GitHub reports only issue 24 as closing
+- **THEN** the check names 21 and 43 as missing
+
+#### Scenario: Unmatched backtick
+- **WHEN** a description has the line ``Fixes #21 (see `notes)`` whose single backtick is never closed
+- **THEN** the backtick is literal text, and the check counts issue 21 as intended
+
 ### Requirement: Closing references need the default branch
 When a PR's base is not its repository's default branch, the check SHALL report that GitHub will not close the issues its closing lines name. Ship SHALL NOT rewrite the description and SHALL NOT stop for that reason.
 
@@ -58,3 +70,42 @@ When a PR's base is not its repository's default branch, the check SHALL report 
 #### Scenario: Default branch cannot be read
 - **WHEN** the lookup of the repository's default branch fails
 - **THEN** the check exits with GitHub state unknown, and ship reports the check as not done
+
+### Requirement: Issues a merged PR left open are closed at cleanup
+When Specwright cleans up after a PR merged into its repository's default branch, it SHALL read the issues the PR's closing lines name in the change's repositories and close each one that is still open and was never closed before, with a comment naming the PR, using the identity of the issue's repository. Issues outside the change's repositories, and issues a person reopened, SHALL be reported and not closed. Issues named only by `Related:` SHALL NOT be closed.
+
+#### Scenario: Merged PR left an issue open
+- **WHEN** a merged PR's closing lines name issues 21 and 24, issue 21 is closed and issue 24 is still open
+- **THEN** cleanup closes 24 with a comment naming the PR, and does not touch 21
+
+#### Scenario: Every intended issue closed
+- **WHEN** every issue a merged PR's closing lines name is closed
+- **THEN** cleanup closes nothing and posts no comment
+
+#### Scenario: Related issue still open
+- **WHEN** a merged PR's description has `Related: #52`, and issue 52 is open
+- **THEN** cleanup does not close 52
+
+#### Scenario: Issue in another repository
+- **WHEN** a merged PR's closing line names `other/tool#5`, which is not one of the change's repositories
+- **THEN** cleanup does not read or close that issue, and reports it as outside the change
+
+#### Scenario: PR not merged
+- **WHEN** cleanup runs for a PR that was closed without merging
+- **THEN** no issue is closed
+
+#### Scenario: PR into a branch other than the default, at cleanup
+- **WHEN** cleanup runs for a merged PR whose base is not its repository's default branch, and its closing lines name open issue 21
+- **THEN** cleanup does not close 21 and reports that it stays open until the fix reaches the default branch
+
+#### Scenario: Issue reopened after it was closed
+- **WHEN** issue 24, named on a merged PR's closing line, was closed and then reopened by a person
+- **THEN** cleanup does not close 24 again and reports it as reopened
+
+#### Scenario: Closing an issue fails
+- **WHEN** cleanup closes issue 21 and then fails to close issue 24
+- **THEN** cleanup reports 21 as closed and 24 as still open, continues its branch cleanup, and a later cleanup closes only 24
+
+#### Scenario: Issue state cannot be read
+- **WHEN** the lookup of the PR, or of an intended issue in the change's repositories, fails
+- **THEN** the check exits with GitHub state unknown, cleanup reports the backstop as not done, closes nothing, and continues its branch cleanup

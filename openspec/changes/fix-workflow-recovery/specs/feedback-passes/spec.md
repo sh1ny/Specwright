@@ -33,6 +33,10 @@ Writing a feedback pass record SHALL fail when a record for the same repository 
 - **WHEN** a handover or removal finds the record's lock directory already present
 - **THEN** it exits with `record_busy` naming the lock path, the record and the lock are unchanged, and the lock is not removed automatically
 
+#### Scenario: Record write fails while it is created
+- **WHEN** `pass write` creates the record without hard-link support and writing it fails
+- **THEN** no record is left at the key, the error is reported, and a later `pass write` for that change can create the record
+
 #### Scenario: Removal by a non-owner
 - **WHEN** a run that does not hold the record's owner id asks to remove a complete pass record
 - **THEN** the removal is refused with `not_owner`, and the record remains
@@ -51,6 +55,18 @@ Each pass record SHALL be stored under a key that keeps the repository owner, th
 #### Scenario: Old key belongs to another repository
 - **WHEN** a record under the old key exists whose recorded repository or change differs from the lookup
 - **THEN** that file is left in place, and the lookup reports no record
+
+#### Scenario: Old key cannot be read
+- **WHEN** no record exists under the new key, and a file under the old key exists whose contents cannot be parsed, so its repository and change are unknown
+- **THEN** the lookup stops with `record_unreadable` naming that file, and no new pass is allowed
+
+#### Scenario: Unreadable old key beside a valid record
+- **WHEN** a valid record exists under the new key, and the file under the old key cannot be parsed
+- **THEN** the plan and `pass done` use the new record, and the old file is reported as ignored
+
+#### Scenario: Copy left by an interrupted move
+- **WHEN** a record under the old key is byte-identical to the record under the new key, because a move was interrupted after the new key was written
+- **THEN** the old file is removed, and once the pass is done no record for the change remains
 
 ### Requirement: A pass intent is validated before it is written
 `pass write` SHALL refuse an intent with `invalid_intent`, writing no record, unless `branch` is a non-empty string, `round` is a positive integer, `prs` is an object whose `code` and `store` entries are absent, null or an object with `repo` as `<owner>/<name>` and `number` as a positive integer, and every finding has the fields a plan reads.
