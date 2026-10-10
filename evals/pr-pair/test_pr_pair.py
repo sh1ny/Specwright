@@ -1016,6 +1016,21 @@ class PassPlan(PassBase):
         self.assertIn("head_unreachable", [s["reason"] for s in p["stops"]])
         self.assertNotEqual(self.row(p, "fix_commit", "code")["state"], "done")
 
+    def test_identical_legacy_copy_is_removed(self):
+        self.settings("github:\n  login: KintsugiBot\npr:\n  max_fix_rounds: 2\n")
+        self.write_record([self.finding("F1", dest="code", edits=[{"file": "greet.py", "contains": ["strip()"]}], react=None)])
+        legacy = self.state_dir / "feedback" / legacy_key(CODE, CHANGE)
+        shutil.copyfile(self.record_path(), legacy)  # the leftover of an interrupted move
+        self.fix_code()
+        self.push_all()
+        p = self.plan(code=snap(threads=[]))
+        self.assertNotIn("legacy_record_ignored", p)
+        self.assertFalse(legacy.exists(), "a legacy file identical to the record is a leftover and is removed")
+        self.assertTrue(self.plan(code=snap(threads=[]), sub="done")["deleted"])
+        later = self.plan(code=snap(threads=[]))
+        self.assertFalse(later["record"])
+        self.assertNotIn("legacy_record_ignored", later)
+
     def test_pass_plan_unrecorded_change_stops(self):
         self.write_record([self.finding()])
         self.write(f"store/{SPEC_ARCHIVED}", f"{NEW_TEXT} by name.\n")
@@ -1477,6 +1492,33 @@ class PassOwnership(PassBase):
         self.assertEqual(legacy.read_bytes(), before)
         self.assertFalse(self.record_path().exists())
 
+    def legacy_file(self, content):
+        legacy = self.state_dir / "feedback" / legacy_key(CODE, CHANGE)
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_bytes(content)
+        return legacy
+
+    def test_unreadable_legacy_record_stops(self):
+        cut = b'{"code_repo": "acme/code", "chan'  # a 0.1.9 file cut off mid-write
+        legacy = self.legacy_file(cut)
+        self.assertFalse(self.record_path().exists())
+        intent = self.write_json("intent.json", self.intent([self.finding()]))
+        for out in (self.plan(expect=1), self.pp("pass", "write", *self.common(), "--intent", intent, expect=1)):
+            self.assertEqual((out["ok"], out["error"]), (False, "record_unreadable"))
+            self.assertIn(legacy.name, out["message"])
+        self.assertFalse(self.record_path().exists(), "no new-key record may be started beside an unreadable legacy file")
+        self.assertEqual(legacy.read_bytes(), cut)
+
+    def test_unreadable_legacy_beside_valid_record_is_ignored(self):
+        self.write_record([self.finding()])
+        legacy = self.legacy_file(b"not json")
+        p = self.plan()
+        self.assertTrue(p["record"])
+        self.assertEqual(p["legacy_record_ignored"].replace(chr(92), "/").rsplit("/", 1)[-1], legacy.name)
+        self.assertEqual(legacy.read_bytes(), b"not json")
+        d = self.plan(sub="done", expect=1)  # the pass is not complete, but the legacy file does not stop it
+        self.assertEqual(d["error"], "not_complete")
+
     def test_pass_write_is_exclusive_under_concurrency(self):
         f = self.write_json("intent.json", self.intent([self.finding()]))
         cmd = ["bash", str(SCRIPT), "pass", "write", *map(str, self.common()), "--intent", str(f)]
@@ -1702,6 +1744,53 @@ def find_py38():
     return None
 
 
+class PublishFallback(unittest.TestCase):
+    """publish() without hard links creates the destination with O_EXCL and writes it; a failed write leaves no record behind."""
+
+    @staticmethod
+    def namespace():
+        text = SCRIPT.read_text(encoding="utf-8")
+        src = text.split("<<'PYSRC'\n", 1)[1].rsplit("\nPYSRC", 1)[0]
+        src = src.split("\nargs = sys.argv[1:]", 1)[0]  # the definitions, not the dispatch
+        ns = {"__name__": "pr_pair_under_test"}
+        exec(compile(src, str(SCRIPT), "exec"), ns)
+        return ns
+
+    def test_failed_fallback_publish_leaves_no_record(self):
+        import errno
+        from unittest import mock
+        publish = self.namespace()["publish"]
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp), True)
+        src, dst = tmp / "src.json", tmp / "dst.json"
+        src.write_bytes(b'{"a": 1}')
+        real_fdopen = os.fdopen
+
+        class Failing:
+            def __init__(self, f):
+                self.f = f
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.f.close()
+
+            def write(self, data):
+                raise OSError(errno.ENOSPC, "No space left on device")
+
+        def failing_fdopen(fd, mode="r", *a, **k):
+            return Failing(real_fdopen(fd, mode, *a, **k))
+
+        with mock.patch.object(os, "link", side_effect=OSError(errno.EPERM, "links unsupported")), \
+                mock.patch.object(os, "fdopen", side_effect=failing_fdopen):
+            with self.assertRaises(OSError):
+                publish(str(src), str(dst))
+        self.assertFalse(dst.exists(), "the fallback left a partly written destination that would read as record_unreadable")
+        publish(str(src), str(dst))  # and the next attempt can create it
+        self.assertEqual(dst.read_bytes(), b'{"a": 1}')
+
+
 class PassRuntime(PassBase):
     """pass write on the minimum Python the script accepts, and its JSON error contract for unexpected failures."""
 
@@ -1917,6 +2006,22 @@ class ClosingCheck(Base):
         body = ("Fixes #1\n```\nFixes #2\n```\n~~~\nFixes #3\n~~~\nand `Fixes #4` inline\n"
                 "Fixes `#5` and #6\n")
         self.assertEqual(self.intended(body), [f"{CODE}#1", f"{CODE}#6"])
+
+    def test_closing_check_ignores_multi_backtick_code_spans(self):
+        # a span closes at the next run of the same length: the single backtick inside does not end it
+        body = "Fixes #1\nsee ``Fixes #2 ` Fixes #4`` and Fixes #3\n"
+        self.assertEqual(self.intended(body), [f"{CODE}#1", f"{CODE}#3"])
+
+    def test_closing_check_unmatched_backtick_is_literal(self):
+        # no closing run of three or of two: both runs are text, so the keyword between them counts
+        self.assertEqual(self.intended("Fixes #1\nsee ```Fixes #3 `` here\n"), [f"{CODE}#1", f"{CODE}#3"])
+
+    def test_closing_check_reads_numbered_closing_lines(self):
+        self.seed("1. Fixes #24, #21, #43\n2) Closes #7\n", refs=[(24, CODE), (7, CODE)])
+        r = self.check()
+        self.assertEqual(r["status"], "mismatch")
+        self.assertEqual(sorted(r["intended"]), sorted(f"{CODE}#{n}" for n in (7, 21, 24, 43)))
+        self.assertEqual(sorted(r["missing"]), [f"{CODE}#21", f"{CODE}#43"])
 
     def test_closing_check_normalises_cross_repo_and_urls(self):
         body = ("Fixes other/repo#5\nFixes https://github.com/acme/code/issues/8\n"

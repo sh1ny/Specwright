@@ -660,6 +660,38 @@ ISSUE_REF = (r"https?://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)\b|(?<![\w/.-]
              r"|(?<![\w/&])#(\d+)\b")
 
 
+def strip_code_spans(line):
+    """CommonMark inline code: a span opens at a backtick run and closes at the next run of the same length; a run with no such
+    closer is literal text, and so are the backticks of a run that is longer or shorter than the opener."""
+    out, i, n = [], 0, len(line)
+    while i < n:
+        if line[i] != "`":
+            out.append(line[i])
+            i += 1
+            continue
+        j = i
+        while j < n and line[j] == "`":
+            j += 1
+        k, close = j, None
+        while k < n:
+            if line[k] != "`":
+                k += 1
+                continue
+            m = k
+            while m < n and line[m] == "`":
+                m += 1
+            if m - k == j - i:
+                close = m
+                break
+            k = m
+        if close is None:
+            out.append(line[i:j])
+            i = j
+        else:
+            i = close
+    return "".join(out)
+
+
 def without_code(body):
     """The description's lines with fenced blocks and inline code spans removed (GitHub reads closing keywords outside code only)."""
     out, fence = [], None
@@ -672,7 +704,7 @@ def without_code(body):
         if m:
             fence = m.group(1)
             continue
-        out.append(re.sub(r"`[^`\n]*`", "", line))
+        out.append(strip_code_spans(line))
     return out
 
 
@@ -690,7 +722,7 @@ def intended_issues(body, repo):
     found = []
     for line in without_code(body):
         refs = [(m.start(), issue_key(m, repo)) for m in re.finditer(ISSUE_REF, line)]
-        if re.match(r"[\s>*+-]*" + CLOSE_KW, line, re.I):
+        if re.match(r"(?:[\s>*+-]|\d{1,9}[.)](?=\s))*" + CLOSE_KW, line, re.I):
             found.extend(k for _, k in refs)
         for kw in re.finditer(CLOSE_KW, line, re.I):
             nxt = next((k for at, k in refs if at >= kw.end() and not line[kw.end():at].strip()), None)
@@ -978,20 +1010,44 @@ def publish(src, dst):
         pass
     data = Path(src).read_bytes()
     fd = os.open(dst, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0))
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
+    try:  # the destination is ours from here: a failed write or close must not leave a file a later call reads as record_unreadable
+        try:
+            f = os.fdopen(fd, "wb")
+        except BaseException:
+            os.close(fd)
+            raise
+        with f:
+            f.write(data)
+    except BaseException:
+        try:
+            os.unlink(dst)
+        except OSError:
+            pass
+        raise
 
 
 def locate_record(code_repo, change):
     """(path, ignored legacy path or None). A 0.1.9-key record of this repository and change is moved to the new key on first
-    use; one of another identity stays where it is, and one beside an existing new-key record is left and reported."""
+    use; one of another identity stays where it is, and one beside an existing new-key record is left and reported. A legacy
+    file byte-identical to the new-key record is the leftover of an interrupted move and is removed. With no new-key record, an
+    unreadable legacy file stops (record_unreadable): it may be the pass in progress, and a new pass must not start beside it;
+    beside a new-key record it is reported as ignored."""
     path, old = record_path(code_repo, change), legacy_record_path(code_repo, change)
     if not old.exists():
         return path, None
+    if path.exists():
+        try:
+            if old.read_bytes() == path.read_bytes():
+                old.unlink()
+                return path, None
+        except OSError:
+            pass
     try:
         rec = load_record(old)
     except Stop:
-        return path, None
+        if path.exists():
+            return path, norm(old)
+        raise
     if (not isinstance(rec, dict) or str(rec.get("code_repo") or "").lower() != code_repo.lower() or rec.get("change") != change):
         return path, None
     if path.exists():
