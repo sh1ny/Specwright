@@ -446,6 +446,52 @@ class ChangeFinishResume(unittest.TestCase):
         self.assertRegex(line, r"(?i)resume|every repo", "step 1 still reports Nothing to finish without checking every repo")
         self.assertTrue(resume_row(s, r"store done[^|]*code branch with commits[^|]*"), "no row for a store done and the code merge pending")
 
+    def test_resume_runs_the_planning_only_test_before_the_archive_commit(self):
+        text, s = read(FINISH), resume_section()
+        self.assertRegex(s, r"(?i)top to bottom", "Resume does not say the rows are checked top to bottom")
+        self.assertRegex(s, r"(?i)first match wins", "Resume does not say the first matching row wins")
+        row = resume_row(s, r"archive paths uncommitted, no A")
+        self.assertTrue(row, "no Resume row for archive paths uncommitted and no A")
+        self.assertRegex(row, r"steps 1-3 in order", "the no-A row does not run steps 1-3 in order")
+        self.assertRegex(row, r"(?is)planning-only test.*archive commit", "the no-A row does not run the planning-only test before the archive commit")
+        self.assertLess(s.index("archive paths uncommitted, no A"), s.index("| A on branch, not M"), "the no-A row is not the first row")
+        self.assertNotIn("step 3, as today", s, "the no-A row still skips the planning-only test")
+        self.assertNotRegex(text, r"A resume writes no planning-only marker", "the old no-marker sentence contradicts the no-A row")
+        self.assertRegex(s, r"(?i)once A exists, a resume never writes the marker", "a resume that finds A may write the marker")
+
+    def test_resume_planning_only_finished_is_done(self):
+        s = resume_section()
+        done = resume_row(s, r"code repo with no A, M or B[^|]*`code_changes: none`[^|]*")
+        self.assertTrue(done, "no Resume row for a code repo with no A, M or B beside a finished store whose archive is marked planning-only")
+        self.assertRegex(done, r"(?i)\bdone\b", "the planning-only row does not finish the code repo")
+        ask = resume_row(s, r"code repo with no A, M or B[^|]*no such marker[^|]*")
+        self.assertTrue(ask, "no Resume row for a code repo with no A, M or B and no planning-only marker")
+        self.assertRegex(ask, r"(?i)\breport\b.*\bask\b", "without the marker the row does not report and ask")
+        self.assertLess(s.index("`code_changes: none`"), s.index("no such marker"), "the marker row is not checked before the ask row")
+        self.assertIn("git show --name-only --format= <A>", s, "the marker path is not read from the store's A")
+        self.assertRegex(s, r"git show <main>:<", "the marker is not read from <main>")
+        self.assertIn(r"^code_changes:\s*none\s*$", s, "the marker test is not the one find_marker uses")
+
+    def test_resume_store_only_recovery_leaves_the_code_repo(self):
+        text, s = read(FINISH), resume_section()
+        row = resume_row(s, r"code repo, [^|]*`Archive-Scope: store-only`[^|]*")
+        self.assertTrue(row, "no Resume row for a store archive marked Archive-Scope: store-only")
+        self.assertRegex(row, r"(?i)\breport\b", "the store-only row does not report the code branch's state")
+        self.assertRegex(row, r"(?i)touch nothing", "the store-only row may touch the code repo")
+        self.assertRegex(row, r"(?i)\bdone\b", "the store-only row does not count as done")
+        bullet = find_block(s, r"Archive-Scope: store-only", r"Nothing to finish", r"touches? nothing|no code merge")
+        self.assertTrue(bullet, "Resume never says a store-only archive counts as done for Nothing to finish")
+        self.assertLess(s.index("`Archive-Scope: store-only`"), s.index("| M and B"), "the store-only row is not above M and B")
+        self.assertIn("git log -1 --format=%B <A>", s, "Resume does not read the marker from the newest store A's body")
+        steps = text[text.index("1. **Branch:**"):text.index("\n## local\n")]
+        step1 = steps[:steps.index("2. **Planning-only test**")]
+        step3 = steps[steps.index("3. **Archive commit**"):steps.index("4. **Finish**")]
+        self.assertIn("Archive-Scope: store-only", step1, "step 1's store-backed recovery does not mention the marker line")
+        self.assertRegex(step3, r"Archive-Scope: store-only", "step 3 never writes the marker line")
+        self.assertRegex(step3, r"(?is)store-backed.*chore/archive-<change-name>.*Archive-Scope: store-only|"
+                                r"Archive-Scope: store-only.*store-backed.*chore/archive-<change-name>",
+                         "step 3 does not tie the marker line to a store-backed change on the recovery branch")
+
     def test_finish_resume_reports_no_archive_found(self):
         s = resume_section()
         block = find_block(s, r"no archive of", r"(?i)do nothing|no commit")
