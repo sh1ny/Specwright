@@ -41,6 +41,24 @@ Script behaviour is tested at the real boundary: `pr-pair.sh` run through `bash`
 | pr-descriptions → Closing references are checked after ship | Closing list cannot be read | evals/pr-pair/test_pr_pair.py | test_closing_check_lookup_failure_is_unknown | green |
 | pr-descriptions → Closing references need the default branch | PR into a branch other than the default | evals/pr-pair/test_pr_pair.py | test_closing_check_not_default_base | green |
 | pr-descriptions → Closing references need the default branch | Default branch cannot be read | evals/pr-pair/test_pr_pair.py | test_closing_check_lookup_failure_is_unknown | green |
+| feedback-passes → A feedback pass has one owner | Record write fails while it is created | evals/pr-pair/test_pr_pair.py | test_failed_fallback_publish_leaves_no_record | red |
+| feedback-passes → Pass records are keyed per repository and change | Old key cannot be read | evals/pr-pair/test_pr_pair.py | test_unreadable_legacy_record_stops | red |
+| feedback-passes → Pass records are keyed per repository and change | Unreadable old key beside a valid record | evals/pr-pair/test_pr_pair.py | test_unreadable_legacy_beside_valid_record_is_ignored | red |
+| feedback-passes → Pass records are keyed per repository and change | Copy left by an interrupted move | evals/pr-pair/test_pr_pair.py | test_identical_legacy_copy_is_removed | red |
+| change-finish → Finish resumes from git evidence | Resumed on the branch it deletes | evals/git-workflow/test_instructions.py | test_resume_checks_out_main_before_deleting | red |
+| change-finish → Finish resumes from git evidence | Archive-recovery branch after the change merged | evals/git-workflow/test_instructions.py | test_resume_merge_requires_branch_tip_on_main | red |
+| pr-descriptions → Closing references are checked after ship | Closing keyword inside code | evals/pr-pair/test_pr_pair.py | test_closing_check_ignores_multi_backtick_code_spans | red |
+| pr-descriptions → Closing references are checked after ship | Numbered closing line | evals/pr-pair/test_pr_pair.py | test_closing_check_reads_numbered_closing_lines | red |
+| pr-descriptions → Closing references are checked after ship | Unmatched backtick | evals/pr-pair/test_pr_pair.py | test_closing_check_unmatched_backtick_is_literal | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | Merged PR left an issue open | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_closed_check_lists_open_intended_issues; test_cleanup_closes_open_intended_issues | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | Every intended issue closed | evals/pr-pair/test_pr_pair.py | test_closed_check_all_closed | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | Related issue still open | evals/pr-pair/test_pr_pair.py | test_closed_check_ignores_related | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | Issue in another repository | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_closed_check_does_not_read_outside_issues; test_cleanup_reports_issues_outside_the_change | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | PR not merged | evals/pr-pair/test_pr_pair.py | test_closed_check_not_merged | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | PR into a branch other than the default, at cleanup | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_closed_check_not_default_base; test_cleanup_closes_nothing_off_the_default_branch | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | Issue reopened after it was closed | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_closed_check_reports_reopened; test_cleanup_never_recloses_reopened | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | Closing an issue fails | evals/pr-pair/test_skill_text.py | test_cleanup_reports_a_failed_close_and_continues | red |
+| pr-descriptions → Issues a merged PR left open are closed at cleanup | Issue state cannot be read | evals/pr-pair/test_pr_pair.py; evals/pr-pair/test_skill_text.py | test_closed_check_lookup_failure_is_unknown; test_cleanup_reports_backstop_not_done | red |
 | planning-stores → Local finish merges the repos that have work | Both merges succeed | evals/git-workflow/evals.json | eval-store-finish-local | green |
 | planning-stores → Local finish merges the repos that have work | Planning-only change in local mode | evals/git-workflow/evals.json | eval-store-finish-planning-only | green |
 | planning-stores → Local finish merges the repos that have work | Store merge conflicts | evals/git-workflow/evals.json | eval-store-finish-store-conflict | green |
@@ -200,8 +218,24 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 
   Verify every test map row is green, `git diff main -- docs/adr` is empty, and record any skipped test with its reason.
 
+## 9. Cleanup backstop for closing references (#61 part 3; D10)
+
+- [ ] 9.1 Add the red tests `test_closed_check_lists_open_intended_issues`, `test_closed_check_all_closed`, `test_closed_check_ignores_related`, `test_closed_check_not_merged`, `test_closed_check_not_default_base`, `test_closed_check_reports_reopened`, `test_closed_check_does_not_read_outside_issues` (an outside issue whose read would fail does not make the check exit 3) and `test_closed_check_lookup_failure_is_unknown` (PR read and issue read), extending `evals/fakes/gh.py` with PR state and issue state and close history if needed (with `test_fake_gh.py` cases). Verify they fail (no subcommand).
+- [ ] 9.2 Implement `pr-pair.sh closed-check --repo o/n --pr N --repos o/n[,o/n]` per D10 (one GraphQL read of the PR, its base and the default branch through the repo's login; intended issues by D9's parser; only issues in `--repos`, compared case-insensitively, read through their repository's login, with their close history; `status` merged/not_merged/not_default_base; `open`, `reopened`, `closed`, `outside`; exit 3 on a failed read) and its header usage line. Verify the tests and flip their rows green.
+- [ ] 9.3 Update `skills/specwright-pr/SKILL.md` **Cleanup after merge** (run `closed-check` per merged PR with the change's repositories as `--repos`; close each `open` issue with `gh issue close --comment` naming the PR, under that repository's identity; report `reopened` and `outside` issues, never closing them; `not_merged` → nothing; `not_default_base` → close nothing and report; exit 3 → report the backstop as not done and continue; a failed close → report what was closed and what is still open, and continue) and `skills/specwright-finish/SKILL.md` **After the PR is merged** (point to it). Add `test_cleanup_closes_open_intended_issues`, `test_cleanup_reports_issues_outside_the_change`, `test_cleanup_reports_backstop_not_done`, `test_cleanup_closes_nothing_off_the_default_branch`, `test_cleanup_never_recloses_reopened` and `test_cleanup_reports_a_failed_close_and_continues` to `test_skill_text.py` (red first), then verify and flip the rows green.
+- [ ] 9.4 Update `openspec/architecture.md` where it describes post-merge cleanup or closing references, if it does. Verify by reading; `git diff main -- docs/adr` stays empty.
+
+## 10. Local pre-ship review fixes
+
+- [ ] 10.1 Feedback step 2 handles a plan with `record: false` / `status: none` before the ownership gate, so a first pass proceeds. Add the check to `test_feedback_asks_before_adopting_a_foreign_record` (red first), then fix `skills/specwright-pr/SKILL.md` and verify.
+- [ ] 10.2 Add the red tests `test_unreadable_legacy_record_stops`, `test_unreadable_legacy_beside_valid_record_is_ignored`, `test_identical_legacy_copy_is_removed` and `test_failed_fallback_publish_leaves_no_record`, then fix `locate_record` (with no new-key record, an unreadable legacy file stops with `record_unreadable`; beside a valid record it is reported as ignored; a byte-identical legacy copy is removed) and `publish` (the fallback removes the destination it created when the write fails). Verify and flip the rows green.
+- [ ] 10.3 Add the red tests `test_resume_checks_out_main_before_deleting` and `test_resume_merge_requires_branch_tip_on_main` to `evals/git-workflow/test_instructions.py`, then update the **Resume** section of `skills/specwright-finish/SKILL.md` per D8 (M needs the branch tip on main when the branch exists; every deletion checks out `<main>` first). Verify and flip the rows green.
+- [ ] 10.4 Add the red tests `test_closing_check_ignores_multi_backtick_code_spans`, `test_closing_check_unmatched_backtick_is_literal` and `test_closing_check_reads_numbered_closing_lines`, then fix `without_code` (CommonMark code spans: a closer of the same run length; an unmatched run is literal) and the closing-line match in `pr-pair.sh` per D9. Verify and flip the rows green.
+- [ ] 10.5 In `evals/fakes/gh.py`, apply the repository reader check to the GraphQL repository path, and report `hasNextPage` when more than 100 closing references are seeded. Add `test_fake_gh.py` cases (red first), then verify `test_fake_gh.py` and the closing-check tests pass.
+- [ ] 10.6 Re-run the 8.2 checks. Verify every test map row is green and `git diff main -- docs/adr` is empty.
+
 ## Workflow follow-up
 
 - Verify, archive and finish per `finish: pr` (ship, watch, archive on the branch before merge).
-- The PR description lists each fixed issue on its own `Fixes #N` line (#48, #25, #26, #29, #30, #32, #34), and `Related: #61` (part 3 stays open). After ship, confirm that `closing-check` reports a match, the first real use of the check.
+- The PR description lists each fixed issue on its own `Fixes #N` line (#48, #25, #26, #29, #30, #32, #34, #61). After ship, confirm that `closing-check` reports a match, the first real use of the check.
 - Publish 0.1.10 per the release rules.
