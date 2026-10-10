@@ -41,10 +41,11 @@ Accepted calls (anything else under `api graphql` exits 2):
   GQL c `api graphql -f query='...' -f owner=<o> -f name=<n> -F number=<issue>`; the query text contains
         `repository(` and `issue(number`:
         { repository(owner: $owner, name: $name) { issue(number: $number) { state
-          timelineItems(first: 1, itemTypes: [CLOSED_EVENT]) { totalCount } } } }
-        -> {"data":{"repository":{"issue":{"state":"OPEN"|"CLOSED","timelineItems":{"totalCount":<ClosedEvents>}}}}};
+          timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) { nodes { ... on ClosedEvent { createdAt } } } } } }
+        -> {"data":{"repository":{"issue":{"state":"OPEN"|"CLOSED","timelineItems":{"nodes":[{"createdAt":<last close>}]}}}}}
+        (no nodes without a close);
         an unknown issue fails like GitHub ("Could not resolve to an Issue"). The pullRequest read also returns `state`
-        (OPEN | CLOSED | MERGED) and `url`.
+        (OPEN | CLOSED | MERGED), `url` and `mergedAt`.
 Fields not named in the query are still returned; the failure-injection `fail` patterns match the whole argv,
 so e.g. "graphql" or "/reactions" apply.
 """
@@ -274,9 +275,13 @@ def set_default_branch(st, slug, name):
 
 
 def set_issue(st, slug, number, state="OPEN", timeline=()):
-    """state: "OPEN" or "CLOSED"; timeline: the close/reopen events in order, e.g. ["CLOSED", "REOPENED"]."""
+    """state: "OPEN" or "CLOSED"; timeline: the close/reopen events in order, e.g. ["CLOSED", "REOPENED"]. An event is a name, or
+    (name, createdAt); a bare "CLOSED" happened at CLOSE_AT."""
     st.setdefault("repos", {}).setdefault(slug, {}).setdefault("issues", {})[str(number)] = {
         "state": state, "timeline": list(timeline)}
+
+
+CLOSE_AT = "2026-10-09T00:00:00Z"  # a bare "CLOSED" event's time: after the test PRs merge
 
 
 def cmd_graphql(st, fields):
@@ -307,9 +312,9 @@ def cmd_graphql(st, fields):
         issue = repo.get("issues", {}).get(str(fields.get("number", "")))
         if issue is None:
             raise Fail(f"GraphQL: Could not resolve to an Issue with the number of {fields.get('number')}. (repository.issue)")
-        return {"data": {"repository": {"issue": {
-            "state": issue["state"],
-            "timelineItems": {"totalCount": sum(1 for e in issue.get("timeline", []) if e == "CLOSED")}}}}}
+        events = [(e, CLOSE_AT) if isinstance(e, str) else tuple(e) for e in issue.get("timeline", [])]
+        closes = [{"createdAt": at} for name, at in events if name == "CLOSED"]
+        return {"data": {"repository": {"issue": {"state": issue["state"], "timelineItems": {"nodes": closes[-1:]}}}}}
     if "repository(" in q and "pullRequest(number" in q:
         slug = f"{fields.get('owner')}/{fields.get('name')}"
         repo = st.get("repos", {}).get(slug)
@@ -321,7 +326,7 @@ def cmd_graphql(st, fields):
         refs = p.get("closing_refs", [])
         return {"data": {"repository": {"defaultBranchRef": {"name": repo.get("default_branch", "main")},
                 "pullRequest": {"body": p.get("body") or "", "baseRefName": p["base"]["ref"],
-                                "state": graphql_view(p, slug)["state"], "url": p["html_url"],
+                                "state": graphql_view(p, slug)["state"], "url": p["html_url"], "mergedAt": p.get("merged_at"),
                                 "closingIssuesReferences": {
                                     "nodes": [{"number": r["number"], "repository": {"nameWithOwner": r.get("repo", slug)}}
                                               for r in refs[:100]],

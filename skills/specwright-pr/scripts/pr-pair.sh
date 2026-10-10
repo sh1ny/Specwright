@@ -737,9 +737,10 @@ def indent_columns(line):
 
 
 def container_content(line):
-    """The line after its blockquote markers (each `>` with up to three spaces before it and one optional space after it), where
-    CommonMark applies the block rules: `>     x` is indented code inside a quote."""
-    return line[re.match(r"(?: {0,3}> ?)*", line).end():]
+    """The line after its blockquote markers (each `>` with up to three spaces before it and one optional space after it) and list
+    markers (`-`, `+`, `*`, `1.` or `1)` with up to three spaces before it and the one space after it), where CommonMark applies
+    the block rules: `>     x` is indented code inside a quote, and `- ~~~` opens a fence inside a list item."""
+    return line[re.match(r"(?: {0,3}(?:> ?|(?:[-+*]|\d{1,9}[.)])(?: |$)))*", line).end():]
 
 
 LIST_CODE = re.compile(r" {0,3}(?:[-+*]|\d{1,9}[.)]) {5,}\S")  # a list item whose first block is indented code
@@ -751,7 +752,7 @@ def without_code(body):
     columns, unless the line before it is a paragraph line; a list item whose marker is followed by five spaces), HTML comments
     (also across lines) and inline code spans, which may continue across the lines of one paragraph (a blank line ends it). Within
     a paragraph the leftmost construct wins, so a `<!--` inside a code span is code; a line that starts with `<!--` is an HTML
-    block, not a paragraph. The block rules read each line after its blockquote markers."""
+    block, not a paragraph. The block rules read each line after its blockquote and list markers."""
     out, para = [], []
     fence, in_comment = None, False
     prev_para = False  # the previous line was a paragraph line, so an indented line continues it
@@ -919,9 +920,10 @@ def cmd_closing_check(argv):
 
 
 CLOSED_PR_QUERY = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) "
-                   "{ defaultBranchRef { name } pullRequest(number: $number) { state url body baseRefName } } }")
+                   "{ defaultBranchRef { name } pullRequest(number: $number) { state url body baseRefName mergedAt } } }")
 CLOSED_ISSUE_QUERY = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) "
-                      "{ issue(number: $number) { state timelineItems(first: 1, itemTypes: [CLOSED_EVENT]) { totalCount } } } }")
+                      "{ issue(number: $number) { state timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) "
+                      "{ nodes { ... on ClosedEvent { createdAt } } } } } }")
 
 
 def graphql_read(query, slug, number):
@@ -956,7 +958,7 @@ def cmd_closed_check(argv):
         rep = data["data"]["repository"]
         pr = rep["pullRequest"]
         default, base, state = rep["defaultBranchRef"]["name"], pr["baseRefName"], pr["state"]
-        url, body = pr["url"], pr["body"] or ""
+        url, body, merged_at = pr["url"], pr["body"] or "", pr["mergedAt"]
     except (KeyError, TypeError, AttributeError):
         unknown("unexpected GraphQL response shape (PR, state or default branch missing)")
     intended = intended_issues(body, repo)
@@ -965,6 +967,8 @@ def cmd_closed_check(argv):
            "open": [], "reopened": [], "closed": [], "outside": []}
     if state != "MERGED":
         return {**out, "status": "not_merged"}
+    if not isinstance(merged_at, str) or not merged_at:
+        unknown("the merged PR has no mergedAt")
     if base != default:  # GitHub closed nothing from this PR, and the fix has not reached the default branch
         return {**out, "status": "not_default_base"}
     inside = {s.lower() for s in scope}
@@ -974,13 +978,16 @@ def cmd_closed_check(argv):
             continue
         try:
             issue = graphql_read(CLOSED_ISSUE_QUERY, slug, n)["data"]["repository"]["issue"]
-            st, closes = issue["state"], int(issue["timelineItems"]["totalCount"])
-        except (KeyError, TypeError, AttributeError, ValueError):
+            st, events = issue["state"], issue["timelineItems"]["nodes"]
+            last_close = events[-1]["createdAt"] if events else None
+        except (KeyError, TypeError, AttributeError, IndexError):
             unknown(f"unexpected GraphQL response shape for {slug}#{n}")
+        if last_close is not None and not isinstance(last_close, str):
+            unknown(f"unexpected close time for {slug}#{n}")
         if st == "CLOSED":
             out["closed"].append(f"{slug}#{n}")
-        elif st == "OPEN":
-            out["reopened" if closes else "open"].append(f"{slug}#{n}")
+        elif st == "OPEN":  # closed at or after the merge and open now: a person reopened it; an older close does not count
+            out["reopened" if last_close and last_close >= merged_at else "open"].append(f"{slug}#{n}")
         else:
             unknown(f"{slug}#{n} has unexpected state {st!r}")
     return out

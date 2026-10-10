@@ -2315,6 +2315,23 @@ class ClosedCheck(Base):
         for n in (30, 31, 32):
             self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is code in a container")
 
+    def test_closed_check_ignores_fences_in_list_items(self):
+        # a fence opened after a list marker hides its lines like any other fence
+        body = "- ~~~\n  Fixes #52\n  ~~~\n\n1. ```\n   Fixes #53\n   ```\n\n- Fixes #21\n"
+        self.seed(body, issues={(CODE, 21): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21"])
+        for n in (52, 53):
+            self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is fenced code in a list item")
+
+    def test_closed_check_close_before_the_merge_is_open(self):
+        # only a close at or after the merge, then a reopen, makes `reopened`; an older close/reopen leaves the issue `open`
+        early = ("CLOSED", "2026-10-01T00:00:00Z")
+        self.seed("Fixes #24\nFixes #25\n", issues={(CODE, 24): ("OPEN", [early, "REOPENED"]),
+                                                    (CODE, 25): ("OPEN", [early, "REOPENED", ("CLOSED", self.MERGED), "REOPENED"])})
+        r = self.check()
+        self.assertEqual((r["open"], r["reopened"]), ([f"{CODE}#24"], [f"{CODE}#25"]))
+
     def test_closed_check_requires_repo_pr_and_repos(self):
         self.pp("closed-check", "--repo", CODE, "--pr", 7, expect=2)
         self.pp("closed-check", "--repo", CODE, "--repos", CODE, expect=2)

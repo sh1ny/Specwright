@@ -72,7 +72,7 @@ When a PR's base is not its repository's default branch, the check SHALL report 
 - **THEN** the check exits with GitHub state unknown, and ship reports the check as not done
 
 ### Requirement: Issues a merged PR left open are closed at cleanup
-When Specwright cleans up after a PR merged into its repository's default branch, it SHALL read the issues the PR's closing lines name in the change's repositories and close each one that is still open and was never closed before and that the user confirmed, with a comment naming the PR, using the identity of the issue's repository. Issues outside the change's repositories, and issues a person reopened, SHALL be reported and not closed. Issues named only by `Related:` SHALL NOT be closed.
+When Specwright cleans up after a PR merged into its repository's default branch, it SHALL read the issues the PR's closing lines name in the change's repositories and close each confirmed one that is open with no close since the merge, with a comment naming the PR, as the issue's repository's identity. Issues outside the change's repositories, and issues a person reopened after the merge, SHALL be reported and not closed. Issues named only by `Related:` SHALL NOT be closed.
 
 #### Scenario: Merged PR left an issue open
 - **WHEN** a merged PR's closing lines name issues 21 and 24, issue 21 is closed and issue 24 is still open
@@ -123,8 +123,12 @@ When Specwright cleans up after a PR merged into its repository's default branch
 - **THEN** cleanup does not close 21 and reports that it stays open until the fix reaches the default branch
 
 #### Scenario: Issue reopened after it was closed
-- **WHEN** issue 24, named on a merged PR's closing line, was closed and then reopened by a person
+- **WHEN** issue 24, named on a merged PR's closing line, was closed at or after the merge and then reopened by a person
 - **THEN** cleanup does not close 24 again and reports it as reopened
+
+#### Scenario: Issue closed and reopened before the merge
+- **WHEN** issue 24, named on a merged PR's closing line, was closed and reopened before the PR merged, and is still open
+- **THEN** cleanup lists 24 as open and asks the user to confirm closing it
 
 #### Scenario: Closing an issue fails
 - **WHEN** cleanup closes issue 21 and then fails to close issue 24
