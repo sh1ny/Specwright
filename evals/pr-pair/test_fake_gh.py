@@ -280,6 +280,48 @@ class ReactionsAndGraphql(FakeGhCase):
         refs = json.loads(self.gh(*args).stdout)["data"]["repository"]["pullRequest"]["closingIssuesReferences"]
         self.assertEqual((len(refs["nodes"]), refs["pageInfo"]["hasNextPage"]), (100, False))
 
+    GQL_CLOSED_PR = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
+                     "defaultBranchRef { name } pullRequest(number: $number) { state url body baseRefName } } }")
+    GQL_ISSUE = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { "
+                 "issue(number: $number) { state timelineItems(first: 1, itemTypes: [CLOSED_EVENT]) { totalCount } } } }")
+
+    def gql(self, query, owner, name, number, check=True):
+        return self.gh("api", "graphql", "-f", "query=" + query, "-f", f"owner={owner}", "-f", f"name={name}",
+                       "-F", f"number={number}", check=check)
+
+    def test_graphql_pr_state_and_url(self):
+        st = self.seeded()
+        st["repos"]["o/n"]["pulls"] += [self.pull(8, "b8", state="closed"), self.pull(9, "b9", state="closed", merged="2026-10-08T10:00:00Z")]
+        self.seed(st)
+        got = {n: json.loads(self.gql(self.GQL_CLOSED_PR, "o", "n", n).stdout)["data"]["repository"]["pullRequest"] for n in (7, 8, 9)}
+        self.assertEqual([got[n]["state"] for n in (7, 8, 9)], ["OPEN", "CLOSED", "MERGED"])
+        self.assertEqual(got[9]["url"], "https://github.com/o/n/pull/9")
+        self.assertEqual(got[9]["baseRefName"], "main")
+
+    def test_graphql_issue_state_and_close_history(self):
+        st = self.seeded()
+        fake_gh.set_issue(st, "o/n", 1, "OPEN")
+        fake_gh.set_issue(st, "o/n", 2, "CLOSED", ["CLOSED"])
+        fake_gh.set_issue(st, "o/n", 3, "OPEN", ["CLOSED", "REOPENED"])
+        self.seed(st)
+        got = {n: json.loads(self.gql(self.GQL_ISSUE, "o", "n", n).stdout)["data"]["repository"]["issue"] for n in (1, 2, 3)}
+        self.assertEqual(got[1], {"state": "OPEN", "timelineItems": {"totalCount": 0}})
+        self.assertEqual(got[2], {"state": "CLOSED", "timelineItems": {"totalCount": 1}})
+        self.assertEqual(got[3], {"state": "OPEN", "timelineItems": {"totalCount": 1}}, "only ClosedEvent items are counted")
+
+    def test_graphql_unknown_issue_and_reader_check(self):
+        st = self.seeded()
+        fake_gh.set_issue(st, "o/n", 1, "OPEN")
+        st["repos"]["o/n"]["readers"] = ["sh1ny"]
+        self.seed(st)
+        r = self.gql(self.GQL_ISSUE, "o", "n", 1, check=False)
+        self.assertEqual(r.returncode, 1, "an issue read applies the same reader check")
+        st["repos"]["o/n"].pop("readers")
+        self.seed(st)
+        r = self.gql(self.GQL_ISSUE, "o", "n", 99, check=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Could not resolve to an Issue", r.stderr)
+
     def test_graphql_unknown_query_exits_2(self):
         r = self.gh("api", "graphql", "-f", "query={ viewer { login } }", check=False)
         self.assertEqual(r.returncode, 2)

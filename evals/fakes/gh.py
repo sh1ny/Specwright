@@ -21,6 +21,7 @@ add_node_reaction, set_closing_refs, set_default_branch, which take and mutate t
   repos[slug]["review_comment_reactions"] = {"<comment id>": [{"user": {"login": l}, "content": "+1" | "-1"}]}
   st["nodes"] = {"<node id>": {"reactions": [{"login": l, "content": "THUMBS_UP" | "THUMBS_DOWN"}]}}
   pull["closing_refs"] = [{"number": n, "repo": "owner/name"}]; pull["closing_refs_has_next"] = bool
+  repos[slug]["issues"] = {"<n>": {"state": "OPEN" | "CLOSED", "timeline": ["CLOSED", "REOPENED", ...]}}  (set_issue)
   st["graphql_page_size"] = N  (optional; caps the reactions page size below the query's `first`)
 
 Accepted calls (anything else under `api graphql` exits 2):
@@ -37,6 +38,13 @@ Accepted calls (anything else under `api graphql` exits 2):
           pullRequest(number: $number) { body baseRefName closingIssuesReferences(first: 100)
             { nodes { number repository { nameWithOwner } } pageInfo { hasNextPage } } } } }
         -> {"data":{"repository":{"defaultBranchRef":{"name":b},"pullRequest":{...}}}}
+  GQL c `api graphql -f query='...' -f owner=<o> -f name=<n> -F number=<issue>`; the query text contains
+        `repository(` and `issue(number`:
+        { repository(owner: $owner, name: $name) { issue(number: $number) { state
+          timelineItems(first: 1, itemTypes: [CLOSED_EVENT]) { totalCount } } } }
+        -> {"data":{"repository":{"issue":{"state":"OPEN"|"CLOSED","timelineItems":{"totalCount":<ClosedEvents>}}}}};
+        an unknown issue fails like GitHub ("Could not resolve to an Issue"). The pullRequest read also returns `state`
+        (OPEN | CLOSED | MERGED) and `url`.
 Fields not named in the query are still returned; the failure-injection `fail` patterns match the whole argv,
 so e.g. "graphql" or "/reactions" apply.
 """
@@ -263,6 +271,12 @@ def set_default_branch(st, slug, name):
     st.setdefault("repos", {}).setdefault(slug, {})["default_branch"] = name
 
 
+def set_issue(st, slug, number, state="OPEN", timeline=()):
+    """state: "OPEN" or "CLOSED"; timeline: the close/reopen events in order, e.g. ["CLOSED", "REOPENED"]."""
+    st.setdefault("repos", {}).setdefault(slug, {}).setdefault("issues", {})[str(number)] = {
+        "state": state, "timeline": list(timeline)}
+
+
 def cmd_graphql(st, fields):
     q = fields.get("query", "")
     if "node(id" in q and "reactions(" in q:
@@ -279,6 +293,17 @@ def cmd_graphql(st, fields):
         return {"data": {"node": {"reactions": {
             "nodes": [{"user": {"login": r["login"]}} for r in items[start:end]],
             "pageInfo": {"hasNextPage": end < len(items), "endCursor": str(end) if end < len(items) else None}}}}}
+    if "repository(" in q and "issue(number" in q:
+        slug = f"{fields.get('owner')}/{fields.get('name')}"
+        repo = st.get("repos", {}).get(slug)
+        if repo is None or (repo.get("readers") and whoami(st) not in repo["readers"]):
+            raise Fail(f"GraphQL: Could not resolve to a Repository with the name '{slug}'. (repository)")
+        issue = repo.get("issues", {}).get(str(fields.get("number", "")))
+        if issue is None:
+            raise Fail(f"GraphQL: Could not resolve to an Issue with the number of {fields.get('number')}. (repository.issue)")
+        return {"data": {"repository": {"issue": {
+            "state": issue["state"],
+            "timelineItems": {"totalCount": sum(1 for e in issue.get("timeline", []) if e == "CLOSED")}}}}}
     if "repository(" in q and "pullRequest(number" in q:
         slug = f"{fields.get('owner')}/{fields.get('name')}"
         repo = st.get("repos", {}).get(slug)
@@ -290,6 +315,7 @@ def cmd_graphql(st, fields):
         refs = p.get("closing_refs", [])
         return {"data": {"repository": {"defaultBranchRef": {"name": repo.get("default_branch", "main")},
                 "pullRequest": {"body": p.get("body") or "", "baseRefName": p["base"]["ref"],
+                                "state": graphql_view(p, slug)["state"], "url": p["html_url"],
                                 "closingIssuesReferences": {
                                     "nodes": [{"number": r["number"], "repository": {"nameWithOwner": r.get("repo", slug)}}
                                               for r in refs[:100]],
