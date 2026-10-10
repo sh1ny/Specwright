@@ -71,7 +71,7 @@ D8 says the `*/<change-name>` match includes `chore/archive-<change-name>`. It d
 
 ## Verdict
 
-VERDICT: APPROVE_WITH_CHANGES
+Round 2 verdict (void, superseded by round 3): APPROVE_WITH_CHANGES
 
 ## Required Changes
 
@@ -90,7 +90,7 @@ VERDICT: APPROVE_WITH_CHANGES
 4. **specs/pr-descriptions/spec.md (M4).** Move `Closing keyword inside code` and `Numbered closing line` from "Closing references need the default branch" to the end of "Closing references are checked after ship", matching the tasks.md test map.
 
 <!-- yes (applied, and re-checked by the reviewer - only the reviewer sets it) | no (outstanding) | n/a (any other verdict) -->
-CHANGES_APPLIED: yes
+Round 2 changes applied: yes
 
 ## Rebuttals
 
@@ -126,3 +126,112 @@ Author, round 2 (as reported by the coordinator): M1-M4 and S1-S5 applied.
   - **Reviewer:** verified. D8's lookup order (prefix branch, then `chore/archive-<change-name>`, then `*/<change-name>`) matches the finish skill.
 - **S5:** applied.
   - **Reviewer:** verified. D9 states the CommonMark rule: a span closes only at a run of the same length, and an unmatched run is literal. The scenario "Unmatched backtick" and its test row cover it.
+
+---
+
+# Round 3
+
+## Metadata
+
+- **Round:** 3
+- **Prior round:** Round 2: APPROVE_WITH_CHANGES, changes applied and re-checked (`CHANGES_APPLIED: yes`). That verdict was voided by amendments made after a local pre-ship review (OMP) of the implemented branch found five defects (D9 hidden text and closing list, D8 pr-mode code merge, D2 file-name length and legacy-move race), plus D10's `--login` flag.
+- **Reviewer:** fresh-context subagent (Claude Code, Claude Agent SDK reviewer)
+- **Reviewed:**
+  - The amendment diff (`git diff -- openspec/changes/fix-workflow-recovery`) and the full current design.md (Triage, D2, D8, D9, D10, diagrams, all FULL tables), specs/pr-descriptions/spec.md, the requirement and scenario list of specs/change-finish/spec.md and specs/feedback-passes/spec.md, and tasks.md (test map, groups 10-11).
+  - skills/specwright-pr/scripts/pr-pair.sh: `CLOSE_KW`, `ISSUE_REF`, `strip_code_spans`, `without_code`, `issue_key`, `intended_issues`, `cmd_closing_check`, `graphql_read`, `cmd_closed_check`, `record_dir`, `record_path`, `legacy_record_path`, `publish`, `locate_record`, `record_lock`, the temp-file helper, `load_record`; the header (Python 3.8+).
+  - skills/specwright-finish/SKILL.md (**Resume**, `## local`, `## pr`) and skills/specwright-pr/SKILL.md (**Cleanup after merge**, the `closed-check` line).
+  - evals/pr-pair/test_pr_pair.py (the `PublishFallback` in-process harness, the `closed-check` tests including `--login`).
+  - openspec/architecture.md (pass-record row). The output of `openspec validate fix-workflow-recovery --strict` (valid).
+- **Findings verified against the code:** all five hold. `without_code` skips only fences and code spans; `intended_issues` adds every reference on a keyword-led line (pr-pair.sh:729-730); the Resume row "store done; code branch with commits, code not M" has no mode (specwright-finish/SKILL.md:33); `record_path` keeps the full sanitised owner, name and change (pr-pair.sh:1065); `old.unlink()` at pr-pair.sh:1131 is unguarded.
+
+<!-- This verdict covers only the contents reviewed. Editing proposal, specs or design afterward (other than applying Required Changes) voids it. -->
+
+## Findings
+
+### Critical (blocking)
+
+None.
+
+### Moderate
+
+**M1. D9's indented-code rule still counts code GitHub hides, in the direction that closes issues.**
+- The rule skips 4+-indented lines "that follow a blank line or another such line, outside a list". In CommonMark an indented code block cannot interrupt a paragraph, but it can follow any other block with no blank line between them: an ATX or setext heading, a closing fence, a thematic break, an HTML comment block. It can also be the first line of the description. CommonMark's spec examples show `# Heading` followed directly by `    foo` rendering as a heading and a code block.
+- Example: `## Verification` followed directly by `    pytest -k "fixes #52"`. GitHub renders the second line as code. Under D9 as written it is not skipped, so `fixes #52` is intended. At ship, 52 is `missing`. The line holds other text, so it is not rewritten, and ship stops on the second check. At cleanup, `closed-check` lists 52 as `open` and cleanup closes it. That is the P1 class this amendment is meant to remove.
+- "Outside a list" is not implementable as stated: the design does not say how a line is known to be inside a list (item content offset, lazy continuation, blank lines between items). Inside a list, a line indented four columns past the item's content is also code (`- item`, a blank line, then `      Fixes #52`), and the rule counts it.
+- D9 itself says skipping is the safe side, because a wrongly skipped reference is only `extra`. The rule should lean that way:
+  - skip a line indented four or more columns (a tab counts to the next multiple of four) unless the line before it is a paragraph line, that is non-blank text that is not a heading, fence, thematic break or HTML-comment line;
+  - the first line counts as following a blank line;
+  - drop the list exception. An indented list-continuation paragraph is then skipped. GitHub still links it, so ship reports it as `extra`, and nothing is closed wrongly.
+
+**M2. D9's closing list does not say where it starts, so `Fixes the crash; Related: #52` can still name 52.**
+- The amended text defines the list as "the references read in order, each separated from the one before by only" separators. It does not say that the first reference must come directly after the line's leading keyword.
+- The current code takes every reference on a keyword-led line. The minimal change that satisfies the new scenario (`Fixes #21; Related: #52`) stops the list at text after a reference. That change still starts the list at the first reference anywhere on the line.
+- Lines such as `Fixes the flaky upload; Related: #52` or `Resolves the crash (see #52)` would then make 52 intended, and cleanup would close it. GitHub links neither, because a keyword names only the reference directly after it.
+- The new scenario and `test_closed_check_ignores_related_on_a_closing_line` do not catch this, because their line starts with a reference.
+
+### Suggestions
+
+**S1. D8: say what the new pr-mode row does when the code branch has no PR.**
+- "Its PR not merged" includes having no PR at all: the store merged by hand before the code branch was ever shipped. "Report the PR (ship or watch)" leaves the agent to guess.
+- State the cases:
+  - no PR, or the branch ahead of its PR → `## pr` ship for the code repo;
+  - an open PR → report it and offer **watch**;
+  - a PR closed without merging → report it and ask.
+- The finish flowchart in **Diagrams** shows neither the `local`-only code merge nor this row.
+
+**S2. D2: the legacy probe is not bounded.**
+- The 120-character cut bounds the new key, but `legacy_record_path` still builds `owner-name-change.json` in full.
+- On Python 3.8-3.11 (supported, per the pr-pair.sh header) on Linux or macOS, `Path.exists()` raises `ENAMETOOLONG` for a name over 255 characters instead of returning False. `locate_record` then ends in `internal_error`.
+- It takes a 39-character owner, a 100-character name and a change name over about 109 characters, so it is rare.
+- 0.1.9 could never have created such a file, so treating a legacy name over 255 characters as absent is enough. The new scenario's 80-character change name does not reach this case.
+
+**S3. Record the new bounds and race in the tables.**
+- Resource Bounds: add a row for the record file name. It is at most 120 + 1 + 32 + `.json`, so 158 characters, and 163 with `.lock`. The temp files are short `mkstemp` names.
+- Flow & State Gaps: add a line for two callers moving one legacy record. The caller that loses `publish` gets `FileExistsError` and continues with the new key. An old file already gone at `unlink` counts as moved.
+- Triage and the Mechanism Ledger need no change: there is no new component or mechanism.
+
+The other amendments hold:
+- D8's `local` restriction and the new scenario "Store merged by hand, code PR still open" fix finding 3. The scenario is assertable by a text test (`test_resume_pr_mode_keeps_an_open_code_pr`), as group 6's red evidence was.
+- D2's prefix cut keeps keys unique: the hash covers the full case-folded identity, and the readable part is only for humans. "Already gone at `unlink` counts as moved" fixes finding 5. The new scenario can be driven in process through the existing `PublishFallback.namespace()` harness.
+- D9's HTML-comment and multi-line code-span rules err toward skipping, which is the safe side for both ship and cleanup.
+- D10's `--login o/n=L` matches `cmd_closed_check` (pr-pair.sh:812-816) and the **Cleanup after merge** call. It is already tested (test_pr_pair.py:2138-2142).
+- Tasks 11.1-11.4 cover the five findings, and their test-map rows are red. They need the cases from M1 and M2 added (Required Change 3).
+
+## Verdict
+
+VERDICT: APPROVE_WITH_CHANGES
+
+## Required Changes
+
+1. **design.md D9, indented code (M1).**
+   - Replace "lines indented four or more spaces, or a tab, that follow a blank line or another such line, outside a list".
+   - The new rule skips every line indented four or more columns, a tab advancing to the next multiple of four, unless the line before it is a paragraph line. A paragraph line is non-blank text other than a heading, a fence line, a thematic break or an HTML-comment line.
+   - The first line of the description counts as following a blank line.
+   - Drop the list exception, and say that an indented list paragraph skipped this way is only reported as `extra`.
+2. **design.md D9, closing list (M2).**
+   - State that the closing list starts at the reference directly after the line's leading keyword, with only whitespace and the optional `:` between them.
+   - A keyword-led line whose first reference does not directly follow the keyword has no closing list. It names only what the "directly after a closing keyword" rule names.
+3. **specs/pr-descriptions/spec.md and tasks.md 11.1.**
+   - Extend the scenario "Closing keyword hidden from the rendered description", or add one, with an indented line directly after a heading.
+   - Add a scenario. WHEN a merged PR's description has the line `Fixes the crash; Related: #52`, and issue 52 is open, THEN 52 is not an intended issue, and cleanup does not close it.
+   - Add both cases to the tests named in 11.1 (`test_closed_check_ignores_hidden_references`, `test_closed_check_ignores_related_on_a_closing_line`) and to the test map.
+
+<!-- yes (applied, and re-checked by the reviewer - only the reviewer sets it) | no (outstanding) | n/a (any other verdict) -->
+CHANGES_APPLIED: yes
+
+## Rebuttals
+
+<!-- Author: fixed (cite) or rebutted (reason) per finding. A Critical/Moderate rebuttal counts only once marked "accepted by reviewer". -->
+
+- **M1:** fixed. D9 skips every line indented four or more columns unless the line before it is a paragraph line; the first line counts as following a blank line; no list exception (an indented list paragraph is only `extra`). The scenario "Closing keyword hidden from the rendered description" names an indented line directly after a heading, and task 11.1's test covers it.
+  - **Reviewer:** verified, and accepted by reviewer. D9 skips a line indented four or more columns (tabs to the next multiple of four) unless the line before it is a paragraph line, counts the first line as following a blank line, and drops the list exception. The heading case is in the scenario "Closing keyword hidden from the rendered description" and in task 11.1. Editorial nit, non-blocking: D9's skip sentence nests the indented-code rule between semicolons ("indented code: ... Lists get no exception: ...; HTML comments"). Splitting it into a sub-list would read more clearly.
+- **M2:** fixed. D9: the closing list starts at the reference directly after the leading keyword; a keyword-led line whose first reference does not follow it has no closing list. New scenario "Closing line without a closing list", test `test_closed_check_ignores_a_line_without_a_closing_list` (task 11.1, test map).
+  - **Reviewer:** verified, and accepted by reviewer. The closing list starts only at a reference directly after the leading keyword, and a line like `Fixes the crash; Related: #52` has none. The scenario "Closing line without a closing list", task 11.1 and the test-map row (red) match.
+- **S1:** applied. D8 has two pr-mode rows (no PR or open PR → ship for the code branch; closed unmerged → report and ask); the finish flowchart shows the local-only code merge and both pr-mode paths. The change-finish scenario says the open code PR is shipped and reported.
+  - **Reviewer:** verified. D8 has two pr-mode rows: no PR or an open PR → ship, merging and deleting nothing; a PR closed unmerged → report and ask. The flowchart shows both, and the local-only code merge. The change-finish scenario and task 11.2 match.
+- **S2:** applied. D2 and Flow & State Gaps: an old path the OS rejects as too long counts as absent; task 11.3 covers it.
+  - **Reviewer:** verified. D2 and Flow & State Gaps treat an old path the OS rejects as too long as absent, and task 11.3 implements it. Non-blocking: no test is named for it. A case in `test_record_key_is_bounded_for_the_longest_names` with a change name over 110 characters would cover it.
+- **S3:** applied. Resource Bounds row for the record file name (158, 163 with `.lock`); Flow & State Gaps line for two callers moving one old record.
+  - **Reviewer:** verified. The Resource Bounds row (158 characters, 163 with `.lock`) and both Flow & State Gaps lines are present.
+- **Gate lines:** round 2's `VERDICT` and `CHANGES_APPLIED` lines are relabelled, so only round 3's lines match.
+  - **Reviewer:** verified. Only round 3's `VERDICT:` and `CHANGES_APPLIED:` lines start a line. `openspec validate fix-workflow-recovery --strict` reports the change valid.
