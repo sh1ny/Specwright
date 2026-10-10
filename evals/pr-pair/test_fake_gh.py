@@ -216,8 +216,8 @@ class ReactionsAndGraphql(FakeGhCase):
         st = self.seeded()
         st["graphql_page_size"] = 2
         for login in ("a", "b", "c"):
-            fake_gh.add_node_reaction(st, "NODE1", login, "THUMBS_UP")
-        fake_gh.add_node_reaction(st, "NODE1", "d", "THUMBS_DOWN")
+            fake_gh.add_node_reaction(st, "o/n", "NODE1", login, "THUMBS_UP")
+        fake_gh.add_node_reaction(st, "o/n", "NODE1", "d", "THUMBS_DOWN")
         self.seed(st)
         r1 = json.loads(self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_UP", "-f", "id=NODE1").stdout)
         rx = r1["data"]["node"]["reactions"]
@@ -232,6 +232,36 @@ class ReactionsAndGraphql(FakeGhCase):
         self.assertEqual([n["user"]["login"] for n in down["data"]["node"]["reactions"]["nodes"]], ["d"])
         none = json.loads(self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_UP", "-f", "id=NOPE").stdout)
         self.assertIsNone(none["data"]["node"])
+
+    def node_query(self, node="NODE1", env=None, check=True):
+        return self.gh("api", "graphql", "-f", "query=" + self.GQL_REACTIONS % "THUMBS_UP", "-f", "id=" + node, env=env, check=check)
+
+    def test_graphql_node_reactions_check_credentials(self):
+        st = self.seeded()
+        st["tokens"] = {"KintsugiBot": "tok-k"}
+        fake_gh.add_node_reaction(st, "o/n", "NODE1", "a", "THUMBS_UP")
+        self.seed(st)
+        other = self.gh("api", "user", env={"GH_TOKEN": "bogus"}, check=False)  # the failure every credentialed read gives
+        self.assertEqual(other.returncode, 1)
+        for node in ("NODE1", "NOPE"):  # credentials are checked before the node is looked up
+            r = self.node_query(node, env={"GH_TOKEN": "bogus"}, check=False)
+            self.assertEqual((r.returncode, r.stdout), (other.returncode, ""), f"a bad token read node {node}: {r.stdout}")
+            self.assertEqual(r.stderr, other.stderr, "a bad token fails differently from the other reads")
+        self.assertEqual(json.loads(self.node_query(env={"GH_TOKEN": "tok-k"}).stdout)["data"]["node"]["reactions"]["nodes"],
+                         [{"user": {"login": "a"}}])
+
+    def test_graphql_node_reactions_apply_the_reader_check(self):
+        st = self.seeded()
+        st["repos"]["o/n"]["readers"] = ["sh1ny"]  # the default user is KintsugiBot
+        fake_gh.add_node_reaction(st, "o/n", "NODE1", "a", "THUMBS_UP")
+        self.seed(st)
+        r = self.node_query(check=False)
+        self.assertEqual(r.returncode, 1, f"GraphQL answered a login that cannot read the node's repository: {r.stdout}")
+        self.assertIn("Could not resolve", r.stderr)
+        self.assertEqual(self.node_query("NOPE", check=False).stdout.strip().count("reactions"), 0)
+        st["user"] = "sh1ny"
+        self.seed(st)
+        self.assertEqual(json.loads(self.node_query().stdout)["data"]["node"]["reactions"]["nodes"], [{"user": {"login": "a"}}])
 
     def test_graphql_pr_closing_refs_and_default_branch(self):
         st = self.seeded()

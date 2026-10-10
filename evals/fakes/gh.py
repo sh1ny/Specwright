@@ -19,7 +19,7 @@ Like real gh, `api --paginate` prints each page's JSON one after another.
 Reactions and closing references (state keys; add them with the helpers add_review_comment_reaction,
 add_node_reaction, set_closing_refs, set_default_branch, which take and mutate the state dict):
   repos[slug]["review_comment_reactions"] = {"<comment id>": [{"user": {"login": l}, "content": "+1" | "-1"}]}
-  st["nodes"] = {"<node id>": {"reactions": [{"login": l, "content": "THUMBS_UP" | "THUMBS_DOWN"}]}}
+  st["nodes"] = {"<node id>": {"repo": "owner/name", "reactions": [{"login": l, "content": "THUMBS_UP" | "THUMBS_DOWN"}]}}
   pull["closing_refs"] = [{"number": n, "repo": "owner/name"}]; pull["closing_refs_has_next"] = bool
   repos[slug]["issues"] = {"<n>": {"state": "OPEN" | "CLOSED", "timeline": ["CLOSED", "REOPENED", ...]}}  (set_issue)
   st["graphql_page_size"] = N  (optional; caps the reactions page size below the query's `first`)
@@ -31,7 +31,7 @@ Accepted calls (anything else under `api graphql` exits 2):
         `node(id: $id)` and `reactions(` with `content: THUMBS_UP` or `content: THUMBS_DOWN` and `after: $cursor`:
         { node(id: $id) { ... on Reactable { reactions(first: 100, content: THUMBS_UP, after: $cursor)
           { nodes { user { login } } pageInfo { hasNextPage endCursor } } } } }
-        -> {"data":{"node":{"reactions":{"nodes":[{"user":{"login":l}}],"pageInfo":{...}}}}}; node null if unknown.
+        -> {"data":{"node":{"reactions":{"nodes":[{"user":{"login":l}}],"pageInfo":{...}}}}}; node null if unknown; checks credentials, and the reader rule of the node's repository.
   GQL b `api graphql -f query='...' -f owner=<o> -f name=<n> -F number=<pr>`; the query text contains
         `repository(` and `pullRequest(number`:
         { repository(owner: $owner, name: $name) { defaultBranchRef { name }
@@ -251,10 +251,12 @@ def add_review_comment_reaction(st, slug, comment_id, login, content):
     rx.setdefault(str(comment_id), []).append({"user": {"login": login}, "content": content})
 
 
-def add_node_reaction(st, node_id, login, content):
-    """content is the GraphQL form: "THUMBS_UP" or "THUMBS_DOWN"."""
-    st.setdefault("nodes", {}).setdefault(str(node_id), {}).setdefault("reactions", []).append(
-        {"login": login, "content": content})
+def add_node_reaction(st, slug, node_id, login, content):
+    """content is the GraphQL form: "THUMBS_UP" or "THUMBS_DOWN". `slug` is the repository the node lives in: reading the
+    node needs a login that can read that repository."""
+    node = st.setdefault("nodes", {}).setdefault(str(node_id), {"repo": slug})
+    node["repo"] = slug
+    node.setdefault("reactions", []).append({"login": login, "content": content})
 
 
 def set_closing_refs(st, slug, number, refs, has_next=False):
@@ -284,9 +286,13 @@ def cmd_graphql(st, fields):
         content = m.group(1) if m else fields.get("content")
         first = re.search(r"first:\s*(\d+)", q)
         size = max(1, min(int(first.group(1)) if first else 30, 100, int(st.get("graphql_page_size", 100))))
+        reader = whoami(st)  # a bad token or no login fails like every credentialed read
         node = st.get("nodes", {}).get(fields.get("id", ""))
         if node is None:
             return {"data": {"node": None}}
+        repo = st.get("repos", {}).get(node.get("repo", ""), {})
+        if repo.get("readers") and reader not in repo["readers"]:  # the node's repository is private to others
+            raise Fail(f"GraphQL: Could not resolve to a node with the global id of '{fields.get('id', '')}'. (node)")
         items = [r for r in node.get("reactions", []) if not content or r["content"] == content]
         start = int(fields.get("cursor") or 0)
         end = start + size

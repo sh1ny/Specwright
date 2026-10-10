@@ -1131,7 +1131,7 @@ class PassPlan(PassBase):
 
     def react_node(self, node, login, content):
         st = self.gh()
-        fake_gh.add_node_reaction(st, node, login, content)
+        fake_gh.add_node_reaction(st, CODE, node, login, content)
         self.save_gh(st)
 
     def test_pass_plan_reaction_todo_until_github_shows_it(self):
@@ -1581,6 +1581,35 @@ class PassOwnership(PassBase):
         self.assertEqual(legacy.read_bytes(), b"not json")
         d = self.plan(sub="done", expect=1)  # the pass is not complete, but the legacy file does not stop it
         self.assertEqual(d["error"], "not_complete")
+
+    def test_denied_legacy_record_is_unreadable(self):
+        # the old file cannot be read at all (a permission error): its identity is unknown, like a cut-off file
+        import errno
+        from unittest import mock
+        ns = PublishFallback.namespace()
+        legacy = self.legacy_file(b"{}")
+        real_text, real_bytes = Path.read_text, Path.read_bytes
+
+        def denied(real):
+            def read(p, *a, **k):
+                if p.name == legacy.name:
+                    raise PermissionError(errno.EACCES, "Permission denied", str(p))
+                return real(p, *a, **k)
+            return read
+
+        env = {"SPECWRIGHT_STATE_DIR": str(self.state_dir)}
+        reads = (mock.patch.dict(os.environ, env), mock.patch.object(Path, "read_text", denied(real_text)),
+                 mock.patch.object(Path, "read_bytes", denied(real_bytes)))
+        with reads[0], reads[1], reads[2]:
+            with self.assertRaises(ns["Stop"]) as cm:
+                ns["locate_record"](CODE, CHANGE)
+        self.assertEqual(cm.exception.error, "record_unreadable")
+        self.assertIn(legacy.name, cm.exception.message)
+        self.assertFalse(self.record_path().exists())
+        self.write_record([self.finding()])
+        with reads[0], reads[1], reads[2]:
+            path, ignored = ns["locate_record"](CODE, CHANGE)  # beside a valid record it is ignored, not fatal
+        self.assertEqual((Path(path).name, Path(ignored).name), (record_key(CODE, CHANGE), legacy.name))
 
     def test_pass_write_is_exclusive_under_concurrency(self):
         f = self.write_json("intent.json", self.intent([self.finding()]))
@@ -2067,7 +2096,7 @@ class ClosingCheck(Base):
 
     def test_closing_check_ignores_refs_in_code(self):
         body = ("Fixes #1\n```\nFixes #2\n```\n~~~\nFixes #3\n~~~\nand `Fixes #4` inline\n"
-                "Fixes `#5` and #6\n")
+                "Fixes #6 and `#5`\n")
         self.assertEqual(self.intended(body), [f"{CODE}#1", f"{CODE}#6"])
 
     def test_closing_check_ignores_multi_backtick_code_spans(self):
@@ -2241,6 +2270,40 @@ class ClosedCheck(Base):
         r = self.check()
         self.assertEqual((r["intended"], r["open"]), ([], []))
         self.assertEqual(self.reads("number=52"), [], "a Related issue is never read")
+
+    def test_closed_check_fence_closes_only_on_a_bare_fence(self):
+        # a fence line closes only with the same character, at least as long, and nothing but white space after it
+        body = ("Fixes #21\n```\nFixes #30\n``` not a closer\nFixes #31\n```\nFixes #22\n"
+                "~~~~\nFixes #32\n~~~ short\nFixes #33\n~~~~   \nFixes #34\n")
+        self.seed(body, issues={(CODE, n): ("OPEN", []) for n in (21, 22, 34)})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#22", f"{CODE}#34"])
+        for n in (30, 31, 32, 33):
+            self.assertEqual(self.reads(f"number={n}"), [], f"fenced #{n} is never read")
+
+    def test_closed_check_removed_span_leaves_a_space(self):
+        # the text around a removed code span never joins into a new word: Fi`x`xes is not Fixes
+        self.seed("Fi`x`xes #30\nFixes #21\n", issues={(CODE, 21): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["intended"], r["open"]), ([f"{CODE}#21"], [f"{CODE}#21"]))
+        self.assertEqual(self.reads("number=30"), [], "a joined word is no keyword")
+
+    def test_closed_check_comment_opener_in_a_span_is_code(self):
+        # code spans are found before HTML comments in a paragraph; a real comment still hides its text
+        body = ("see `<!--` here\nFixes #21\n\nText `<!--\nstill code` and <!-- hidden\nFixes #30\n-->\nFixes #22\n")
+        self.seed(body, issues={(CODE, 21): ("OPEN", []), (CODE, 22): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#22"])
+        self.assertEqual(self.reads("number=30"), [], "text in a real comment is never read")
+
+    def test_closed_check_list_needs_a_ref_right_after_the_keyword(self):
+        # only white space and an optional colon may sit between the leading keyword and the first reference
+        body = "Fixes, #30\nFixes `x`; #31\nFixes `#21` and #32\nFixes: #22, #23\n"
+        self.seed(body, issues={(CODE, n): ("OPEN", []) for n in (22, 23)})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#22", f"{CODE}#23"])
+        for n in (30, 31, 32):
+            self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is in no closing list")
 
     def test_closed_check_requires_repo_pr_and_repos(self):
         self.pp("closed-check", "--repo", CODE, "--pr", 7, expect=2)
