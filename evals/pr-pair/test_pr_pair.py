@@ -2046,5 +2046,123 @@ class ClosingCheck(Base):
         self.assertEqual(self.intended("Fixes #5\nFixes #5\n"), [f"{CODE}#5"])
 
 
+class ClosedCheck(Base):
+    """closed-check: at cleanup, which issues a merged PR's closing lines name are still open (#61 part 3)."""
+
+    MERGED = "2026-10-08T10:00:00Z"
+
+    def seed(self, body, merged=MERGED, base="main", issues=None):
+        """PR #7 of CODE; `issues` maps (slug, n) to (state, timeline)."""
+        self.add_pull(CODE, 7, body=body, base=base, state="closed", merged=merged)
+        st = self.gh()
+        for (slug, n), (state, timeline) in (issues or {}).items():
+            fake_gh.set_issue(st, slug, n, state, timeline)
+        self.save_gh(st)
+
+    def check(self, repos=CODE, expect=0, pr=7):
+        return self.pp("closed-check", "--repo", CODE, "--pr", pr, "--repos", repos, expect=expect)
+
+    def reads(self, needle):
+        return [c for c in self.gh_calls() if "graphql" in " ".join(c["argv"]) and needle in " ".join(c["argv"])]
+
+    def test_closed_check_lists_open_intended_issues(self):
+        self.seed("Fixes #21\nFixes #24\n", issues={(CODE, 21): ("CLOSED", ["CLOSED"]), (CODE, 24): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["ok"], r["status"]), (True, "merged"))
+        self.assertEqual(r["pr_url"], f"https://github.com/{CODE}/pull/7")
+        self.assertEqual((r["base"], r["default_branch"]), ("main", "main"))
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#24"])
+        self.assertEqual((r["open"], r["closed"], r["reopened"], r["outside"]), ([f"{CODE}#24"], [f"{CODE}#21"], [], []))
+        self.assertEqual(len(self.reads("pullRequest(number")), 1, "one GraphQL read of the PR")
+        self.assertEqual(len(self.reads("issue(number")), 2, "one read per intended issue")
+        writes = [c for c in self.gh_calls() if c["argv"][:2] in (["issue", "close"], ["issue", "comment"]) or "-X" in c["argv"]]
+        self.assertEqual(writes, [], "the check never writes")
+
+    def test_closed_check_all_closed(self):
+        self.seed("Fixes #21\nFixes #24\n", issues={(CODE, 21): ("CLOSED", ["CLOSED"]), (CODE, 24): ("CLOSED", ["CLOSED"])})
+        r = self.check()
+        self.assertEqual((r["status"], r["open"], r["reopened"], r["outside"]), ("merged", [], [], []))
+        self.assertEqual(r["closed"], [f"{CODE}#21", f"{CODE}#24"])
+
+    def test_closed_check_ignores_related(self):
+        self.seed("Fixes #21\n\nRelated: #52\n", issues={(CODE, 21): ("CLOSED", ["CLOSED"]), (CODE, 52): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21"])
+        self.assertEqual((r["open"], r["reopened"], r["outside"]), ([], [], []))
+        self.assertEqual(self.reads("number=52"), [], "a Related issue is never read")
+
+    def test_closed_check_not_merged(self):
+        self.seed("Fixes #21\n", merged=None, issues={(CODE, 21): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["ok"], r["status"]), (True, "not_merged"))
+        self.assertEqual((r["open"], r["reopened"], r["closed"], r["outside"]), ([], [], [], []))
+        self.assertEqual(self.reads("issue(number"), [], "no issue is read for an unmerged PR")
+
+    def test_closed_check_not_default_base(self):
+        self.seed("Fixes #21\n", base="develop", issues={(CODE, 21): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["ok"], r["status"]), (True, "not_default_base"))
+        self.assertEqual((r["base"], r["default_branch"], r["intended"]), ("develop", "main", [f"{CODE}#21"]))
+        self.assertEqual((r["open"], r["reopened"], r["closed"], r["outside"]), ([], [], [], []))
+        self.assertEqual(self.reads("issue(number"), [], "nothing is closed, so nothing is read")
+
+    def test_closed_check_reports_reopened(self):
+        self.seed("Fixes #24\nFixes #25\n", issues={(CODE, 24): ("OPEN", ["CLOSED", "REOPENED"]), (CODE, 25): ("OPEN", [])})
+        r = self.check()
+        self.assertEqual((r["reopened"], r["open"]), ([f"{CODE}#24"], [f"{CODE}#25"]))
+
+    def test_closed_check_does_not_read_outside_issues(self):
+        self.seed("Fixes #21\nFixes other/tool#5\n", issues={(CODE, 21): ("OPEN", [])})
+        st = self.gh()
+        st["fail"] = [{"match": "name=tool", "exit": 1, "stderr": "boom"}]  # any read of the outside repo would fail
+        self.save_gh(st)
+        r = self.check()
+        self.assertEqual(r["status"], "merged")
+        self.assertEqual((r["open"], r["outside"]), ([f"{CODE}#21"], ["other/tool#5"]))
+        self.assertEqual(r["intended"], [f"{CODE}#21", "other/tool#5"])
+        self.assertEqual(self.reads("name=tool"), [], "an outside issue is never read")
+
+    def test_closed_check_reads_issues_of_every_listed_repo_case_insensitively(self):
+        self.seed("Fixes #21\nFixes acme/plans#3\nFixes Other/Tool#5\n",
+                  issues={(CODE, 21): ("OPEN", []), (STORE, 3): ("OPEN", ["CLOSED", "REOPENED"])})
+        r = self.check(repos=f"{CODE.upper()},{STORE}")
+        self.assertEqual((r["open"], r["reopened"], r["outside"]), ([f"{CODE}#21"], [f"{STORE}#3"], ["Other/Tool#5"]))
+        self.assertEqual(len(self.reads("name=plans")), 1)
+
+    def test_closed_check_reads_each_repo_through_its_login(self):
+        # a private store only sh1ny can read: its issue is read as sh1ny while the call runs as KintsugiBot
+        self.seed("Fixes #21\nFixes acme/plans#3\n", issues={(CODE, 21): ("OPEN", []), (STORE, 3): ("OPEN", [])})
+        st = self.gh()
+        st.setdefault("repos", {}).setdefault(STORE, {})["readers"] = ["sh1ny"]
+        self.save_gh(st)
+        args = ("closed-check", "--repo", CODE, "--pr", 7, "--repos", f"{CODE},{STORE}")
+        self.assertEqual(self.pp(*args, env={"GH_TOKEN": "tok-k"}, expect=3)["error"], "lookup_failed")
+        r = self.pp(*args, "--login", f"{STORE}=sh1ny", env={"GH_TOKEN": "tok-k"})
+        self.assertEqual(r["open"], [f"{CODE}#21", f"{STORE}#3"])
+        self.pp(*args, "--login", "sh1ny", expect=2)
+
+    def test_closed_check_lookup_failure_is_unknown(self):
+        self.seed("Fixes #21\n", issues={(CODE, 21): ("OPEN", [])})
+        st = self.gh()
+        st["fail"] = [{"match": r"pullRequest\(number", "exit": 1, "stderr": "boom"}]  # the PR read
+        self.save_gh(st)
+        r = self.check(expect=3)
+        self.assertEqual((r["ok"], r["error"], r["unknown"]), (False, "lookup_failed", True))
+        st["fail"] = [{"match": r"issue\(number", "exit": 1, "stderr": "boom"}]  # an in-scope issue read
+        self.save_gh(st)
+        r = self.check(expect=3)
+        self.assertEqual((r["ok"], r["error"], r["unknown"]), (False, "lookup_failed", True))
+
+    def test_closed_check_unreadable_pr_or_issue_is_unknown(self):
+        self.seed("Fixes #21\n")  # issue 21 does not exist in the fake
+        self.assertEqual(self.check(expect=3)["error"], "lookup_failed")
+        self.assertEqual(self.check(expect=3, pr=99)["error"], "lookup_failed")
+
+    def test_closed_check_requires_repo_pr_and_repos(self):
+        self.pp("closed-check", "--repo", CODE, "--pr", 7, expect=2)
+        self.pp("closed-check", "--repo", CODE, "--repos", CODE, expect=2)
+        self.pp("closed-check", "--pr", 7, "--repos", CODE, expect=2)
+
+
 if __name__ == "__main__":
     unittest.main()

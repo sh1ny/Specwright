@@ -15,6 +15,10 @@
 #                                     find the open PR or create it; stops on a wrong base; never edits a description
 #   closing-check --repo o/n --pr N   the issues the description's closing lines name vs what GitHub will close
 #                                     status match | mismatch | not_default_base (one GraphQL read; a failure = unknown, exit 3)
+#   closed-check --repo o/n --pr N --repos o/n[,o/n] [--login o/n=L ...]
+#                                     at cleanup: which issues the merged PR's closing lines name are still open
+#                                     status merged | not_merged | not_default_base; open, reopened, closed, outside (a failed read = unknown, exit 3)
+                                     --login: the login that reads o/n when it is not the one the call runs as
 #   link --repo o/n --pr N --kind store|code --peer-url URL [--login L]
 #                                     one marker comment <!-- specwright:link KIND URL -->; edits its own on a new peer
 #   pair-state --code d --store d --branch b [--snapshot code=f] [--snapshot store=f] [--dropped id@rev]...
@@ -775,6 +779,74 @@ def cmd_closing_check(argv):
     missing = [k for k in intended if (k[0].lower(), k[1]) not in low(linked)]
     extra = [k for k in linked if (k[0].lower(), k[1]) not in low(intended)]
     return {**out, "status": "mismatch" if missing else "match", "missing": fmt(missing), "extra": fmt(extra)}
+
+
+CLOSED_PR_QUERY = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) "
+                   "{ defaultBranchRef { name } pullRequest(number: $number) { state url body baseRefName } } }")
+CLOSED_ISSUE_QUERY = ("query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) "
+                      "{ issue(number: $number) { state timelineItems(first: 1, itemTypes: [CLOSED_EVENT]) { totalCount } } } }")
+
+
+def graphql_read(query, slug, number):
+    """The `data` of one GraphQL read through `slug`'s login; any failure or GraphQL error is unknown (exit 3)."""
+    owner, name = slug.split("/")
+    r = gh("api", "graphql", "-f", f"query={query}", "-f", f"owner={owner}", "-f", f"name={name}", "-F", f"number={number}", repo=slug)
+    if r.returncode != 0:
+        unknown((r.stderr or r.stdout).strip() or f"gh exited {r.returncode}")
+    try:
+        data = json.loads(r.stdout)
+    except ValueError as e:
+        unknown(f"unreadable response: {e}")
+    if not isinstance(data, dict) or data.get("errors"):
+        unknown(f"GraphQL errors: {data.get('errors') if isinstance(data, dict) else data}")
+    return data
+
+
+def cmd_closed_check(argv):
+    a, _ = parse_args(argv, {"--repo": "repo", "--pr": "pr", "--repos": "repos", "--login": "+login"})
+    need(a, "repo", "pr", "repos")
+    repo, scope = a["repo"], [s for s in a["repos"].split(",") if s]
+    slug_ok = lambda s: re.match(r"^[^/\s]+/[^/\s]+$", s)
+    if not slug_ok(repo) or not str(a["pr"]).isdigit() or not scope or not all(slug_ok(s) for s in scope):
+        usage("--repo is owner/name, --pr a number and --repos a comma-separated list of owner/name")
+    for pair in a.get("login", []):  # a repository read through a login other than the ambient one
+        slug, _, login = pair.partition("=")
+        if not slug_ok(slug) or not login:
+            usage("--login is owner/name=login")
+        REPO_LOGIN[slug.lower()] = login
+    data = graphql_read(CLOSED_PR_QUERY, repo, a["pr"])
+    try:
+        rep = data["data"]["repository"]
+        pr = rep["pullRequest"]
+        default, base, state = rep["defaultBranchRef"]["name"], pr["baseRefName"], pr["state"]
+        url, body = pr["url"], pr["body"] or ""
+    except (KeyError, TypeError, AttributeError):
+        unknown("unexpected GraphQL response shape (PR, state or default branch missing)")
+    intended = intended_issues(body, repo)
+    fmt = lambda ks: [f"{s}#{n}" for s, n in ks]
+    out = {"ok": True, "status": "merged", "pr_url": url, "base": base, "default_branch": default, "intended": fmt(intended),
+           "open": [], "reopened": [], "closed": [], "outside": []}
+    if state != "MERGED":
+        return {**out, "status": "not_merged"}
+    if base != default:  # GitHub closed nothing from this PR, and the fix has not reached the default branch
+        return {**out, "status": "not_default_base"}
+    inside = {s.lower() for s in scope}
+    for slug, n in intended:
+        if slug.lower() not in inside:
+            out["outside"].append(f"{slug}#{n}")  # never read
+            continue
+        try:
+            issue = graphql_read(CLOSED_ISSUE_QUERY, slug, n)["data"]["repository"]["issue"]
+            st, closes = issue["state"], int(issue["timelineItems"]["totalCount"])
+        except (KeyError, TypeError, AttributeError, ValueError):
+            unknown(f"unexpected GraphQL response shape for {slug}#{n}")
+        if st == "CLOSED":
+            out["closed"].append(f"{slug}#{n}")
+        elif st == "OPEN":
+            out["reopened" if closes else "open"].append(f"{slug}#{n}")
+        else:
+            unknown(f"{slug}#{n} has unexpected state {st!r}")
+    return out
 
 
 def link_state(repo, n, kind, peer):
@@ -1594,7 +1666,8 @@ def cmd_cleanup(argv):
 
 
 COMMANDS = {"identity": cmd_identity, "context": cmd_context, "discover": cmd_discover, "expected": cmd_expected,
-            "ensure-pr": cmd_ensure_pr, "closing-check": cmd_closing_check, "link": cmd_link, "pair-state": cmd_pair_state, "rounds": cmd_rounds,
+            "ensure-pr": cmd_ensure_pr, "closing-check": cmd_closing_check,
+            "closed-check": cmd_closed_check, "link": cmd_link, "pair-state": cmd_pair_state, "rounds": cmd_rounds,
             "pass": cmd_pass, "cleanup-plan": cmd_cleanup}
 
 args = sys.argv[1:]
