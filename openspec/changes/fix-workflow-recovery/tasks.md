@@ -232,7 +232,7 @@ Green rows are unchanged scenarios carried in a MODIFIED requirement. Group 2 re
 - [x] 10.3 Add the red tests `test_resume_checks_out_main_before_deleting` and `test_resume_merge_requires_branch_tip_on_main` to `evals/git-workflow/test_instructions.py`, then update the **Resume** section of `skills/specwright-finish/SKILL.md` per D8 (M needs the branch tip on main when the branch exists; every deletion checks out `<main>` first). Verify and flip the rows green.
 - [x] 10.4 Add the red tests `test_closing_check_ignores_multi_backtick_code_spans`, `test_closing_check_unmatched_backtick_is_literal` and `test_closing_check_reads_numbered_closing_lines`, then fix `without_code` (CommonMark code spans: a closer of the same run length; an unmatched run is literal) and the closing-line match in `pr-pair.sh` per D9. Verify and flip the rows green.
 - [x] 10.5 In `evals/fakes/gh.py`, apply the repository reader check to the GraphQL repository path, and report `hasNextPage` when more than 100 closing references are seeded. Add `test_fake_gh.py` cases (red first), then verify `test_fake_gh.py` and the closing-check tests pass.
-- [ ] 10.6 Re-run the 8.2 checks. Verify every test map row is green and `git diff main -- docs/adr` is empty.
+- [x] 10.6 Re-run the 8.2 checks. Verify every test map row is green and `git diff main -- docs/adr` is empty.
 
 ## Workflow follow-up
 
