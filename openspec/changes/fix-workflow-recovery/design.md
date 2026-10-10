@@ -4,10 +4,10 @@
 
 | Trigger | Applies? | Evidence |
 |---|---|---|
-| T1 Components (new component, or 3+ with directed relationships) | No | No new component. New subcommands (`pass adopt`, `closing-check`) live in the existing `pr-pair.sh`; finish resume is skill text. |
+| T1 Components (new component, or 3+ with directed relationships) | No | No new component. New subcommands (`pass adopt`, `closing-check`, `closed-check`) live in the existing `pr-pair.sh`; finish resume is skill text. |
 | T2 State (persistent state, caches, 3+ state machine) | Yes | The pass record (`pr-pair.sh:830-936`) gains an owner, a new key and a version. The finish resume reads a per-repo state machine (archive committed → merged → branch deleted). |
 | T3 Concurrency (background work, workers/isolates, async, retries) | Yes | Two sessions writing one pass record (#32); the check-then-replace in `pass_write` (`pr-pair.sh:897-935`). |
-| T4 Boundaries (data format, migration, shared interface, IPC, external) | Yes | The record file format and path change (migration from the 0.1.9 key). `pr-pair.sh`'s JSON output is a contract (ADR 0002). It gains `rounds`/`pass` without `--store`, the `link` row, the `react` row semantics and a new subcommand. The new GitHub read is `closingIssuesReferences`. |
+| T4 Boundaries (data format, migration, shared interface, IPC, external) | Yes | The record file format and path change (migration from the 0.1.9 key). `pr-pair.sh`'s JSON output is a contract (ADR 0002). It gains `rounds`/`pass` without `--store`, the `link` row, the `react` row semantics and new subcommands. The new GitHub reads are `closingIssuesReferences`, the PR's base and state, and each intended issue's state and close history; the new GitHub write is closing an issue with a comment at cleanup (D10). |
 | T5 Volume (grows without a fixed bound) | Yes | Reaction lists and closing-issue lists read from GitHub are unbounded on GitHub's side. |
 | T6 Risk (security, money, data loss, unrecoverable user data) | Yes | A wrongly removed or taken-over record loses a pass's intent (#32). A wrongly repeated finish step could merge or delete the wrong branch (#48). |
 
@@ -49,7 +49,7 @@ See proposal.md for the issues. Current state:
     - `<readable>` is the old sanitised `owner.name.change`, kept for humans with `.` as the separator;
     - `<h>` is the first 32 hex characters of `sha256(lower(owner) + "\n" + lower(name) + "\n" + change)`.
   - The hash keeps the fields apart, so different identities never share a file. Lower-casing matches GitHub's case-insensitive names.
-  - On every `pass` call, if the new path is absent and the 0.1.9 path exists, it is read. When its `code_repo` (compared case-insensitively) and `change` equal the lookup, it is moved with `os.link` plus `unlink` under the same exclusive rule as D1. Otherwise it is left alone and the lookup reports no record.
+  - On every `pass` call, if the 0.1.9 path exists, it is read. When the new path is absent and the old file cannot be parsed, its identity is unknown, so the lookup stops with `record_unreadable`; when the new path exists, an unreadable old file is reported as ignored and never blocks the valid record. A readable old file byte-identical to the new record is the leftover of an interrupted move and is removed. Otherwise, with the new path absent, When its `code_repo` (compared case-insensitively) and `change` equal the lookup, it is moved with `os.link` plus `unlink` under the same exclusive rule as D1. Otherwise it is left alone and the lookup reports no record.
 - **Rejected: percent-encoding each field with a separator.** It is equally collision-free and fully readable, but filenames grow and still depend on the encoding being applied consistently by hand. The hash suffix is fixed length. **Rejected: no migration.** A pass interrupted under 0.1.9 would silently vanish and the next run would start a fresh pass at a higher round.
 - **Reversal cost:** low. It is a local cache path.
 
@@ -110,7 +110,7 @@ See proposal.md for the issues. Current state:
 
 - **Choice:** A new **Resume** section at the top of `specwright-finish`. It applies when the change directory is gone and the user asks to finish (or the archive workflow reports the change already archived). For each repo of the change (repo-local: one; store-backed: the store, then the code repo), read three facts:
   - **A:** an `archive change` commit for the change on `<branch>` (`git log --format=%s <main>..<branch>`, a subject `<type>(<change-name>): archive change`), or on main;
-  - **M:** `merge: <change-name>` in `git log --first-parent --format=%s <main>`;
+  - **M:** `merge: <change-name>` in `git log --first-parent --format=%s <main>`, and, when B, the branch tip is on main (`git merge-base --is-ancestor <branch> <main>`). An archive-recovery branch made after the change merged holds a new archive commit, so the earlier merge does not count for it;
   - **B:** `<branch>` exists.
 
   Then continue from the first missing step of the normal order:
@@ -119,19 +119,20 @@ See proposal.md for the issues. Current state:
   |---|---|
   | uncommitted archive paths | step 3 (as today) |
   | A on branch, not M, B, local mode | merge |
-  | M and B | `git branch -d` |
+  | M and B | `git checkout <main> && git branch -d` |
   | M, not B | repo done |
   | store done, code branch with commits, code not M | code merge |
-  | store done, code branch without commits | `git branch -d` |
+  | store done, code branch without commits | `git checkout <main> && git branch -d` |
   | pr mode, A on branch, PR not merged | step 4 pr (ship; push and PR are idempotent) |
   | pr mode, the branch's PR merged | **After the PR is merged** (cleanup), not ship |
 
-  - **Finding the branch from main:** `<prefix>/<change-name>` with the prefix rule of `specwright-branch` step 6. Otherwise, the one local branch matching `*/<change-name>` (including `chore/archive-<change-name>`). Several matches → list them and ask.
+  - **Finding the branch from main:** `<prefix>/<change-name>` with the prefix rule of `specwright-branch` step 6; else a local `chore/archive-<change-name>`; else the one local branch matching `*/<change-name>`. Several candidates → list them and ask.
   - **The archive subject** matches any type: the regex `^[a-z]+\(<change-name>\): archive change$`.
   - `Nothing to finish` is reported only when every repo is done.
   - Uncommitted changes under the archive directory or the change directory stop the resume, listed for the user.
   - When none of the facts is found, finish reports that it found no archive of the change and does nothing.
   - The planning-only test (step 2) runs only before an archive commit; a resume never writes the marker.
+  - Every branch deletion checks out `<main>` first: a resume can start on the branch it deletes, and git refuses to delete the checked-out branch.
 - **Rejected: a finish progress file.** That is a second source of truth (ADR 0003), and git already holds every fact.
 - **Reversal cost:** low. It is skill text.
 
@@ -149,8 +150,21 @@ See proposal.md for the issues. Current state:
     - `not_default_base` → no rewrite and no stop: ship reports that GitHub will not close the listed issues from this PR;
     - `created` + mismatch → rewrite only the closing lines that hold nothing but a keyword and references, one keyword per reference. A closing line with other text is left as is and reported. Then `gh pr edit --body-file` and check again; a second mismatch → stop and name the missing issues;
     - `found` + mismatch → report and ask; never edit the description unprompted.
-- **Rejected: a prose rule alone.** PR #59 was written with a prose rule in place. **Rejected: a backstop at cleanup** (#61 part 3). It is valuable, but deferred by the user; it stays on #61.
+  - Code is skipped as GitHub renders it (CommonMark): fenced blocks, and inline code spans. A span opens at a backtick run and closes only at the next run of the same length, so ` ``Fixes #21`` ` is code; a run with no matching closer is literal text. An ordered-list marker (`1.`, `1)`) before a keyword counts as the start of the line, like `-`, `*` and `>`.
+- **Rejected: a prose rule alone.** PR #59 was written with a prose rule in place.
 - **Reversal cost:** low.
+
+### D10: Issues a merged PR left open are closed at cleanup (#61 part 3)
+
+- **Choice:**
+  - New `pr-pair.sh closed-check --repo o/n --pr N --repos o/n[,o/n]` (`--repos`: the change's repositories). One GraphQL read of the PR (`state`, `url`, `body`, `baseRefName`, the repository's `defaultBranchRef`) through the repo's login; the intended issues parsed by D9's function. Only intended issues in `--repos` (compared case-insensitively) are read, each through its repository's login: its `state` and whether its timeline has any `ClosedEvent`. Others are listed as `outside`, unread. It prints `{status, pr_url, base, default_branch, intended, open, reopened, closed, outside}`:
+    - `status` is `not_merged` when the PR is not merged; `not_default_base` when its base is not the default branch (GitHub closes nothing from such a PR, and the fix has not reached the default branch); `merged` otherwise;
+    - `open`: open and never closed; `reopened`: open with an earlier close event, so a person reopened it.
+  - A failed or malformed read of the PR, or of an issue it reads, exits 3 (unknown).
+  - `specwright-pr` **Cleanup after merge** runs it for each merged PR of the change (store-backed and repo-local; `specwright-finish` **After the PR is merged** points there). For each `open` issue: `[as] gh issue close <n> --repo <owner/name> --comment "Fixed by <pr_url>. Its closing keyword did not close this issue on merge."`, with that repository's identity. `reopened` and `outside` issues are reported, never closed. `not_merged` → nothing. `not_default_base` → close nothing; report that the intended issues stay open until the fix reaches the default branch. Exit 3 → report the backstop as not done; branch cleanup continues. A failed close → report what was closed and what is still open, and continue; a later cleanup closes only the rest.
+  - Only closing lines count, so a `Related:` issue is never closed.
+- **Rejected: edit the PR description after merge.** GitHub applies closing keywords only at merge, so an edit closes nothing. **Rejected: close issues named anywhere in the body.** `Related:` issues are only partly resolved.
+- **Reversal cost:** low. It is one script subcommand and one cleanup step.
 
 ## Diagrams (FULL)
 
@@ -223,6 +237,9 @@ Record format (T4): `{version: 2, owner: {id, at, checkout, host}, branch, round
 | `link` row | Link call fails | The row stays `todo`; the pass does not complete | Yes (`link` is idempotent) | Agent |
 | Finish resume | Stops between steps | The next resume reads the evidence again | Yes, by D8 | User (report) |
 | `closing-check` | GitHub error or more than 100 closing issues | Exit 3; ship reports the check as not done | Yes | User (ship report) |
+| `closed-check` | GitHub error on the PR or on an issue of the change's repositories | Exit 3; cleanup reports the backstop as not done, closes nothing and continues its branch cleanup | Yes | User (cleanup report) |
+| Issue close at cleanup | `gh issue close` fails partway through the list | Cleanup reports which issues it closed and which are still open; a later cleanup reads the states again and closes only the rest (a failed close leaves no close event) | Yes | User (cleanup report) |
+| Issue reopened by a person after a close | — | `closed-check` lists it as `reopened` (it has a close event); cleanup reports it and never closes it again | — | User (cleanup report) |
 
 ## Resource Bounds (FULL)
 
@@ -230,6 +247,7 @@ Record format (T4): `{version: 2, owner: {id, at, checkout, host}, branch, round
 |---|---|---|---|---|
 | Reactions on one comment | Paginated to the end (REST `--paginate`, GraphQL pages of 100) | — | gh's own | A comment with 1000 thumbs is 10 pages, read only for answered findings |
 | Closing issues | 100 | `hasNextPage` → exit 3, unknown | gh's own | Not realistic for one PR |
+| Issue reads in `closed-check` | One per intended issue in the change's repositories | — | gh's own | Bounded by the description's closing lines |
 | Pass records on disk | One per repository and change | — | — | Deleted at `done` |
 | Record lock hold time | One read-check-write | — | — | — |
 
@@ -237,7 +255,9 @@ Record format (T4): `{version: 2, owner: {id, at, checkout, host}, branch, round
 
 - **Concurrent `pass write`:** one wins (D1). The loser gets `record_exists` and plans, sees `owned: false` and asks the user. It never proceeds to fixes.
 - **Owner alive but asked to adopt:** the user is the arbiter. After `adopt`, the old session's `done` gets `not_owner`, and its remaining replies are its own risk. The skill tells it to stop on `not_owner`.
-- **Legacy record and a new record both exist:** the new key wins. The old file is left in place and reported once in the plan output (`legacy_record_ignored`).
+- **Legacy record and a new record both exist:** the new key wins. A legacy file byte-identical to the new record is the leftover of an interrupted move and is removed; any other is left in place and reported once in the plan output (`legacy_record_ignored`). It is a separate pass of a 0.1.9 session: once the new record is done, it surfaces with no owner and the user is asked.
+- **Legacy record that cannot be read:** with no new-key record, its identity is unknown, so the lookup stops with `record_unreadable` rather than allowing a new pass. Beside a valid new-key record it is reported as ignored and does not block that record's plan or `done`.
+- **Fallback publish fails mid-write** (no hard links): the destination it created is removed before the error is raised, so no partial record blocks the next write.
 - **Reaction of the opposite content already present:** the recorded content is still added. The plan never removes reactions.
 - **Code PR closed between adoption and link:** only an open PR is adopted (`:1061`). A closed one is not linked, and the push row's `ship` path handles it.
 - **Finish resume while the store branch was deleted but its merge is missing:** the facts read as ¬A (the branch is gone), ¬M and ¬B. Finish reports no archive found for the store and asks.
@@ -257,7 +277,9 @@ Record format (T4): `{version: 2, owner: {id, at, checkout, host}, branch, round
 | `link` row | Yes | #30: the store PR is left without its peer link, unnoticed | — |
 | Finish progress file | No | Git holds the facts (ADR 0003) | — |
 | `closing-check` | Yes | #61: issues stay open silently after merge | — |
-| Cleanup backstop that closes issues | No | Deferred by the user (#61 part 3) | — |
+| `closed-check` and the cleanup close | Yes | #61 part 3: an intended issue stays open after merge (a PR merged before `closing-check`, or a check that was skipped or failed); nobody notices until the milestone gate | — |
+| Skip reopened issues | Yes | Without it a re-run cleanup closes an issue a person reopened on purpose | — |
+| Base and default-branch check in `closed-check` | Yes | Without it cleanup closes issues whose fix has not reached the default branch (a `develop` main) | — |
 
 ## Risks / Trade-offs
 
