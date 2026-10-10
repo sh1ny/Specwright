@@ -665,36 +665,62 @@ ISSUE_REF = (r"https?://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)\b|(?<![\w/.-]
              r"|(?<![\w/&])#(\d+)\b")
 
 
+def backtick_span(text, i):
+    """The backtick run at text[i:] and the end of the code span it opens: (run_end, close_end), close_end None when no later run
+    of the same length closes it (the run is then literal text)."""
+    n, j = len(text), i
+    while j < n and text[j] == "`":
+        j += 1
+    k = j
+    while k < n:
+        if text[k] != "`":
+            k += 1
+            continue
+        m = k
+        while m < n and text[m] == "`":
+            m += 1
+        if m - k == j - i:
+            return j, m
+        k = m
+    return j, None
+
+
 def strip_code_spans(line):
     """CommonMark inline code: a span opens at a backtick run and closes at the next run of the same length; a run with no such
-    closer is literal text, and so are the backticks of a run that is longer or shorter than the opener."""
+    closer is literal text, and so are the backticks of a run that is longer or shorter than the opener. A removed span leaves a
+    space, so the text around it never joins into a new word."""
     out, i, n = [], 0, len(line)
     while i < n:
         if line[i] != "`":
             out.append(line[i])
             i += 1
             continue
-        j = i
-        while j < n and line[j] == "`":
-            j += 1
-        k, close = j, None
-        while k < n:
-            if line[k] != "`":
-                k += 1
-                continue
-            m = k
-            while m < n and line[m] == "`":
-                m += 1
-            if m - k == j - i:
-                close = m
-                break
-            k = m
+        j, close = backtick_span(line, i)
         if close is None:
             out.append(line[i:j])
             i = j
         else:
+            out.append(" ")
             i = close
     return "".join(out)
+
+
+def inline_comments(text):
+    """(start, end) of each HTML comment in `text`, scanning left to right where the first construct wins: a `<!--` inside a code
+    span is code, and a backtick inside a comment is comment text. An unclosed comment runs to the end of `text`."""
+    found, i, n = [], 0, len(text)
+    while i < n:
+        if text[i] == "`":
+            j, close = backtick_span(text, i)
+            i = j if close is None else close
+        elif text.startswith("<!--", i):
+            end = text.find("-->", i + 4)
+            end = n if end < 0 else end + 3
+            found.append((i, end))
+            i = end
+        else:
+            i += 1
+    return found
 
 
 def indent_columns(line):
@@ -711,19 +737,45 @@ def indent_columns(line):
 
 
 def without_code(body):
-    """The description's lines with what GitHub does not read as text removed: fenced blocks, indented code (every line indented
-    four or more columns, unless the line before it is a paragraph line), HTML comments (also across lines) and inline code
-    spans, which may continue across the lines of one paragraph (a blank line ends it)."""
+    """The description's lines with what GitHub does not read as text removed: fenced blocks (closed only by a fence line of the
+    same character, at least as long, with nothing but white space after it), indented code (every line indented four or more
+    columns, unless the line before it is a paragraph line), HTML comments (also across lines) and inline code spans, which may
+    continue across the lines of one paragraph (a blank line ends it). Within a paragraph the leftmost construct wins, so a `<!--`
+    inside a code span is code; a line that starts with `<!--` is an HTML block, not a paragraph."""
     out, para = [], []
     fence, in_comment = None, False
     prev_para = False  # the previous line was a paragraph line, so an indented line continues it
+    lines = body.replace("\r\n", "\n").split("\n")
 
     def flush():
         if para:
             out.extend(strip_code_spans("\n".join(para)).split("\n"))
             del para[:]
 
-    for raw in body.replace("\r\n", "\n").split("\n"):
+    def strip_comments(line, comment_line, rest):
+        """`line` without its HTML comments; a comment that does not end on the line leaves in_comment set."""
+        nonlocal in_comment
+        head = "\n".join(para) + "\n" if para and not comment_line else ""
+        tail = []
+        for nxt in rest:  # the rest of the paragraph decides whether a backtick before a `<!--` closes a span
+            if not nxt.strip():
+                break
+            tail.append(nxt)
+        base, kept, at = len(head), [], 0
+        for start, end in inline_comments(head + "\n".join([line] + tail)):
+            if start < base:
+                continue
+            if start >= base + len(line):
+                break
+            kept.append(line[at:start - base])
+            if end > base + len(line):
+                in_comment, at = True, len(line)
+                break
+            at = end - base
+        kept.append(line[at:])
+        return "".join(kept)
+
+    for idx, raw in enumerate(lines):
         line, comment_line = raw, in_comment
         if in_comment:
             end = line.find("-->")
@@ -734,7 +786,8 @@ def without_code(body):
         else:
             m = re.match(r"\s{0,3}(`{3,}|~{3,})", line)
             if fence:
-                if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                closer = re.match(r"\s{0,3}(`{3,}|~{3,})\s*$", line)
+                if closer and closer.group(1)[0] == fence[0] and len(closer.group(1)) >= len(fence):
                     fence = None
                 continue
             if m:
@@ -743,13 +796,8 @@ def without_code(body):
                 continue
             if indent_columns(line) < 4 and line.lstrip().startswith("<!--"):
                 comment_line = True
-        while "<!--" in line:
-            start = line.index("<!--")
-            end = line.find("-->", start + 4)
-            if end < 0:
-                line, in_comment = line[:start], True
-                break
-            line = line[:start] + line[end + 3:]
+        if "<!--" in line:
+            line = strip_comments(line, comment_line, lines[idx + 1:])
         if not raw.strip():
             flush()
             prev_para = False
@@ -781,11 +829,13 @@ def issue_key(m, repo):
 
 
 LIST_GAP = re.compile(r"(?:[\s,;]|\band\b|" + CLOSE_KW + r")*", re.I)
+FIRST_GAP = re.compile(r"\s*")  # the keyword's own optional colon is part of CLOSE_KW
 
 
 def intended_issues(body, repo):
     """Issues a description's closing lines name: every ref directly after a closing keyword, and the closing list of a line that
-    starts with one: the ref directly after that keyword and each next ref separated from the one before by only `,`, `;`, `and`,
+    starts with one: the ref after that keyword (only white space between; a `,`, `;`, `and` or a removed code span there means no
+    list) and each next ref separated from the one before by only `,`, `;`, `and`,
     white space or another closing keyword. Any other text ends the list; a line whose first ref does not directly follow the
     keyword has none."""
     found = []
@@ -793,12 +843,14 @@ def intended_issues(body, repo):
         refs = [(m.start(), m.end(), issue_key(m, repo)) for m in re.finditer(ISSUE_REF, line)]
         lead = re.match(r"(?:[\s>*+-]|\d{1,9}[.)](?=\s))*" + CLOSE_KW, line, re.I)
         if lead:
-            prev = lead.end()
+            prev, first = lead.end(), True
             for at, end, k in refs:
                 if at < lead.end():
                     continue
-                if LIST_GAP.match(line, prev).end() != at:
+                gap = FIRST_GAP if first else LIST_GAP  # the first ref follows the keyword with only white space between
+                if gap.match(line, prev).end() != at:
                     break
+                first = False
                 found.append(k)
                 prev = end
         for kw in re.finditer(CLOSE_KW, line, re.I):
@@ -1249,7 +1301,7 @@ def load_record(p):
         return json.loads(p.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
-    except ValueError as e:
+    except (ValueError, OSError) as e:  # cut off, not JSON, or not readable at all (a denied permission): identity unknown
         raise Stop("record_unreadable", f"{p}: {e}")
 
 
