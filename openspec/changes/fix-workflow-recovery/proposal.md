@@ -13,7 +13,9 @@ Milestone **M1 - Hardening**, change 2 of 3 (release 0.1.10). An interrupted or 
 
 This change advances the exit criteria "every issue in the changes below is closed by a merged PR, with a regression test" and "`evals/pr-pair` passes". It serves the milestone outcome: a change runs from branch to merged PR, including an interrupted or concurrent feedback pass, without manual git or PR rescue.
 
-**Scope addition, approved by the user on 2026-10-10:** #61 parts 1 and 2. PR #59 listed eight issues after a single `Fixes` keyword, so GitHub closed only the first, and the other seven had to be closed by hand. The roadmap's exit criterion "every issue is closed by a merged PR" depends on closing keywords working, so this belongs in M1. It is small and touches `specwright-pr` ship, which this change already edits. #61 part 3 (a backstop at cleanup) stays open on #61.
+**Scope addition, approved by the user on 2026-10-10:** #61 parts 1 and 2. PR #59 listed eight issues after a single `Fixes` keyword, so GitHub closed only the first, and the other seven had to be closed by hand. The roadmap's exit criterion "every issue is closed by a merged PR" depends on closing keywords working, so this belongs in M1. It is small and touches `specwright-pr` ship, which this change already edits.
+
+**Scope addition, approved by the user on 2026-10-10 (after the local pre-ship review):** #61 part 3, the backstop at cleanup, so this change closes #61 and M1's exit criterion can be met. The same review's findings on this change's own code are fixed here too (see the last bullet of What Changes).
 
 ## What Changes
 
@@ -29,7 +31,9 @@ This change advances the exit criteria "every issue in the changes below is clos
   - on an existing PR, ship reports the mismatch and asks, since the description belongs to the user once it exists.
 
   Closing lines go on the PR in the repo that holds the issues (normally the code PR).
-- Everything moves to 0.1.10. The roadmap's change 2 entry names #61 and the user's approval.
+- **#61 (part 3)** After a PR merges, cleanup runs a new `pr-pair.sh closed-check`: it reads the issues the PR's closing lines name and closes any still open with a comment naming the PR. Issues outside the change's repositories are reported, not closed. This covers PRs merged before the check existed and anything the check missed.
+- **Local review fixes** (findings on this change's code before ship): feedback step 2 handles `status: none` before the ownership gate; a legacy record that cannot be read stops instead of allowing a new pass; a legacy record left byte-identical by an interrupted move is removed; a failed fallback publish removes the file it created; finish resume treats a change as merged only when the branch tip is on main, and checks out main before deleting a branch; `closing-check` skips code spans of any backtick length and reads ordered-list closing lines; the fake `gh` applies the reader check to GraphQL and reports overflow past 100 closing references.
+- Everything moves to 0.1.10. The roadmap's change 2 entry names #61 (all three parts) and the user's approvals.
 
 ## Capabilities
 
@@ -45,10 +49,10 @@ This change advances the exit criteria "every issue in the changes below is clos
 
 - Scripts: `skills/specwright-pr/scripts/pr-pair.sh`:
   - `pass write|plan|done` change: ownership, key, validation, react evidence, link row, optional `--store`;
-  - new `pass adopt` and `closing-check`;
+  - new `pass adopt`, `closing-check` and `closed-check`;
   - `rounds` changes: legacy count only, optional `--store`.
-- Skills: `specwright-pr` (SKILL.md: ship, feedback steps 2, 3, 6 and 10, repo-local notes; `references/description.md`) and `specwright-finish` (resume step). `metadata.version` changes in all six skills.
+- Skills: `specwright-pr` (SKILL.md: ship, feedback steps 2, 3, 6 and 10, repo-local notes, cleanup after merge; `references/description.md`) and `specwright-finish` (resume step, after the PR is merged). `metadata.version` changes in all six skills.
 - Docs: README badge, `VERSION`, `openspec/architecture.md` (the rows that describe pass records and finish), `openspec/roadmap.md` (change 2 entry). Accepted ADRs are not edited.
 - Tests: `evals/pr-pair/test_pr_pair.py` (pass ownership, keys and migration, validation, reactions, link row, repo-local pass, rounds, closing-check) and `test_skill_text.py`. New agent evals in `evals/git-workflow` for the two finish interruption points.
 - State: a pass record written by 0.1.9 is moved to its new key on first use. A 0.1.9 record has no owner, so its first resume asks the user, like any record another session owns.
-- Out of scope: #61 part 3 (cleanup backstop), PR evidence freshness (#31, #33, #35, #39, #47: change 3), watch-key collisions (#39).
+- Out of scope: PR evidence freshness (#31, #33, #35, #39, #47: change 3), watch-key collisions (#39).
