@@ -736,12 +736,22 @@ def indent_columns(line):
     return col
 
 
+def container_content(line):
+    """The line after its blockquote markers (each `>` with up to three spaces before it and one optional space after it), where
+    CommonMark applies the block rules: `>     x` is indented code inside a quote."""
+    return line[re.match(r"(?: {0,3}> ?)*", line).end():]
+
+
+LIST_CODE = re.compile(r" {0,3}(?:[-+*]|\d{1,9}[.)]) {5,}\S")  # a list item whose first block is indented code
+
+
 def without_code(body):
     """The description's lines with what GitHub does not read as text removed: fenced blocks (closed only by a fence line of the
     same character, at least as long, with nothing but white space after it), indented code (every line indented four or more
-    columns, unless the line before it is a paragraph line), HTML comments (also across lines) and inline code spans, which may
-    continue across the lines of one paragraph (a blank line ends it). Within a paragraph the leftmost construct wins, so a `<!--`
-    inside a code span is code; a line that starts with `<!--` is an HTML block, not a paragraph."""
+    columns, unless the line before it is a paragraph line; a list item whose marker is followed by five spaces), HTML comments
+    (also across lines) and inline code spans, which may continue across the lines of one paragraph (a blank line ends it). Within
+    a paragraph the leftmost construct wins, so a `<!--` inside a code span is code; a line that starts with `<!--` is an HTML
+    block, not a paragraph. The block rules read each line after its blockquote markers."""
     out, para = [], []
     fence, in_comment = None, False
     prev_para = False  # the previous line was a paragraph line, so an indented line continues it
@@ -784,9 +794,9 @@ def without_code(body):
                 continue
             line, in_comment = line[end + 3:], False
         else:
-            m = re.match(r"\s{0,3}(`{3,}|~{3,})", line)
+            m = re.match(r"\s{0,3}(`{3,}|~{3,})", container_content(line))
             if fence:
-                closer = re.match(r"\s{0,3}(`{3,}|~{3,})\s*$", line)
+                closer = re.match(r"\s{0,3}(`{3,}|~{3,})\s*$", container_content(line))
                 if closer and closer.group(1)[0] == fence[0] and len(closer.group(1)) >= len(fence):
                     fence = None
                 continue
@@ -794,18 +804,20 @@ def without_code(body):
                 flush()
                 fence, prev_para = m.group(1), False
                 continue
-            if indent_columns(line) < 4 and line.lstrip().startswith("<!--"):
+            inner = container_content(line)
+            if indent_columns(inner) < 4 and inner.lstrip().startswith("<!--"):
                 comment_line = True
         if "<!--" in line:
             line = strip_comments(line, comment_line, lines[idx + 1:])
-        if not raw.strip():
+        inner = container_content(raw)
+        if not inner.strip():
             flush()
             prev_para = False
             continue
-        if indent_columns(raw) >= 4 and not prev_para and not comment_line:
+        if (indent_columns(inner) >= 4 and not prev_para and not comment_line) or LIST_CODE.match(inner):
             flush()
             continue
-        stripped = raw.lstrip()
+        stripped = inner.lstrip()
         if (comment_line or re.match(r"#{1,6}(?:\s|$)", stripped) or re.match(r"([-*_])(?:\s*\1){2,}\s*$", stripped)
                 or not line.strip()):
             flush()  # a heading, thematic break or comment line is no paragraph line and ends the paragraph

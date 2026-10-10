@@ -2305,6 +2305,16 @@ class ClosedCheck(Base):
         for n in (30, 31, 32):
             self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is in no closing list")
 
+    def test_closed_check_ignores_code_inside_containers(self):
+        # block rules apply after the blockquote markers: `>     Fixes` is indented code in a quote, and a quoted fence hides its
+        # lines; a list marker followed by five spaces starts indented code too
+        body = (">     Fixes #30\n\n> ```\n> Fixes #31\n> ```\n\n-     Fixes #32\n\n> Fixes #21\n\n- Fixes #22\n")
+        self.seed(body, issues={(CODE, n): ("OPEN", []) for n in (21, 22)})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#22"])
+        for n in (30, 31, 32):
+            self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is code in a container")
+
     def test_closed_check_requires_repo_pr_and_repos(self):
         self.pp("closed-check", "--repo", CODE, "--pr", 7, expect=2)
         self.pp("closed-check", "--repo", CODE, "--repos", CODE, expect=2)

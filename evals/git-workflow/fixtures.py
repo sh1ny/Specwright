@@ -40,7 +40,7 @@ def init(repo):
 def base(repo):
     init(repo)
     shutil.copytree(ROOT / "schemas" / "specwright", repo / "openspec" / "schemas" / "specwright")
-    shutil.copy(ROOT / "openspec" / "config.yaml", repo / "openspec" / "config.yaml")
+    shutil.copy(ROOT / "templates" / "openspec" / "config.yaml", repo / "openspec" / "config.yaml")
     write(repo, "openspec/specwright.yaml", "finish: local\n")
     write(repo, "openspec/specs/.gitkeep", "")
     project(repo)
@@ -103,7 +103,7 @@ def code_repo(code, store_id="team-plans", pointer=True, settings="finish: local
 def store_content(root):
     """What a planning root holds: the schema, trigger config and specs (not yet committed)."""
     shutil.copytree(ROOT / "schemas" / "specwright", root / "openspec" / "schemas" / "specwright")
-    shutil.copy(ROOT / "openspec" / "config.yaml", root / "openspec" / "config.yaml")
+    shutil.copy(ROOT / "templates" / "openspec" / "config.yaml", root / "openspec" / "config.yaml")
     write(root, "openspec/specs/.gitkeep", "")
 
 
