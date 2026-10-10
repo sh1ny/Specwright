@@ -1836,6 +1836,37 @@ def find_py38():
     return None
 
 
+class RecordLock(unittest.TestCase):
+    """record_lock: a lock directory that cannot be removed never replaces the outcome of the work done under it."""
+
+    def setUp(self):
+        self.ns = PublishFallback.namespace()
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(self.tmp), True)
+        self.path = self.tmp / "rec.json"
+
+    def held(self, body, path):
+        from unittest import mock
+        with mock.patch.object(self.ns["os"], "rmdir", side_effect=PermissionError(13, "denied")):
+            with self.ns["record_lock"](path):
+                body()
+
+    def test_failed_lock_removal_keeps_the_outcome(self):
+        self.held(lambda: None, self.path)  # the work succeeded: no exception, the lock is reported as left behind
+        self.assertEqual(self.ns["LEFT_LOCKS"], [self.ns["norm"](Path(str(self.path) + ".lock"))])
+        with self.assertRaises(self.ns["Stop"]) as busy:  # the lock that was left stops the next call, as for any held lock
+            self.held(lambda: None, self.path)
+        self.assertEqual(busy.exception.obj()["error"], "record_busy")
+        Stop = self.ns["Stop"]
+
+        def fail():
+            raise Stop("not_owner", "someone else")
+
+        with self.assertRaises(Stop) as cm:  # the body's own stop is what the caller sees
+            self.held(fail, self.tmp / "other.json")
+        self.assertEqual(cm.exception.obj()["error"], "not_owner")
+
+
 class PublishFallback(unittest.TestCase):
     """publish() without hard links creates the destination with O_EXCL and writes it; a failed write leaves no record behind."""
 
@@ -2331,6 +2362,16 @@ class ClosedCheck(Base):
                                                     (CODE, 25): ("OPEN", [early, "REOPENED", ("CLOSED", self.MERGED), "REOPENED"])})
         r = self.check()
         self.assertEqual((r["open"], r["reopened"]), ([f"{CODE}#24"], [f"{CODE}#25"]))
+
+    def test_closed_check_reads_text_after_an_inline_comment(self):
+        # an inline comment that opens after paragraph text ends at `-->`, and the text after it is rendered; an HTML block that
+        # starts its own line takes the rest of its closing line with it
+        body = "Intro <!-- hidden\nFixes #30 --> Fixes #21\n\n<!-- block\n--> Fixes #31\n\nFixes #22\n"
+        self.seed(body, issues={(CODE, n): ("OPEN", []) for n in (21, 22)})
+        r = self.check()
+        self.assertEqual(r["intended"], [f"{CODE}#21", f"{CODE}#22"])
+        for n in (30, 31):
+            self.assertEqual(self.reads(f"number={n}"), [], f"#{n} is hidden")
 
     def test_closed_check_requires_repo_pr_and_repos(self):
         self.pp("closed-check", "--repo", CODE, "--pr", 7, expect=2)

@@ -752,9 +752,11 @@ def without_code(body):
     columns, unless the line before it is a paragraph line; a list item whose marker is followed by five spaces), HTML comments
     (also across lines) and inline code spans, which may continue across the lines of one paragraph (a blank line ends it). Within
     a paragraph the leftmost construct wins, so a `<!--` inside a code span is code; a line that starts with `<!--` is an HTML
-    block, not a paragraph. The block rules read each line after its blockquote and list markers."""
+    block, not a paragraph, and takes the rest of its closing line, while the text after an inline comment's `-->` is read. The
+    block rules read each line after its blockquote and list markers."""
     out, para = [], []
     fence, in_comment = None, False
+    comment_block = False  # the open comment started its own line (an HTML block), so it takes the rest of its closing line
     prev_para = False  # the previous line was a paragraph line, so an indented line continues it
     lines = body.replace("\r\n", "\n").split("\n")
 
@@ -765,7 +767,7 @@ def without_code(body):
 
     def strip_comments(line, comment_line, rest):
         """`line` without its HTML comments; a comment that does not end on the line leaves in_comment set."""
-        nonlocal in_comment
+        nonlocal in_comment, comment_block
         head = "\n".join(para) + "\n" if para and not comment_line else ""
         tail = []
         for nxt in rest:  # the rest of the paragraph decides whether a backtick before a `<!--` closes a span
@@ -780,18 +782,18 @@ def without_code(body):
                 break
             kept.append(line[at:start - base])
             if end > base + len(line):
-                in_comment, at = True, len(line)
+                in_comment, comment_block, at = True, comment_line, len(line)
                 break
             at = end - base
         kept.append(line[at:])
         return "".join(kept)
 
     for idx, raw in enumerate(lines):
-        line, comment_line = raw, in_comment
+        line, comment_line = raw, in_comment and comment_block
         if in_comment:
             end = line.find("-->")
             if end < 0:
-                prev_para = False
+                prev_para = prev_para and not comment_block  # an inline comment's lines stay in their paragraph
                 continue
             line, in_comment = line[end + 3:], False
         else:
@@ -1295,9 +1297,13 @@ def new_owner(oid, checkout):
             "host": socket.gethostname()}
 
 
+LEFT_LOCKS = []  # locks this call could not remove; the output names them, and later calls stop with record_busy
+
+
 @contextlib.contextmanager
 def record_lock(path):
-    """The `<record>.lock` directory, held only by the call that created it; a lock already there is never removed."""
+    """The `<record>.lock` directory, held only by the call that created it; a lock already there is never removed. A failed removal
+    never replaces the outcome of the work under the lock: it is recorded in LEFT_LOCKS and reported as `lock_left`."""
     lock = Path(str(path) + ".lock")
     try:
         os.mkdir(lock)
@@ -1307,7 +1313,10 @@ def record_lock(path):
     try:
         yield
     finally:
-        os.rmdir(lock)
+        try:
+            os.rmdir(lock)
+        except OSError:
+            LEFT_LOCKS.append(norm(lock))
 
 
 def temp_beside(path):
@@ -1832,9 +1841,11 @@ args = sys.argv[1:]
 try:
     if not args or args[0] not in COMMANDS:
         usage("subcommand: " + " | ".join(COMMANDS))
-    emit(COMMANDS[args[0]](args[1:]))
+    out = COMMANDS[args[0]](args[1:])
+    emit({**out, "lock_left": LEFT_LOCKS} if LEFT_LOCKS else out)
 except Stop as e:
-    emit(e.obj(), e.code)
+    emit({**e.obj(), "lock_left": LEFT_LOCKS} if LEFT_LOCKS else e.obj(), e.code)
 except Exception as e:
-    emit({"ok": False, "error": "internal_error", "message": f"{type(e).__name__}: {e}"}, 1)
+    err = {"ok": False, "error": "internal_error", "message": f"{type(e).__name__}: {e}"}
+    emit({**err, "lock_left": LEFT_LOCKS} if LEFT_LOCKS else err, 1)
 PYSRC
